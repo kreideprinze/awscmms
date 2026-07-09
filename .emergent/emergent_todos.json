@@ -1,42 +1,42 @@
 [
   {
     "content": "Backend: GET /control-room/line-kpis (availability + downtime per line & per section, window param)",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Backend: GET/PUT /users/me/ui-prefs (sidebar order + icon colors)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Backend: branding accent hex + logo upload (base64) endpoints",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: pure black theme + dynamic accent CSS vars in index.css",
-    "status": "pending"
+    "status": "completed"
   },
   {
-    "content": "Frontend: outlined button/pill styling (button.jsx default variant + sweep filled buttons)",
-    "status": "pending"
+    "content": "Frontend: outlined button/pill styling (button.jsx + 30 sweep fixes)",
+    "status": "completed"
   },
   {
     "content": "Frontend: AppContext applies brand accent + loads/saves ui-prefs",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: Layout sidebar DnD reorder + per-icon colors + custom logo",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: Control Room ribbon v2 (line/section availability + downtime, collapsible plant strip)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: Administration branding UI (logo upload + hex color)",
-    "status": "pending"
+    "status": "completed"
   },
   {
-    "content": "Test: backend KPI/prefs/branding APIs + frontend screenshots + testing agent",
-    "status": "pending"
+    "content": "Test: testing agent full pass + fix issues",
+    "status": "in_progress"
   }
 ]

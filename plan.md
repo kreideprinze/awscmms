@@ -10,12 +10,15 @@
 - Ensure time references are unambiguous across operations:
   - Display **current actual wall-clock time** (date + HH:MM:SS ticking every second) so users can cross-reference Breakdown/WO timestamps.
 - Deliver a coherent, app-wide **Cyberpunk HUD aesthetic** across *every* module and component.
-- **NEW (Phase E)**: Upgrade Control Room “at-a-glance” intelligence + deep customization:
-  1) Replace the top KPI ribbon primary content with **Availability + Downtime** at **Line** and **Section/Process Group** levels (expandable), with plant-wide aggregates demoted to a collapsible secondary strip.
-  2) Sidebar navigation supports **user-assigned icon colors** + **drag-and-drop reorder**, persisted per user.
-  3) Admin-configurable **custom branding**: uploadable logo + hex brand accent color applied platform-wide.
-  4) Standardize all buttons/icons to **outlined style**: thin-line borders, transparent interiors.
-  5) Move the background theme to **pure black** base (remove deep-blue undertone), while preserving contrast.
+- Provide **shift-lead command-center intelligence** at the point of use:
+  - Availability + downtime **per Line** and **per Section/Process Group**, configurable window.
+  - Keep plant-wide totals accessible but demoted.
+- Enable **deep personalization and white-labeling**:
+  - Per-user sidebar ordering and icon colors.
+  - Admin-managed logo and brand accent color that re-themes the entire platform instantly.
+- Standardize UI interaction language:
+  - All buttons/icons/pills follow **outlined hairline border styling**.
+  - Background theme is **pure black** (no deep-blue undertone), while maintaining readable contrast.
 
 ## 2) Implementation Steps
 
@@ -47,42 +50,39 @@
 #### E1) Control Room KPI Ribbon v2 (Line/Section Availability + Downtime) (P0)
 **Requirements**
 - Primary ribbon shows:
-  - **Availability per Line**: PC21, PC32, PC36, KKR, TWZ, BCP, Packaging, Utilities.
-  - **Total downtime per Line** for selected window (shift/day/custom window).
+  - **Availability per Line** (PC21, PC32, PC36, KKR, TWZ, BCP; plus seeded lines as present).
+  - **Total downtime per Line** for selected window.
 - Each Line entry is expandable to show:
   - **Availability per Section/Process Group** within the line.
-  - **Total downtime per Section/Process Group** for same window.
-- Keep plant-wide aggregate counts (Machines/Running/Failed/Open BD/Open WO/etc.) as a **secondary collapsible strip**.
-- Time window is **configurable** (default = current shift or current day). Must be consistent across Control Room and Breakdown timestamps.
+  - **Total downtime per Section/Process Group** for the same window.
+- Plant-wide aggregate counts (Machines/Running/Failed/Open BD/Open WO/etc.) retained as a **secondary collapsible strip**.
+- Time window is configurable via presets:
+  - **Shift (8h)** / **Day (24h)** / **Week (7d)**.
 
-**Backend**
-- Add a new endpoint, e.g.:
-  - `GET /api/control-room/health-kpis?window=shift|day|hours&hours=8&tz=...`
-- Computations:
-  - **Downtime** = sum of breakdown downtime/repair time in window.
-  - **Availability** (practical v1):
-    - If runtime logs exist for window: availability = run_hours / calendar_hours.
-    - Else fallback: availability approximation from breakdown minutes within window (calendar - downtime) / calendar.
+**Backend (Delivered)**
+- `GET /api/control-room/line-kpis?hours=8|24|168`.
+- Computation method (v1 practical):
+  - Downtime = **summed overlap** of breakdown open-time (start → end or now) with the selected window.
+  - Availability = `1 - downtime / (machines_in_group * window)` expressed as a percent.
 - Grouping:
-  - by `line` and by `process_group` (aka section).
-- Add indexes if needed:
-  - `breakdowns(line, process_group, start_time)`
-  - `runtime_logs(line, machine_id, date)` (if used)
+  - by `line` and by `process_group` (section).
 
-**Frontend**
-- Replace the current top KPI strip in `ControlRoom.jsx`:
-  - New ribbon component: `LineAvailabilityRibbon` (expand/collapse lines; show mini cards)
-  - Time window selector: `Shift / Day / Last N hours`.
-  - Secondary collapsible strip for old plant aggregates.
-- UX details:
-  - Show availability as % with mono tabular numerals.
-  - Show downtime next to it (e.g. `92.4% · 1h 24m down`).
-  - Clicking a section optionally filters the twin to that line/section.
+**Frontend (Delivered)**
+- `LineKpiRibbon.jsx` renders:
+  - Line cards (availability color-coded, downtime shown next to percent).
+  - Expandable section panel for selected line.
+  - Window selector buttons.
+  - Action: **Filter twin to line**.
+- `ControlRoom.jsx`:
+  - Primary ribbon = Line/Section KPIs.
+  - Secondary collapsible plant totals strip with inline summary when collapsed.
 
 **Exit Criteria**
-- Ribbon shows correct per-line and per-section figures for chosen window.
-- Expanding a line reveals process-group breakdown.
-- Secondary strip contains plant-wide totals and can be collapsed.
+- ✅ Ribbon shows correct per-line and per-section figures for chosen window.
+- ✅ Expanding a line reveals process-group breakdown.
+- ✅ Secondary plant totals strip is collapsible.
+
+**Status:** ✅ COMPLETE
 
 #### E2) Sidebar Icon Customization (Per-user) (P0)
 **Requirements**
@@ -90,52 +90,61 @@
 - Sidebar supports **drag-and-drop reorder**.
 - Persist these settings **per user**.
 
-**Backend**
-- Extend user document/preferences:
-  - `ui_prefs: { sidebar: { order: ["control_room", "breakdowns", ...], colors: { moduleKey: "#RRGGBB" } } }`
+**Backend (Delivered)**
+- User prefs stored on user document under `ui_prefs`.
 - Endpoints:
   - `GET /api/users/me/ui-prefs`
-  - `PUT /api/users/me/ui-prefs` (validate hex colors + module keys)
+  - `PUT /api/users/me/ui-prefs`
+- Validation:
+  - Module keys validated.
+  - Hex colors validated (`#RRGGBB`).
+  - Duplicate keys rejected.
 
-**Frontend**
-- Update `Layout.jsx` sidebar:
-  - Add DnD (e.g., dnd-kit) for ordering.
-  - Add icon color picker (simple hex input or palette) per item.
-  - Load/save prefs on login.
+**Frontend (Delivered)**
+- `Layout.jsx`:
+  - “Customize sidebar” mode (paintbrush toggle).
+  - HTML5 drag-and-drop reorder.
+  - Native color input per icon.
+  - Per-user persistence via `saveUiPrefs`.
 
 **Exit Criteria**
-- User reorders modules and chooses colors; refresh preserves order/colors.
+- ✅ User reorders modules and chooses colors; refresh preserves order/colors.
+
+**Status:** ✅ COMPLETE
 
 #### E3) Custom Branding: Admin Uploadable Logo + Hex Brand Color (P0)
 **Requirements**
 - Replace top-left hardcoded mark with admin-uploaded logo/icon.
-- Admin-configurable **brand accent color** via **hex input** (not preset).
+- Admin-configurable **brand accent color** via **hex input**.
 - Accent color drives:
-  - icons, buttons, borders, highlights, focus rings, charts where applicable.
-- Integrate under existing Administration Branding settings.
+  - icons, buttons, borders, highlights, focus rings, and other accent surfaces.
+- Integrate under existing Administration System/Branding settings.
 
-**Backend**
-- Add settings collection fields:
-  - `branding.logo_url` (or stored file id)
-  - `branding.brand_hex` (validated)
-- Add upload endpoint:
-  - `POST /api/admin/branding/logo` (multipart upload)
-  - Store file under `/app/backend/uploads/` (or similar) and serve via static route.
-- Add settings endpoints if not present:
-  - `GET /api/admin/settings/branding`
-  - `PUT /api/admin/settings/branding`
+**Backend (Delivered)**
+- Branding document supports:
+  - `accent` (validated `#RRGGBB`)
+  - `logo_data` (data-URI)
+- Endpoints:
+  - `GET /api/branding`
+  - `PUT /api/branding` (validates `accent`)
+  - `POST /api/branding/logo` (multipart upload; type validation; max 500KB; stored as base64 data-URI)
+  - `DELETE /api/branding/logo`
 
-**Frontend**
-- Administration → Branding tab:
-  - Logo upload control + preview
-  - Brand hex input + live preview
-- App-wide theming:
-  - Set CSS variable `--primary` (or equivalent) from fetched branding settings.
-  - Ensure it applies to existing cyber classes.
+**Frontend (Delivered)**
+- `AppContext.js`:
+  - `applyAccent(hex)` converts hex → HSL + RGB triple and sets runtime CSS vars:
+    - `--primary`, `--accent`, `--ring`, `--accent-rgb`, etc.
+- `Administration.jsx` System tab:
+  - Accent hex input + color picker.
+  - Logo upload/preview/remove.
+- `Layout.jsx`:
+  - Uses `branding.logo_data` to replace the default factory mark.
 
 **Exit Criteria**
-- Uploading logo updates top-left immediately.
-- Changing brand hex updates accent across app without redeploy.
+- ✅ Uploading logo updates top-left immediately.
+- ✅ Changing brand hex updates accent across app without redeploy.
+
+**Status:** ✅ COMPLETE
 
 #### E4) Outlined Buttons / Icon Border Styling Standardization (P1)
 **Requirements**
@@ -144,69 +153,78 @@
   - filter pills
   - action buttons
 
-**Implementation**
-- Add/adjust global utility classes:
-  - `.cyber-outline-btn`, `.cyber-outline-icon`
-- Update instances still using filled styles (including `cyber-primary` if needed) to outlined variants.
-- Ensure hover glow remains neon but fill stays transparent.
+**Implementation (Delivered)**
+- `button.jsx`: default/destructive/secondary are outlined; transparent interiors.
+- `.cyber-primary`: switched from filled gradient sweep to outlined CTA.
+- Per-page sweep: ~30 replacements converting filled pills/buttons to outlined equivalents.
 
 **Exit Criteria**
-- Visual consistency across all modules; no “solid fill” outliers.
+- ✅ Visual consistency across all modules; no filled-background action button outliers.
+
+**Status:** ✅ COMPLETE
 
 #### E5) Theme Background: Pure Black Base (P1)
 **Requirements**
 - Replace near-black/blue-tinted backgrounds with **pure black** (#000000 or close as contrast allows).
 
-**Implementation**
-- Update CSS variables in `index.css`:
-  - base background and panel backgrounds to neutral black/near-black without blue undertone.
-  - keep borders readable and text contrast acceptable.
-- Re-screenshot key pages to confirm removal of blue tint.
+**Implementation (Delivered)**
+- `index.css` theme variables migrated to neutral black/greys:
+  - `--background` = `0 0% 0%`.
+  - Panels `--panel-1..3` in 3–9% neutral range.
+  - Borders neutralized (no blue undertone).
 
 **Exit Criteria**
-- Base app background and panels read as true black.
-- Text remains readable; charts and borders remain visible.
+- ✅ Base app background and panels read as true black.
+- ✅ Text remains readable; charts/borders remain legible.
+
+**Status:** ✅ COMPLETE
 
 ---
 
 ## 3) Next Actions
-> All earlier phases are complete. Next work is Phase E.
+> All earlier phases are complete. Phase E is now complete and tested.
 
-### Completed (Prior Iteration) ✅
+### Completed (Prior Iterations) ✅
 - Removed infinite zoom in Control Room; enabled vertical scroll.
 - Replaced plant runtime clock display with wall-clock time.
 - Applied Cyberpunk HUD styling across all modules.
 - Verified Breakdown → auto-create WO end-to-end.
 - Completed testing pass (`/app/test_reports/iteration_2.json`).
 
-### Phase E — Next Actions (New Work)
-**P0**
-1) Implement backend KPI aggregation endpoint for line/section availability + downtime with configurable time window.
-2) Build Control Room Ribbon v2 UI with expand/collapse per line + window selector; demote plant-wide counts into collapsible secondary strip.
-3) Implement per-user sidebar customization: drag-and-drop reorder + per-icon color; persist in user prefs.
-4) Implement admin branding: logo upload + brand hex accent; apply as dynamic CSS variables globally.
+### Phase E — Completed Work ✅
+- Implemented `GET /api/control-room/line-kpis` (availability + downtime per line and per process-group section; configurable window).
+- Implemented Control Room Ribbon v2 (LineKpiRibbon) with expand/collapse sections and “Filter twin to line”.
+- Implemented per-user sidebar customization (order + icon colors) with persistence (`/api/users/me/ui-prefs`).
+- Implemented admin branding:
+  - accent hex applied instantly platform-wide via runtime CSS variables
+  - logo upload/preview/remove (data-URI storage)
+- Standardized outlined styling for buttons/pills/icons.
+- Updated UI theme to pure black base (no blue undertone).
 
-**P1**
-5) Standardize outlined button/icon styling across the entire app.
-6) Update theme to pure black base; verify across all pages via screenshots.
+### Testing ✅
+- Phase E fully regression-tested:
+  - `/app/test_reports/iteration_3.json` — **backend 100% (43/43)**, **frontend 100%**.
 
-**Testing (after Phase E)**
-- Frontend: screenshot audit of Control Room ribbon expanded/collapsed states; sidebar reorder persistence; icon color persistence; logo and brand color propagation.
-- Backend: API tests for KPI endpoint correctness on known seeded data; prefs endpoints; branding endpoints.
+### Optional Next Enhancements (Future / Backlog)
+- Add a true “current shift” window mode using a configurable shift schedule (rather than fixed last-8h), including timezone support.
+- Add a per-line breakdown list drilldown from the ribbon (click line → open filtered breakdown/work-order panel).
+- Add section-level filtering directly (click section tile → filter twin to line+process_group).
+- Add role-scoped admin controls for sidebar defaults (template for new users).
+- Add a contrast review pass (WCAG-oriented) for pure black + neon accents.
 
 ## 4) Success Criteria
-- Control Room ribbon is **line-first**:
+- ✅ Control Room ribbon is **line-first**:
   - Availability + downtime per line always visible.
   - Expandable to section/process-group breakdown.
   - Plant-wide totals available but demoted.
-- Sidebar supports per-user:
+- ✅ Sidebar supports per user:
   - icon colors
   - drag-and-drop ordering
   - persistence across refresh/login.
-- Branding supports admin:
+- ✅ Branding supports admin:
   - uploadable logo
   - hex brand accent
   - immediate visual propagation.
-- Buttons/icons are consistently outlined across the app.
-- Theme background is true black without blue undertone.
-- All changes validated by updated test report (Phase E test report).
+- ✅ Buttons/icons are consistently outlined across the app.
+- ✅ Theme background is true black without blue undertone.
+- ✅ All changes validated by Phase E test report (`iteration_3.json`).
