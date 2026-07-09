@@ -1,0 +1,30 @@
+[
+  {
+    "content": "Phase 1: POC - WebSocket hub + event pipeline tested in isolation (14/14 PASS)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Design guidelines via design_agent (SCADA/HMI dark theme)",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 2: Backend - full data model, Appendix A seed, auth/RBAC, all CRUD modules, breakdown/WO/PM/reports/notes/runtime, timeline+notifications",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Frontend - Control Room Digital Twin, Machine Drawer (11 tabs), Breakdowns, Work Orders, PM, Runtime pages",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 3: Reliability/AWS engine (MTBF L1-L3, Weibull), Predictive engine (health states, 80% alerts), Analytics multi-level",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 4: Spares Inventory (SAP-centric, ledger, CSV import), Administration module, seeded spares",
+    "status": "pending"
+  },
+  {
+    "content": "End-to-end testing via testing_agent_v3 and fix all issues",
+    "status": "pending"
+  }
+]

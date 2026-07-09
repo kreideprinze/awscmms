@@ -1,0 +1,156 @@
+# plan.md
+
+## 1) Objectives
+- Deliver a production-ready, LAN-only Factory Operations Platform (Digital Twin Control Room + CMMS + Reliability/AWS + Predictive + Analytics + Runtime + Spares + Admin) that is **machine-centric** in every workflow.
+- Ship **non-empty** on first boot: seed full hierarchy (Appendix A), machine layout positions, templates/rules, **default users** (admin/admin123, tech/tech123, operator/operator123), and realistic starter spares.
+- Provide real-time **timeline + notifications** (WebSocket) and scalable MongoDB data model (indexes/pagination) to hit performance targets.
+
+## 2) Implementation Steps
+
+### Phase 1 — Core “Operational Loop” POC (Isolation) (WebSocket + eventing + derived machine state)
+> Core = if this breaks, the system isn’t “live”: machine state aggregation + timeline/notifications + Digital Twin can’t be trusted.
+
+**POC scope (no full UI, minimal pages/scripts):**
+1. Backend skeleton: FastAPI + Motor + JWT scaffolding (JWT can be stubbed for POC routes if needed), WebSocket hub (single-worker constraint).
+2. Minimal data model + seed subset: 1 dept/line/process group + 3 machines + default users.
+3. Event pipeline: create a breakdown → emits timeline event + notification → updates machine “derived state” (status/health placeholders) → WebSocket broadcasts.
+4. A minimal React page that:
+   - lists the 3 machines
+   - opens WS connection
+   - shows live notifications and machine state changes
+
+**Web search (best practices) before coding:**
+- FastAPI WebSocket patterns with Motor and single-process broadcast hub; JWT over WS; avoiding blocking calls.
+
+**Exit criteria:**
+- From a script or minimal UI: create breakdown for a machine and see (a) timeline event persisted, (b) notification persisted, (c) WS push received, (d) machine card reflects updated indicator.
+
+**User stories (Phase 1):**
+1. As an Operator, I can see a minimal live machine list that updates without refresh when events occur.
+2. As a Technician, I receive a real-time notification when a breakdown is created for my machine.
+3. As an Admin, I can seed the system and confirm it never starts empty.
+4. As an Admin, I can verify every significant action creates a timeline event.
+5. As a user, I can refresh the page and still see the persisted events (not just in-memory WS messages).
+
+---
+
+### Phase 2 — V1 App Development (MVP, end-to-end usable)
+**2.1 Data model + foundations**
+- Implement Mongo collections per spec + counters for ticket numbers.
+- Implement seed on first startup:
+  - Full hierarchy (Appendix A) + machine layout positions
+  - failure modes + report error codes
+  - PM templates + runtime templates
+  - reliability rules/settings + notification templates
+  - default users + realistic spares + spare locations
+- Implement RBAC (3 roles) + route guards (frontend) + API enforcement (backend).
+
+**2.2 Control Room / Digital Twin (primary landing)**
+- Dynamic layout renderer from hierarchy + machine positions (no hardcoded cards).
+- Pan/zoom, search, filters; machine cards show Dept/Line/PG/Name/Status/Health/Runtime/Reliability.
+- Machine Detail Drawer with tabs (MVP content per tab, but all tabs present): Overview, Reports, Breakdowns, Work Orders, PM Tasks, Analytics, Timeline, Notes, Documents (metadata only), Reliability, Spares.
+
+**2.3 Maintenance modules (machine-centric flows)**
+- Machine Reports + review/convert-to-breakdown flow.
+- Machine Notes (timestamped).
+- Breakdowns:
+  - lifecycle OPEN→ASSIGNED→IN_PROGRESS→COMPLETED→CLOSED
+  - downtime calc; enforce root-cause rule >30 min + auto follow-up task
+  - consumed spares capture on close
+- Work Orders:
+  - types + lifecycle
+  - completion triggers inventory transaction + usage log
+- PM:
+  - task definitions + scheduler to generate PM work orders
+  - completion with checklist + spares consumption
+
+**2.4 Timeline + Notifications (full)**
+- Persist timeline events for all major actions; filter by type.
+- WebSocket notifications for: reports, breakdowns, critical failures, WOs, PM due/overdue, reliability alerts, inspection recommendations.
+
+**2.5 Runtime (manual + CSV import)**
+- Admin UI for manual runtime log entry and CSV import with validation/preview.
+- Runtime KPIs stored permanently; availability computed.
+
+**2.6 One round of end-to-end testing (testing agent)**
+- Validate core flows: seed → Control Room → drawer → report → convert → breakdown lifecycle → spares consumption → notifications → timeline → PM generation/completion → runtime log.
+
+**User stories (Phase 2):**
+1. As an Operator, I can start from the Control Room, search a machine, open its drawer, and submit a report in under 30 seconds.
+2. As a Technician, I can take an assigned breakdown through all lifecycle stages and close it with action taken + spares used.
+3. As an Admin, I can adjust machine layout positions and immediately see the Digital Twin re-render.
+4. As a Technician, I can complete a PM task with checklist and see it logged on the machine timeline.
+5. As an Admin, I can import runtime logs via CSV preview and see availability update in analytics.
+
+---
+
+### Phase 3 — Reliability/AWS + Predictive + Analytics (multi-level)
+**3.1 Reliability metrics engine (non-ML)**
+- MTBF/MTTR calculations start after first breakdown.
+- Maturity levels:
+  - L1: MTBF + operating hours since failure
+  - L2: rolling/weighted MTBF + failure trend
+  - L3 (5+): Weibull fit + hazard + reliability curve + failure probability
+- Store reliability_metrics and weibull_models; incremental recompute on new events.
+
+**3.2 Predictive engine**
+- Prediction tiers: MTBF → weighted MTBF → Weibull.
+- Health state bands (0–70/70–80/80–100/100%+).
+- At ≥80%: create inspection flag + notification + suggested PM task (auto suggestions list).
+
+**3.3 Analytics module**
+- Hierarchy-level rollups: Machine/PG/Line/Dept/Plant.
+- KPI dashboards + charts (Recharts): downtime/failure trends, PM compliance, availability.
+- Add required indexes + pagination; cached rollups where needed.
+
+**3.4 One round of end-to-end testing (testing agent)**
+- Simulate breakdown history + runtime logs; verify level transitions, Weibull activation, predictive alerts, analytics correctness.
+
+**User stories (Phase 3):**
+1. As a Reliability user (Admin), after the first breakdown I can immediately see MTBF populated for the machine.
+2. As a Technician, I can see a machine enter Watch/Inspection Due based on runtime vs predicted life.
+3. As an Admin, I get an automatic inspection recommendation notification at ≥80% predicted life.
+4. As a Plant user (Admin), I can view MTBF/MTTR/Availability rollups at line/department levels.
+5. As a user, I can open a machine’s Reliability tab and see Weibull outputs once it reaches 5+ failures.
+
+---
+
+### Phase 4 — Spares/Inventory + Administration hardening + scale readiness
+**4.1 Inventory module (SAP-centric)**
+- spares_inventory master + spare_locations.
+- Transaction ledger only (no direct edits): imports, adjustments, consumptions.
+- CSV import modes Replace/Add/Subtract + simplified quantity_change with validation + preview.
+- Machine recommended spares + Machine drawer Spares tab (recent usage, most consumed, history).
+- Spare analytics dashboards (top 10, breakdown by month/machine/area/source).
+
+**4.2 Administration module**
+- Full CRUD for hierarchy + layout, users, templates, reliability settings, spare locations, branding/system settings.
+- Audit logs for admin changes.
+
+**4.3 Performance work**
+- Add/verify indexes, cursor pagination, aggregation pipelines for rollups.
+- WS backpressure/basic rate limiting; avoid N+1 queries in Control Room.
+
+**4.4 One round of end-to-end testing (testing agent)**
+- Validate consumption auto-decrements stock + transactions, CSV import preview correctness, admin CRUD integrity, large-list pagination.
+
+**User stories (Phase 4):**
+1. As an Admin, I can import a CSV stock adjustment and see a preview of all changes before applying.
+2. As a Technician, when I record used spares on a breakdown close, inventory updates automatically and creates a transaction.
+3. As an Admin, I can search inventory instantly by SAP code/name/location.
+4. As an Admin, I can create/edit/retire spare locations without technicians changing the location list.
+5. As a user, I can open a machine and see its most-consumed spares and recent usage history.
+
+## 3) Next Actions
+1. Implement Phase 1 POC: backend WS hub + minimal models/seed + event pipeline + minimal React live page.
+2. Run POC exit test; fix until stable.
+3. Start Phase 2 bulk build: seed full Appendix A + Control Room + Machine Drawer + Reports/Breakdowns/WOs/PM + timeline/notifications + runtime entry/import.
+
+## 4) Success Criteria
+- First boot: system is fully seeded (hierarchy, users, templates, spares) and **not empty**.
+- Control Room renders Digital Twin dynamically from hierarchy + layout positions; machine drawer contains all required tabs.
+- Real-time WS notifications and timeline eventing work end-to-end for key actions.
+- Maintenance flows function: reports→review→convert, breakdown lifecycle + 30-min root cause rule, WO completion updates spares, PM scheduler generates tasks.
+- Reliability + predictive start after first breakdown; analytics available at all hierarchy levels.
+- Inventory ledger is enforced; CSV preview/validation prevents invalid imports.
+- App remains responsive with pagination/indexes and avoids obvious degradation patterns.
