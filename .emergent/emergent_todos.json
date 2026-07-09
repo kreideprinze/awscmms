@@ -1,26 +1,42 @@
 [
   {
-    "content": "Phase A: Replace infinite zoom TransformWrapper with fixed-size scrollable canvas in ControlRoom",
-    "status": "completed"
-  },
-  {
-    "content": "Phase A: PlantClock shows current actual wall-clock time (date + time) instead of runtime",
-    "status": "completed"
-  },
-  {
-    "content": "Phase B: Screenshot & audit secondary modules for Cyberpunk compliance",
-    "status": "completed"
-  },
-  {
-    "content": "Phase B: Update non-compliant pages with Cyberpunk aesthetic (138 fixes applied + verified)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase C: E2E test breakdown -> auto-create work order flow (verified: BD-00011 -> WO-00006 ASSIGNED)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase D: Full testing agent pass + fix issues",
+    "content": "Backend: GET /control-room/line-kpis (availability + downtime per line & per section, window param)",
     "status": "in_progress"
+  },
+  {
+    "content": "Backend: GET/PUT /users/me/ui-prefs (sidebar order + icon colors)",
+    "status": "pending"
+  },
+  {
+    "content": "Backend: branding accent hex + logo upload (base64) endpoints",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: pure black theme + dynamic accent CSS vars in index.css",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: outlined button/pill styling (button.jsx default variant + sweep filled buttons)",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: AppContext applies brand accent + loads/saves ui-prefs",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Layout sidebar DnD reorder + per-icon colors + custom logo",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Control Room ribbon v2 (line/section availability + downtime, collapsible plant strip)",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Administration branding UI (logo upload + hex color)",
+    "status": "pending"
+  },
+  {
+    "content": "Test: backend KPI/prefs/branding APIs + frontend screenshots + testing agent",
+    "status": "pending"
   }
 ]

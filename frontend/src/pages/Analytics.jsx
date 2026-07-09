@@ -53,7 +53,7 @@ export default function Analytics() {
       <div className="mb-5 flex flex-wrap items-center gap-2">
         {LEVELS.map((l) => (
           <button key={l.key} data-testid={`analytics-level-${l.key}`} onClick={() => { setLevel(l.key); setValue(''); setKpis(l.key === 'plant' ? kpis : null); }}
-            className={`cyber-chamfer-sm border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition-colors ${level === l.key ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition-colors ${level === l.key ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {l.label}
           </button>
         ))}
@@ -121,7 +121,7 @@ export default function Analytics() {
                     <XAxis dataKey="month" tick={chartTheme.tick} />
                     <YAxis tick={chartTheme.tick} width={35} domain={[0, 100]} />
                     <RTooltip contentStyle={chartTheme.tooltip} />
-                    <Area type="monotone" dataKey="availability" stroke="#00fff5" fill="rgba(0,255,245,0.12)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="availability" stroke="#00fff5" fill="rgba(var(--accent-rgb),0.12)" strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}

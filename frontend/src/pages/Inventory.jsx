@@ -123,7 +123,7 @@ export default function Inventory() {
             </div>
             {['all', 'in', 'out'].map((s) => (
               <button key={s} onClick={() => setStockFilter(s)} data-testid={`inventory-stock-filter-${s}`}
-                className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${stockFilter === s ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground'}`}>
+                className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${stockFilter === s ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground'}`}>
                 {s === 'all' ? 'All' : s === 'in' ? 'In Stock' : 'Out of Stock'}
               </button>
             ))}
@@ -312,7 +312,7 @@ export default function Inventory() {
             <div className="flex gap-2">
               <Button variant="outline" onClick={doPreview} data-testid="csv-preview-button" className="border-border bg-[hsl(var(--panel-2))]">Preview</Button>
               {preview && preview.errors.length === 0 && preview.valid_rows > 0 && (
-                <Button onClick={doApply} data-testid="csv-apply-button" className="bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25">Apply {preview.valid_rows} rows</Button>
+                <Button onClick={doApply} data-testid="csv-apply-button" className="border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10">Apply {preview.valid_rows} rows</Button>
               )}
             </div>
             {preview && (

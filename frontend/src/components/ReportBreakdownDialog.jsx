@@ -31,7 +31,7 @@ function Segmented({ options, value, onChange, testPrefix }) {
             onClick={() => onChange(val)}
             className={`cyber-chamfer-sm border px-2 py-2 text-[11px] font-semibold uppercase tracking-widest transition-all duration-150 ${
               selected
-                ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))] shadow-[0_0_10px_rgba(0,255,245,0.25)]'
+                ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)] shadow-[0_0_10px_rgba(var(--accent-rgb),0.25)]'
                 : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
             }`}
           >

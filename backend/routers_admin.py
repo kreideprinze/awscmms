@@ -3,7 +3,7 @@ templates, branding, system settings, audit logs. Admin-only."""
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from auth import get_current_user, require_admin, hash_password
@@ -325,6 +325,10 @@ async def get_branding():
     return await db.branding.find_one({'id': 'branding'}, {'_id': 0}) or {}
 
 
+import re as _re
+HEX_COLOR_RE = _re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
 class BrandingUpdate(BaseModel):
     app_name: Optional[str] = None
     plant_name: Optional[str] = None
@@ -334,10 +338,36 @@ class BrandingUpdate(BaseModel):
 @router.put('/branding')
 async def update_branding(req: BrandingUpdate, user: dict = Depends(require_admin)):
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    if 'accent' in updates and updates['accent'] != '' and not HEX_COLOR_RE.match(updates['accent']):
+        raise HTTPException(status_code=400, detail='accent must be a hex color like #00fff5')
     updates['updated_at'] = now_iso()
     await db.branding.update_one({'id': 'branding'}, {'$set': updates}, upsert=True)
     await audit(user, 'update', 'branding', 'branding')
     return await db.branding.find_one({'id': 'branding'}, {'_id': 0})
+
+
+@router.post('/branding/logo')
+async def upload_branding_logo(file: UploadFile = File(...), user: dict = Depends(require_admin)):
+    """Upload a custom logo/icon (png/jpg/svg/webp, max 500KB). Stored as a data URI and
+    served with the branding document — replaces the default factory mark app-wide."""
+    allowed = {'image/png', 'image/jpeg', 'image/svg+xml', 'image/webp', 'image/gif'}
+    if file.content_type not in allowed:
+        raise HTTPException(status_code=400, detail=f'Unsupported image type {file.content_type}. Allowed: png, jpg, svg, webp, gif')
+    data = await file.read()
+    if len(data) > 500 * 1024:
+        raise HTTPException(status_code=400, detail='Logo too large (max 500KB)')
+    import base64
+    data_uri = f"data:{file.content_type};base64,{base64.b64encode(data).decode()}"
+    await db.branding.update_one({'id': 'branding'}, {'$set': {'logo_data': data_uri, 'updated_at': now_iso()}}, upsert=True)
+    await audit(user, 'update', 'branding_logo', 'branding', file.filename)
+    return {'ok': True, 'logo_data': data_uri}
+
+
+@router.delete('/branding/logo')
+async def remove_branding_logo(user: dict = Depends(require_admin)):
+    await db.branding.update_one({'id': 'branding'}, {'$unset': {'logo_data': ''}, '$set': {'updated_at': now_iso()}})
+    await audit(user, 'delete', 'branding_logo', 'branding')
+    return {'ok': True}
 
 
 @router.get('/audit-logs')

@@ -315,14 +315,47 @@ function CatalogsTab() {
 
 /* ---- System tab (branding + audit) ---- */
 function SystemTab() {
-  const [branding, setBranding] = useState({ app_name: '', plant_name: '' });
+  const { refreshBranding } = useApp();
+  const [branding, setBranding] = useState({ app_name: '', plant_name: '', accent: '', logo_data: '' });
   const [audit, setAudit] = useState([]);
-  useEffect(() => {
-    api.get('/branding').then((r) => setBranding(r.data));
+  const load = () => {
+    api.get('/branding').then((r) => setBranding((b) => ({ ...b, ...r.data })));
     api.get('/audit-logs?limit=100').then((r) => setAudit(r.data));
-  }, []);
+  };
+  useEffect(() => { load(); }, []);
   const save = async () => {
-    try { await api.put('/branding', { app_name: branding.app_name, plant_name: branding.plant_name }); toast.success('Branding saved — refresh to apply'); } catch (e) { toast.error(errMsg(e)); }
+    try {
+      const payload = { app_name: branding.app_name, plant_name: branding.plant_name };
+      if (branding.accent) {
+        if (!/^#[0-9a-fA-F]{6}$/.test(branding.accent)) { toast.error('Brand color must be a hex value like #00fff5'); return; }
+        payload.accent = branding.accent;
+      }
+      await api.put('/branding', payload);
+      await refreshBranding();
+      toast.success('Branding saved — accent applied platform-wide');
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+  const uploadLogo = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) { toast.error('Logo too large (max 500KB)'); return; }
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await api.post('/branding/logo', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setBranding((b) => ({ ...b, logo_data: res.data.logo_data }));
+      await refreshBranding();
+      toast.success('Logo uploaded — applied to the top-left mark');
+    } catch (err) { toast.error(errMsg(err)); }
+    e.target.value = '';
+  };
+  const removeLogo = async () => {
+    try {
+      await api.delete('/branding/logo');
+      setBranding((b) => ({ ...b, logo_data: '' }));
+      await refreshBranding();
+      toast.success('Logo removed — default mark restored');
+    } catch (e) { toast.error(errMsg(e)); }
   };
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -330,6 +363,44 @@ function SystemTab() {
         <div className="space-y-3">
           <div><Label className="text-xs">Application Name</Label><Input data-testid="admin-branding-app" value={branding.app_name || ''} onChange={(e) => setBranding({ ...branding, app_name: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
           <div><Label className="text-xs">Plant Name</Label><Input data-testid="admin-branding-plant" value={branding.plant_name || ''} onChange={(e) => setBranding({ ...branding, plant_name: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
+          <div>
+            <Label className="text-xs">Brand Accent Color (hex)</Label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="color"
+                data-testid="admin-branding-color-picker"
+                value={/^#[0-9a-fA-F]{6}$/.test(branding.accent || '') ? branding.accent : '#00fff5'}
+                onChange={(e) => setBranding({ ...branding, accent: e.target.value })}
+                className="h-9 w-10 shrink-0 cursor-pointer border border-border bg-transparent p-0.5"
+                title="Pick brand accent color"
+              />
+              <Input
+                data-testid="admin-branding-accent"
+                value={branding.accent || ''}
+                onChange={(e) => setBranding({ ...branding, accent: e.target.value })}
+                placeholder="#00fff5"
+                className="w-32 bg-[hsl(var(--panel-2))] font-mono"
+              />
+              <span className="text-[11px] text-muted-foreground">Applied to icons, buttons, borders & highlights platform-wide</span>
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Custom Logo / Icon (replaces top-left mark, max 500KB)</Label>
+            <div className="mt-1 flex items-center gap-3">
+              {branding.logo_data ? (
+                <img src={branding.logo_data} alt="logo preview" data-testid="admin-logo-preview" className="h-10 w-10 border border-border object-contain p-1" />
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center border border-dashed border-border text-[9px] text-muted-foreground">none</div>
+              )}
+              <label className="cyber-chamfer-sm cursor-pointer border border-[hsl(var(--primary))]/50 bg-transparent px-3 py-1.5 text-xs uppercase tracking-wide text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10">
+                Upload logo
+                <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif" onChange={uploadLogo} className="hidden" data-testid="admin-logo-upload" />
+              </label>
+              {branding.logo_data && (
+                <Button variant="ghost" size="sm" className="h-8 text-xs text-[#ff2e63]" onClick={removeLogo} data-testid="admin-logo-remove">Remove</Button>
+              )}
+            </div>
+          </div>
           <Button onClick={save} data-testid="admin-branding-save">Save Branding</Button>
         </div>
       </Section>

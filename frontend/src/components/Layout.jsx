@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import React, { useMemo, useState, useRef } from 'react';
+import { NavLink } from 'react-router-dom';
 import {
   Radar, Flame, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, Siren,
-  Bell, LogOut, Pin, PinOff, Factory,
+  Bell, LogOut, Pin, PinOff, Factory, Paintbrush, GripVertical, Check,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -24,19 +24,48 @@ const MODULES = [
 ];
 
 const SEVERITY_CLS = {
-  critical: 'border-l-red-500',
-  warning: 'border-l-yellow-500',
-  success: 'border-l-green-500',
+  critical: 'border-l-[#ff2e63]',
+  warning: 'border-l-[#f9f871]',
+  success: 'border-l-[#05ffa1]',
   info: 'border-l-[hsl(var(--primary))]',
 };
 
 export function Layout({ children }) {
-  const { user, logout, unreadCount, notifications, markAllRead, branding, openMachine } = useApp();
+  const { user, logout, unreadCount, notifications, markAllRead, branding, openMachine, uiPrefs, saveUiPrefs } = useApp();
   const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const navigate = useNavigate();
-  const expanded = pinned || hovered;
-  const visible = MODULES.filter((m) => m.roles.includes(user?.role));
+  const [customizing, setCustomizing] = useState(false);
+  const dragKey = useRef(null);
+  const expanded = pinned || hovered || customizing;
+
+  // Apply per-user order, then append any modules not in the saved order
+  const ordered = useMemo(() => {
+    const visible = MODULES.filter((m) => m.roles.includes(user?.role));
+    const order = uiPrefs?.sidebar_order || [];
+    if (!order.length) return visible;
+    const byKey = Object.fromEntries(visible.map((m) => [m.key, m]));
+    const sorted = order.map((k) => byKey[k]).filter(Boolean);
+    for (const m of visible) if (!order.includes(m.key)) sorted.push(m);
+    return sorted;
+  }, [user, uiPrefs]);
+
+  const iconColors = uiPrefs?.icon_colors || {};
+
+  const onDrop = (targetKey) => {
+    const src = dragKey.current;
+    dragKey.current = null;
+    if (!src || src === targetKey) return;
+    const keys = ordered.map((m) => m.key);
+    const from = keys.indexOf(src);
+    const to = keys.indexOf(targetKey);
+    if (from === -1 || to === -1) return;
+    keys.splice(to, 0, keys.splice(from, 1)[0]);
+    saveUiPrefs({ sidebar_order: keys });
+  };
+
+  const setColor = (key, color) => {
+    saveUiPrefs({ icon_colors: { ...iconColors, [key]: color } });
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -48,7 +77,11 @@ export function Layout({ children }) {
         className={`relative z-30 flex flex-col border-r border-border bg-[hsl(var(--panel-1))] transition-[width] duration-200 ${expanded ? 'w-64' : 'w-14'}`}
       >
         <div className="flex h-14 items-center gap-3 border-b border-border px-3">
-          <Factory className="h-6 w-6 shrink-0 text-[hsl(var(--primary))]" />
+          {branding.logo_data ? (
+            <img src={branding.logo_data} alt="logo" data-testid="app-logo-custom" className="h-7 w-7 shrink-0 object-contain" />
+          ) : (
+            <Factory data-testid="app-logo-default" className="h-6 w-6 shrink-0 text-[hsl(var(--primary))]" />
+          )}
           {expanded && (
             <div className="overflow-hidden">
               <div className="truncate text-sm font-semibold tracking-wide">{branding.app_name || 'ForgeOps'}</div>
@@ -57,29 +90,62 @@ export function Layout({ children }) {
           )}
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3">
-          {visible.map((m) => (
-            <NavLink
-              key={m.key}
-              to={m.path}
-              data-testid={`sidebar-nav-item-${m.key}`}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                  isActive
-                    ? 'border-l-2 border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-foreground'
-                    : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
-                }`
-              }
-            >
-              <m.icon className="h-4.5 w-4.5 h-[18px] w-[18px] shrink-0" />
-              {expanded && <span className="truncate">{m.label}</span>}
-            </NavLink>
-          ))}
+          {ordered.map((m) => {
+            const color = iconColors[m.key];
+            return (
+              <div
+                key={m.key}
+                draggable={customizing}
+                onDragStart={() => { dragKey.current = m.key; }}
+                onDragOver={(e) => customizing && e.preventDefault()}
+                onDrop={() => customizing && onDrop(m.key)}
+                className={customizing ? 'cursor-grab active:cursor-grabbing' : ''}
+              >
+                <NavLink
+                  to={m.path}
+                  data-testid={`sidebar-nav-item-${m.key}`}
+                  onClick={(e) => customizing && e.preventDefault()}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 border border-transparent px-2.5 py-2 text-sm transition-colors ${
+                      isActive && !customizing
+                        ? 'border-l-2 border-l-[hsl(var(--primary))] text-foreground'
+                        : 'text-muted-foreground hover:border-border hover:text-foreground'
+                    }`
+                  }
+                >
+                  {customizing && <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                  <m.icon className="h-[18px] w-[18px] shrink-0" style={color ? { color } : undefined} />
+                  {expanded && <span className="truncate" style={color ? { color } : undefined}>{m.label}</span>}
+                  {customizing && expanded && (
+                    <input
+                      type="color"
+                      value={color || '#00fff5'}
+                      data-testid={`sidebar-color-${m.key}`}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setColor(m.key, e.target.value)}
+                      className="ml-auto h-5 w-6 shrink-0 cursor-pointer border-0 bg-transparent p-0"
+                      title={`Icon color for ${m.label}`}
+                    />
+                  )}
+                </NavLink>
+              </div>
+            );
+          })}
         </nav>
-        <div className="border-t border-border p-2">
+        <div className="space-y-1 border-t border-border p-2">
+          <button
+            data-testid="sidebar-customize-toggle"
+            onClick={() => setCustomizing(!customizing)}
+            className={`flex w-full items-center gap-3 border border-transparent px-2.5 py-2 text-sm transition-colors ${customizing ? 'border-[hsl(var(--primary))]/60 text-[hsl(var(--primary))]' : 'text-muted-foreground hover:border-border hover:text-foreground'}`}
+            title="Customize sidebar: drag to reorder, pick icon colors"
+          >
+            {customizing ? <Check className="h-[18px] w-[18px] shrink-0" /> : <Paintbrush className="h-[18px] w-[18px] shrink-0" />}
+            {expanded && <span>{customizing ? 'Done customizing' : 'Customize sidebar'}</span>}
+          </button>
           <button
             data-testid="sidebar-collapse-toggle"
             onClick={() => setPinned(!pinned)}
-            className="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground"
+            className="flex w-full items-center gap-3 border border-transparent px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:border-border hover:text-foreground"
           >
             {pinned ? <PinOff className="h-[18px] w-[18px] shrink-0" /> : <Pin className="h-[18px] w-[18px] shrink-0" />}
             {expanded && <span>{pinned ? 'Unpin sidebar' : 'Pin sidebar'}</span>}
@@ -92,7 +158,7 @@ export function Layout({ children }) {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-[hsl(var(--panel-1))] px-4">
           <div className="flex items-center gap-3">
             <span className="text-xs uppercase tracking-widest text-muted-foreground">{branding.plant_name || 'Plant'}</span>
-            <span className="hidden items-center gap-1.5 rounded-full border border-[#05ffa1]/40 bg-[#05ffa1]/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[#05ffa1] sm:flex">
+            <span className="hidden items-center gap-1.5 rounded-full border border-[#05ffa1]/40 bg-transparent px-2 py-0.5 text-[10px] uppercase tracking-wide text-[#05ffa1] sm:flex">
               <span className="h-1.5 w-1.5 rounded-full bg-[#05ffa1] alarm-pulse" /> Live
             </span>
           </div>
@@ -103,7 +169,7 @@ export function Layout({ children }) {
                 <Button variant="ghost" size="icon" data-testid="notification-center-bell" className="relative">
                   <Bell className="h-5 w-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff2e63] px-1 text-[10px] font-semibold text-white">
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-[#ff2e63] bg-transparent px-1 text-[10px] font-semibold text-[#ff2e63]">
                       {unreadCount > 99 ? '99+' : unreadCount}
                     </span>
                   )}

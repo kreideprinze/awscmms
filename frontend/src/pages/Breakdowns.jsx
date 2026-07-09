@@ -36,7 +36,7 @@ export default function Breakdowns() {
           <h1 className="text-2xl font-semibold tracking-tight">Breakdowns</h1>
           <p className="text-sm text-muted-foreground">{data.total} total · lifecycle OPEN → ASSIGNED → IN_PROGRESS → COMPLETED → CLOSED</p>
         </div>
-        <Button data-testid="breakdowns-create-button" onClick={() => setCreateOpen(true)} className="bg-[#ff2e63]/15 text-[#ff2e63] hover:bg-[#ff2e63]/25">
+        <Button data-testid="breakdowns-create-button" onClick={() => setCreateOpen(true)} className="border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10">
           <Plus className="mr-1 h-4 w-4" /> Report Breakdown
         </Button>
       </div>
@@ -48,7 +48,7 @@ export default function Breakdowns() {
         </div>
         {STATUSES.map((s) => (
           <button key={s} data-testid={`breakdowns-filter-${s}`} onClick={() => setStatus(s)}
-            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${status === s ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${status === s ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {s === 'all' ? 'All' : s}
           </button>
         ))}

@@ -33,7 +33,7 @@ export default function Login() {
     <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
       <div
         className="pointer-events-none absolute inset-0"
-        style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(0,255,245,0.08), transparent 60%), radial-gradient(700px 420px at 80% 0%, rgba(255,46,99,0.05), transparent 55%)' }}
+        style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(var(--accent-rgb),0.08), transparent 60%), radial-gradient(700px 420px at 80% 0%, rgba(255,46,99,0.05), transparent 55%)' }}
       />
       <div className="relative w-full max-w-md rounded-xl border border-border bg-[hsl(var(--panel-1))] p-8">
         <div className="mb-8 flex items-center gap-3">

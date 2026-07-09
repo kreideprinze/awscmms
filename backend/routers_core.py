@@ -303,3 +303,136 @@ async def control_room_summary(user: dict = Depends(get_current_user)):
     availability = round(agg[0]['run'] / agg[0]['cal'] * 100, 1) if agg and agg[0]['cal'] else None
     return {'total_machines': total, 'by_status': by_status, 'open_breakdowns': open_breakdowns,
             'open_work_orders': open_wos, 'overdue_pm': overdue_pm, 'watchlist': watchlist, 'availability': availability}
+
+
+# ---------------- CONTROL ROOM LINE / SECTION KPIS ----------------
+def _parse_iso(s):
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(s.replace('Z', '+00:00'))
+    except Exception:
+        return None
+
+
+@router.get('/control-room/line-kpis')
+async def control_room_line_kpis(hours: float = Query(24, gt=0, le=168), user: dict = Depends(get_current_user)):
+    """Availability + total downtime per Line and per Process Group (section) over a
+    configurable trailing window (default: last 24h / current day).
+
+    Downtime = summed overlap of breakdown open-time (start -> end or now) with the window.
+    Availability = 1 - downtime / (machines_in_group * window). Practical shift-lead metric:
+    directly shows which line/section is bleeding availability right now.
+    """
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    window_min = hours * 60.0
+
+    # group machines by line / section
+    machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'line': 1, 'process_group': 1, 'department': 1, 'status': 1}).to_list(100000)
+    lines = {}
+    for m in machines:
+        ln = lines.setdefault(m['line'], {
+            'line': m['line'], 'department': m.get('department'), 'machines': 0,
+            'running': 0, 'failed': 0, 'downtime_minutes': 0.0, 'sections': {},
+        })
+        ln['machines'] += 1
+        if m['status'] == 'running':
+            ln['running'] += 1
+        elif m['status'] == 'failed':
+            ln['failed'] += 1
+        pg = ln['sections'].setdefault(m.get('process_group') or '—', {
+            'process_group': m.get('process_group') or '—', 'machines': 0, 'downtime_minutes': 0.0,
+        })
+        pg['machines'] += 1
+
+    # breakdowns overlapping window: end_time missing (still open) OR end_time >= since
+    since_iso = since.isoformat()
+    q = {'$or': [{'end_time': None}, {'end_time': {'$gte': since_iso}}]}
+    async for bd in db.breakdowns.find(q, {'_id': 0, 'line': 1, 'process_group': 1, 'start_time': 1, 'end_time': 1}):
+        start = _parse_iso(bd.get('start_time') or '') or since
+        end = _parse_iso(bd.get('end_time') or '') or now
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        overlap = (min(end, now) - max(start, since)).total_seconds() / 60.0
+        if overlap <= 0:
+            continue
+        ln = lines.get(bd.get('line'))
+        if not ln:
+            continue
+        ln['downtime_minutes'] += overlap
+        pg = ln['sections'].get(bd.get('process_group') or '—')
+        if pg:
+            pg['downtime_minutes'] += overlap
+
+    def avail(downtime_min, n_machines):
+        if not n_machines:
+            return None
+        cap = n_machines * window_min
+        return round(max(0.0, (cap - min(downtime_min, cap)) / cap) * 100, 1)
+
+    # deterministic line ordering: known process lines first, then by department
+    order = {'PC21': 0, 'PC32': 1, 'PC36': 2, 'KKR': 3, 'TWZ': 4, 'BCP': 5}
+    out = []
+    for ln in lines.values():
+        sections = []
+        for pg in ln['sections'].values():
+            sections.append({
+                'process_group': pg['process_group'], 'machines': pg['machines'],
+                'downtime_minutes': round(pg['downtime_minutes'], 1),
+                'availability': avail(pg['downtime_minutes'], pg['machines']),
+            })
+        sections.sort(key=lambda s: (-(s['downtime_minutes']), s['process_group']))
+        out.append({
+            'line': ln['line'], 'department': ln['department'], 'machines': ln['machines'],
+            'running': ln['running'], 'failed': ln['failed'],
+            'downtime_minutes': round(ln['downtime_minutes'], 1),
+            'availability': avail(ln['downtime_minutes'], ln['machines']),
+            'sections': sections,
+        })
+    out.sort(key=lambda x: (order.get(x['line'], 99), x['department'] or '', x['line']))
+    return {'window_hours': hours, 'since': since_iso, 'generated_at': now.isoformat(), 'lines': out}
+
+
+# ---------------- USER UI PREFERENCES (sidebar order + icon colors) ----------------
+import re as _re
+
+VALID_MODULE_KEYS = {'control-room', 'breakdowns', 'work-orders', 'pm', 'analytics', 'runtime', 'inventory', 'admin', 'aws'}
+HEX_RE = _re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+class UiPrefs(BaseModel):
+    sidebar_order: Optional[list] = None
+    icon_colors: Optional[dict] = None
+
+
+@router.get('/users/me/ui-prefs')
+async def get_ui_prefs(user: dict = Depends(get_current_user)):
+    doc = await db.users.find_one({'username': user['username']}, {'_id': 0, 'ui_prefs': 1})
+    return (doc or {}).get('ui_prefs') or {}
+
+
+@router.put('/users/me/ui-prefs')
+async def put_ui_prefs(req: UiPrefs, user: dict = Depends(get_current_user)):
+    prefs = {}
+    if req.sidebar_order is not None:
+        keys = [k for k in req.sidebar_order if k in VALID_MODULE_KEYS]
+        if len(keys) != len(set(keys)):
+            raise HTTPException(status_code=400, detail='Duplicate module keys in sidebar_order')
+        prefs['sidebar_order'] = keys
+    if req.icon_colors is not None:
+        colors = {}
+        for k, v in req.icon_colors.items():
+            if k not in VALID_MODULE_KEYS:
+                continue
+            if v and not HEX_RE.match(str(v)):
+                raise HTTPException(status_code=400, detail=f'Invalid hex color for {k}: {v}')
+            if v:
+                colors[k] = v
+        prefs['icon_colors'] = colors
+    if prefs:
+        await db.users.update_one({'username': user['username']}, {'$set': {f'ui_prefs.{k}': v for k, v in prefs.items()}})
+    doc = await db.users.find_one({'username': user['username']}, {'_id': 0, 'ui_prefs': 1})
+    return (doc or {}).get('ui_prefs') or {}

@@ -22,7 +22,7 @@ export function PlantClock() {
         <div className="text-[9px] font-semibold uppercase tracking-[0.25em] text-muted-foreground">
           Plant Time · {DAYS[now.getDay()]} {pad(now.getDate())} {MONTHS[now.getMonth()]} {now.getFullYear()}
         </div>
-        <div data-testid="plant-time-value" className="font-mono text-lg leading-tight tabular-nums text-[hsl(var(--primary))]" style={{ textShadow: '0 0 10px rgba(0,255,245,0.45)' }}>
+        <div data-testid="plant-time-value" className="font-mono text-lg leading-tight tabular-nums text-[hsl(var(--primary))]" style={{ textShadow: '0 0 10px rgba(var(--accent-rgb),0.45)' }}>
           {pad(now.getHours())}:{pad(now.getMinutes())}:{pad(now.getSeconds())}
         </div>
       </div>

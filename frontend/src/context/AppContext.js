@@ -5,6 +5,36 @@ import { api, WS_URL } from '@/lib/api';
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
 
+// Apply the admin-configured brand accent (hex) as runtime CSS variables so the
+// entire neon accent system (borders, buttons, glows, charts) re-themes instantly.
+export function applyAccent(hex) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex || '')) return;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const r1 = r / 255, g1 = g / 255, b1 = b / 255;
+  const max = Math.max(r1, g1, b1), min = Math.min(r1, g1, b1);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r1) h = (g1 - b1) / d + (g1 < b1 ? 6 : 0);
+    else if (max === g1) h = (b1 - r1) / d + 2;
+    else h = (r1 - g1) / d + 4;
+    h *= 60;
+  }
+  const hsl = `${Math.round(h)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
+  const root = document.documentElement.style;
+  root.setProperty('--primary', hsl);
+  root.setProperty('--accent', hsl);
+  root.setProperty('--ring', hsl);
+  root.setProperty('--neon-cyan', hsl);
+  root.setProperty('--chart-1', hsl);
+  root.setProperty('--status-repair', hsl);
+  root.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
+}
+
 export function AppProvider({ children }) {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('fops_user')); } catch { return null; }
@@ -15,6 +45,7 @@ export function AppProvider({ children }) {
   const [liveFeed, setLiveFeed] = useState([]);
   const [drawerMachineId, setDrawerMachineId] = useState(null);
   const [branding, setBranding] = useState({ app_name: 'ForgeOps', plant_name: '' });
+  const [uiPrefs, setUiPrefs] = useState({});
   const wsRef = useRef(null);
   const reconnectRef = useRef(null);
 
@@ -43,7 +74,26 @@ export function AppProvider({ children }) {
     } catch {}
   }, []);
 
-  // WebSocket live connection
+  const refreshBranding = useCallback(async () => {
+    try {
+      const res = await api.get('/branding');
+      setBranding((b) => ({ ...b, ...res.data }));
+      if (res.data.accent) applyAccent(res.data.accent);
+    } catch {}
+  }, []);
+
+  const saveUiPrefs = useCallback(async (prefs) => {
+    setUiPrefs((p) => ({ ...p, ...prefs }));
+    try {
+      const res = await api.put('/users/me/ui-prefs', prefs);
+      setUiPrefs(res.data || {});
+    } catch {}
+  }, []);
+
+  // Branding applies even on the login screen
+  useEffect(() => { refreshBranding(); }, [refreshBranding]);
+
+  // WebSocket live connection + per-user prefs
   useEffect(() => {
     if (!user) return undefined;
     let closed = false;
@@ -74,7 +124,7 @@ export function AppProvider({ children }) {
     };
     connect();
     refreshNotifications();
-    api.get('/branding').then((r) => setBranding((b) => ({ ...b, ...r.data }))).catch(() => {});
+    api.get('/users/me/ui-prefs').then((r) => setUiPrefs(r.data || {})).catch(() => {});
     return () => {
       closed = true;
       clearTimeout(reconnectRef.current);
@@ -97,7 +147,8 @@ export function AppProvider({ children }) {
     <AppContext.Provider value={{
       user, login, logout, isAdmin, isTech,
       notifications, unreadCount, markAllRead, refreshNotifications,
-      machineUpdates, liveFeed, branding,
+      machineUpdates, liveFeed, branding, refreshBranding,
+      uiPrefs, saveUiPrefs,
       drawerMachineId, openMachine: setDrawerMachineId, closeMachine: () => setDrawerMachineId(null),
     }}>
       {children}

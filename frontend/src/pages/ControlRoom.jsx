@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StatusDot, HealthBadge, STATUS_META, fmtDate } from '@/components/StatusBits';
 import { KpiCard } from '@/components/Shared';
 import { PlantClock } from '@/components/PlantClock';
+import { LineKpiRibbon } from '@/components/LineKpiRibbon';
 
 const STATUS_FILTERS = ['all', 'running', 'watch', 'inspection_due', 'repair', 'failed', 'idle'];
 const LINE_ORDER = ['PC21', 'PC32', 'PC36', 'KKR', 'TWZ', 'BCP'];
@@ -20,7 +21,7 @@ const MachineTile = React.memo(function MachineTile({ machine, onOpen }) {
     <button
       data-testid={`machine-tile-${machine.code}`}
       onClick={() => onOpen(machine.id)}
-      className={`cyber-chamfer-sm relative w-[200px] border border-border bg-[hsl(var(--panel-1))] p-3 text-left transition-all duration-150 hover:border-[hsl(var(--primary))]/60 hover:shadow-[0_0_12px_rgba(0,255,245,0.15)] ${critical ? 'glow-critical border-[#ff2e63]/50' : ''}`}
+      className={`cyber-chamfer-sm relative w-[200px] border border-border bg-[hsl(var(--panel-1))] p-3 text-left transition-all duration-150 hover:border-[hsl(var(--primary))]/60 hover:shadow-[0_0_12px_rgba(var(--accent-rgb),0.15)] ${critical ? 'glow-critical border-[#ff2e63]/50' : ''}`}
     >
       <span className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: meta.color, boxShadow: `0 0 8px ${meta.color}66` }} />
       <div className="flex items-start justify-between gap-1">
@@ -53,6 +54,7 @@ export default function ControlRoom() {
   const [lineFilter, setLineFilter] = useState('all');
   const [groupMode, setGroupMode] = useState('hierarchy'); // hierarchy | line
   const [showFeed, setShowFeed] = useState(true);
+  const [showPlantTotals, setShowPlantTotals] = useState(false);
   const [feed, setFeed] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -153,21 +155,41 @@ export default function ControlRoom() {
 
   return (
     <div className="flex h-full flex-col" data-testid="control-room-page">
-      {/* KPI strip */}
+      {/* KPI ribbon — primary: line/section availability + downtime */}
       <div
         className="border-b border-border px-4 py-3"
-        style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(0,255,245,0.06), transparent 60%), radial-gradient(700px 400px at 85% 0%, rgba(255,46,99,0.05), transparent 55%)' }}
+        style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(var(--accent-rgb),0.05), transparent 60%), radial-gradient(700px 400px at 85% 0%, rgba(255,46,99,0.04), transparent 55%)' }}
       >
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
-          <KpiCard testId="kpi-total-machines" label="Machines" value={summary?.total_machines} />
-          <KpiCard testId="kpi-running" label="Running" value={summary?.by_status?.running || 0} accent="text-[#05ffa1]" />
-          <KpiCard testId="kpi-failed" label="Failed" value={summary?.by_status?.failed || 0} accent={summary?.by_status?.failed ? 'text-[#ff2e63]' : ''} />
-          <KpiCard testId="kpi-repair" label="In Repair" value={summary?.by_status?.repair || 0} accent="text-[hsl(var(--primary))]" />
-          <KpiCard testId="kpi-open-breakdowns" label="Open Breakdowns" value={summary?.open_breakdowns} accent={summary?.open_breakdowns ? 'text-[#ff2e63]' : ''} />
-          <KpiCard testId="kpi-open-wos" label="Open WOs" value={summary?.open_work_orders} />
-          <KpiCard testId="kpi-watchlist" label="Watchlist" value={summary?.watchlist} accent={summary?.watchlist ? 'text-[#f9f871]' : ''} />
-          <KpiCard testId="kpi-availability" label="Availability" value={summary?.availability != null ? `${summary.availability}%` : '—'} />
-        </div>
+        <LineKpiRibbon
+          refreshSignal={machineUpdates}
+          onSelectLine={(line) => { setLineFilter(line); setDeptFilter('all'); }}
+        />
+
+        {/* Secondary: plant-wide totals, collapsible */}
+        <button
+          data-testid="plant-totals-toggle"
+          onClick={() => setShowPlantTotals(!showPlantTotals)}
+          className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {showPlantTotals ? '▾' : '▸'} Plant totals
+          {!showPlantTotals && summary && (
+            <span className="ml-2 normal-case tracking-normal">
+              {summary.total_machines} machines · {summary.by_status?.running || 0} running · {summary.open_breakdowns} open BD · {summary.open_work_orders} open WO
+            </span>
+          )}
+        </button>
+        {showPlantTotals && (
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8" data-testid="plant-totals-strip">
+            <KpiCard testId="kpi-total-machines" label="Machines" value={summary?.total_machines} />
+            <KpiCard testId="kpi-running" label="Running" value={summary?.by_status?.running || 0} accent="text-[#05ffa1]" />
+            <KpiCard testId="kpi-failed" label="Failed" value={summary?.by_status?.failed || 0} accent={summary?.by_status?.failed ? 'text-[#ff2e63]' : ''} />
+            <KpiCard testId="kpi-repair" label="In Repair" value={summary?.by_status?.repair || 0} accent="text-[hsl(var(--primary))]" />
+            <KpiCard testId="kpi-open-breakdowns" label="Open Breakdowns" value={summary?.open_breakdowns} accent={summary?.open_breakdowns ? 'text-[#ff2e63]' : ''} />
+            <KpiCard testId="kpi-open-wos" label="Open WOs" value={summary?.open_work_orders} />
+            <KpiCard testId="kpi-watchlist" label="Watchlist" value={summary?.watchlist} accent={summary?.watchlist ? 'text-[#f9f871]' : ''} />
+            <KpiCard testId="kpi-availability" label="Availability" value={summary?.availability != null ? `${summary.availability}%` : '—'} />
+          </div>
+        )}
         {/* Filters */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <div className="relative">
@@ -186,7 +208,7 @@ export default function ControlRoom() {
               data-testid={`status-filter-${s}`}
               onClick={() => setStatusFilter(s)}
               className={`cyber-chamfer-sm border px-3 py-1 text-[11px] font-mono uppercase tracking-wide transition-colors ${
-                statusFilter === s ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'
+                statusFilter === s ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'
               }`}
             >
               {s === 'all' ? 'All' : (STATUS_META[s]?.label || s)}
@@ -198,7 +220,7 @@ export default function ControlRoom() {
               data-testid={`dept-filter-${d}`}
               onClick={() => { setDeptFilter(d); setLineFilter('all'); }}
               className={`cyber-chamfer-sm border px-3 py-1 text-[11px] uppercase tracking-wide transition-colors ${
-                deptFilter === d ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'
+                deptFilter === d ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'
               }`}
             >
               {d === 'all' ? 'All Depts' : d}
@@ -260,7 +282,7 @@ export default function ControlRoom() {
                   {twin.length === 0 && <div className="p-10 text-muted-foreground">No machines match filters</div>}
                   {twin.map(({ dept, lines }) => (
                     <section key={dept || lines[0]?.line}>
-                      {dept && <h2 className="mb-3 text-lg font-bold uppercase tracking-[0.25em] text-[hsl(var(--primary))]" style={{ textShadow: '0 0 12px rgba(0,255,245,0.35)' }}>{dept}</h2>}
+                      {dept && <h2 className="mb-3 text-lg font-bold uppercase tracking-[0.25em] text-[hsl(var(--primary))]" style={{ textShadow: '0 0 12px rgba(var(--accent-rgb),0.35)' }}>{dept}</h2>}
                       <div className="space-y-6">
                         {lines.map(({ line, pgs }) => (
                           <div key={line} className="cyber-panel p-4" data-testid={`twin-line-${line.replace(/\s+/g, '-')}`}>

@@ -2,223 +2,211 @@
 
 ## 1) Objectives
 - Deliver a production-ready, LAN-only **Factory Operations Platform** (Digital Twin Control Room + CMMS + Reliability/AWS + Predictive + Analytics + Spares + Admin) that is **machine-centric** in every workflow.
-- Ship **non-empty** on first boot: seed full hierarchy (Appendix A), machine layout positions, templates/rules, **default users** (admin/admin123, tech/tech123, operator/operator123), and realistic starter spares.
+- Ship **non-empty** on first boot: seed full hierarchy, machine layout positions, templates/rules, **default users** (admin/admin123, tech/tech123, operator/operator123), and realistic starter spares.
 - Provide real-time **timeline + notifications** (WebSocket) and scalable MongoDB data model (indexes/pagination) to hit performance targets.
 - Ensure Control Room UX is **bounded and usable**:
-  - **No zoom-to-infinity** behavior (zoom disabled / removed).
-  - A **fixed/controlled canvas** with **vertical scrolling** to view all machines.
+  - **No zoom** / no zoom-to-infinity behavior.
+  - A fixed/controlled canvas with **vertical scrolling** to view all machines.
 - Ensure time references are unambiguous across operations:
   - Display **current actual wall-clock time** (date + HH:MM:SS ticking every second) so users can cross-reference Breakdown/WO timestamps.
-- Apply a coherent, app-wide **Cyberpunk 2077 HUD aesthetic** across *every module* (not just Control Room): dark charcoal base (not pure black), neon accents (cyan/magenta/yellow), monospace/tabular data typography, chamfered corners, scanlines, glow hovers, and subtle glitch/flicker where appropriate.
+- Deliver a coherent, app-wide **Cyberpunk HUD aesthetic** across *every* module and component.
+- **NEW (Phase E)**: Upgrade Control Room “at-a-glance” intelligence + deep customization:
+  1) Replace the top KPI ribbon primary content with **Availability + Downtime** at **Line** and **Section/Process Group** levels (expandable), with plant-wide aggregates demoted to a collapsible secondary strip.
+  2) Sidebar navigation supports **user-assigned icon colors** + **drag-and-drop reorder**, persisted per user.
+  3) Admin-configurable **custom branding**: uploadable logo + hex brand accent color applied platform-wide.
+  4) Standardize all buttons/icons to **outlined style**: thin-line borders, transparent interiors.
+  5) Move the background theme to **pure black** base (remove deep-blue undertone), while preserving contrast.
 
 ## 2) Implementation Steps
 
 ### Phase 1 — Core “Operational Loop” POC (Isolation) (WebSocket + eventing + derived machine state)
 > Core = if this breaks, the system isn’t “live”: machine state aggregation + timeline/notifications + Digital Twin can’t be trusted.
 
-**POC scope (no full UI, minimal pages/scripts):**
-1. Backend skeleton: FastAPI + Motor + JWT scaffolding (JWT can be stubbed for POC routes if needed), WebSocket hub (single-worker constraint).
-2. Minimal data model + seed subset: 1 dept/line/process group + 3 machines + default users.
-3. Event pipeline: create a breakdown → emits timeline event + notification → updates machine “derived state” (status/health placeholders) → WebSocket broadcasts.
-4. A minimal React page that:
-   - lists the 3 machines
-   - opens WS connection
-   - shows live notifications and machine state changes
-
-**Web search (best practices) before coding:**
-- FastAPI WebSocket patterns with Motor and single-process broadcast hub; JWT over WS; avoiding blocking calls.
-
-**Exit criteria:**
-- From a script or minimal UI: create breakdown for a machine and see (a) timeline event persisted, (b) notification persisted, (c) WS push received, (d) machine card reflects updated indicator.
-
-**User stories (Phase 1):**
-1. As an Operator, I can see a minimal live machine list that updates without refresh when events occur.
-2. As a Technician, I receive a real-time notification when a breakdown is created for my machine.
-3. As an Admin, I can seed the system and confirm it never starts empty.
-4. As an Admin, I can verify every significant action creates a timeline event.
-5. As a user, I can refresh the page and still see the persisted events (not just in-memory WS messages).
+**Status:** ✅ COMPLETE
 
 ---
 
 ### Phase 2 — V1 App Development (MVP, end-to-end usable)
-**2.1 Data model + foundations**
-- Implement Mongo collections per spec + counters for ticket numbers.
-- Implement seed on first startup:
-  - Full hierarchy (Appendix A) + machine layout positions
-  - failure modes + report error codes
-  - PM templates + runtime templates
-  - reliability rules/settings + notification templates
-  - default users + realistic spares + spare locations
-- Implement RBAC (3 roles) + route guards (frontend) + API enforcement (backend).
-
-**2.2 Control Room / Digital Twin (primary landing)**
-- Dynamic layout renderer from hierarchy + machine positions (no hardcoded cards).
-- Search, filters; machine cards show Dept/Line/PG/Name/Status/Health/Runtime/Reliability.
-- **Bounded UX**:
-  - **Zoom removed** (no infinite zoom; no zoom controls).
-  - Fixed tile sizing with a **vertical scroll container** to reach all machines.
-- Machine Detail Drawer with tabs (MVP content per tab, but all tabs present): Overview, Reports, Breakdowns, Work Orders, PM Tasks, Analytics, Timeline, Notes, Documents (metadata only), Reliability, Spares.
-
-**2.3 Maintenance modules (machine-centric flows)**
-- Machine Reports + review/convert-to-breakdown flow.
-- Machine Notes (timestamped).
-- Breakdowns:
-  - lifecycle OPEN→ASSIGNED→IN_PROGRESS→COMPLETED→CLOSED
-  - downtime calc; enforce root-cause rule >30 min + auto follow-up task
-  - consumed spares capture on close
-  - **Auto-create Corrective Work Order on breakdown creation** (optional toggle).
-- Work Orders:
-  - types + lifecycle
-  - completion triggers inventory transaction + usage log
-- PM:
-  - task definitions + scheduler to generate PM work orders
-  - completion with checklist + spares consumption
-
-**2.4 Timeline + Notifications (full)**
-- Persist timeline events for all major actions; filter by type.
-- WebSocket notifications for: reports, breakdowns, critical failures, WOs, PM due/overdue, reliability alerts, inspection recommendations.
-
-**2.5 Runtime (manual + CSV import)**
-- Admin UI for manual runtime log entry and CSV import with validation/preview.
-- Runtime KPIs stored permanently; availability computed.
-
-**2.6 One round of end-to-end testing (testing agent)**
-- Validate core flows: seed → Control Room → drawer → report → convert → breakdown lifecycle → spares consumption → notifications → timeline → PM generation/completion → runtime log.
-
-**User stories (Phase 2):**
-1. As an Operator, I can start from the Control Room, search a machine, open its drawer, and submit a report in under 30 seconds.
-2. As a Technician, I can take an assigned breakdown through all lifecycle stages and close it with action taken + spares used.
-3. As an Admin, I can adjust machine layout positions and immediately see the Digital Twin re-render.
-4. As a Technician, I can complete a PM task with checklist and see it logged on the machine timeline.
-5. As an Admin, I can import runtime logs via CSV preview and see availability update in analytics.
+**Status:** ✅ COMPLETE
 
 ---
 
 ### Phase 3 — Reliability/AWS + Predictive + Analytics (multi-level)
-**3.1 Reliability metrics engine (non-ML)**
-- MTBF/MTTR calculations start after first breakdown.
-- Maturity levels:
-  - L1: MTBF + operating hours since failure
-  - L2: rolling/weighted MTBF + failure trend
-  - L3 (5+): Weibull fit + hazard + reliability curve + failure probability
-- Store reliability_metrics and weibull_models; incremental recompute on new events.
-
-**3.2 Predictive engine**
-- Prediction tiers: MTBF → weighted MTBF → Weibull.
-- Health state bands (0–70/70–80/80–100/100%+).
-- At ≥80%: create inspection flag + notification + suggested PM task (auto suggestions list).
-
-**3.3 Analytics module**
-- Hierarchy-level rollups: Machine/PG/Line/Dept/Plant.
-- KPI dashboards + charts (Recharts): downtime/failure trends, PM compliance, availability.
-- Add required indexes + pagination; cached rollups where needed.
-
-**3.4 One round of end-to-end testing (testing agent)**
-- Simulate breakdown history + runtime logs; verify level transitions, Weibull activation, predictive alerts, analytics correctness.
-
-**User stories (Phase 3):**
-1. As a Reliability user (Admin), after the first breakdown I can immediately see MTBF populated for the machine.
-2. As a Technician, I can see a machine enter Watch/Inspection Due based on runtime vs predicted life.
-3. As an Admin, I get an automatic inspection recommendation notification at ≥80% predicted life.
-4. As a Plant user (Admin), I can view MTBF/MTTR/Availability rollups at line/department levels.
-5. As a user, I can open a machine’s Reliability tab and see Weibull outputs once it reaches 5+ failures.
+**Status:** ✅ COMPLETE
 
 ---
 
 ### Phase 4 — Spares/Inventory + Administration hardening + scale readiness
-**4.1 Inventory module (SAP-centric)**
-- spares_inventory master + spare_locations.
-- Transaction ledger only (no direct edits): imports, adjustments, consumptions.
-- CSV import modes Replace/Add/Subtract + simplified quantity_change with validation + preview.
-- Machine recommended spares + Machine drawer Spares tab (recent usage, most consumed, history).
-- Spare analytics dashboards (top 10, breakdown by month/machine/area/source).
+**Status:** ✅ COMPLETE
 
-**4.2 Administration module**
-- Full CRUD for hierarchy + layout, users, templates, reliability settings, spare locations, branding/system settings.
-- Audit logs for admin changes.
+---
 
-**4.3 Performance work**
-- Add/verify indexes, cursor pagination, aggregation pipelines for rollups.
-- WS backpressure/basic rate limiting; avoid N+1 queries in Control Room.
+### Phase E — Control Room Ribbon + Customization + Theming (NEW)
+> This phase turns the Control Room into a true shift-lead “command center”: availability + downtime at the exact hierarchy level people manage (line/section), plus personalization (sidebar order/colors) and proper white-label branding.
 
-**4.4 One round of end-to-end testing (testing agent)**
-- Validate consumption auto-decrements stock + transactions, CSV import preview correctness, admin CRUD integrity, large-list pagination.
+#### E1) Control Room KPI Ribbon v2 (Line/Section Availability + Downtime) (P0)
+**Requirements**
+- Primary ribbon shows:
+  - **Availability per Line**: PC21, PC32, PC36, KKR, TWZ, BCP, Packaging, Utilities.
+  - **Total downtime per Line** for selected window (shift/day/custom window).
+- Each Line entry is expandable to show:
+  - **Availability per Section/Process Group** within the line.
+  - **Total downtime per Section/Process Group** for same window.
+- Keep plant-wide aggregate counts (Machines/Running/Failed/Open BD/Open WO/etc.) as a **secondary collapsible strip**.
+- Time window is **configurable** (default = current shift or current day). Must be consistent across Control Room and Breakdown timestamps.
 
-**User stories (Phase 4):**
-1. As an Admin, I can import a CSV stock adjustment and see a preview of all changes before applying.
-2. As a Technician, when I record used spares on a breakdown close, inventory updates automatically and creates a transaction.
-3. As an Admin, I can search inventory instantly by SAP code/name/location.
-4. As an Admin, I can create/edit/retire spare locations without technicians changing the location list.
-5. As a user, I can open a machine and see its most-consumed spares and recent usage history.
+**Backend**
+- Add a new endpoint, e.g.:
+  - `GET /api/control-room/health-kpis?window=shift|day|hours&hours=8&tz=...`
+- Computations:
+  - **Downtime** = sum of breakdown downtime/repair time in window.
+  - **Availability** (practical v1):
+    - If runtime logs exist for window: availability = run_hours / calendar_hours.
+    - Else fallback: availability approximation from breakdown minutes within window (calendar - downtime) / calendar.
+- Grouping:
+  - by `line` and by `process_group` (aka section).
+- Add indexes if needed:
+  - `breakdowns(line, process_group, start_time)`
+  - `runtime_logs(line, machine_id, date)` (if used)
+
+**Frontend**
+- Replace the current top KPI strip in `ControlRoom.jsx`:
+  - New ribbon component: `LineAvailabilityRibbon` (expand/collapse lines; show mini cards)
+  - Time window selector: `Shift / Day / Last N hours`.
+  - Secondary collapsible strip for old plant aggregates.
+- UX details:
+  - Show availability as % with mono tabular numerals.
+  - Show downtime next to it (e.g. `92.4% · 1h 24m down`).
+  - Clicking a section optionally filters the twin to that line/section.
+
+**Exit Criteria**
+- Ribbon shows correct per-line and per-section figures for chosen window.
+- Expanding a line reveals process-group breakdown.
+- Secondary strip contains plant-wide totals and can be collapsed.
+
+#### E2) Sidebar Icon Customization (Per-user) (P0)
+**Requirements**
+- Sidebar icons support **user-assigned color** per icon.
+- Sidebar supports **drag-and-drop reorder**.
+- Persist these settings **per user**.
+
+**Backend**
+- Extend user document/preferences:
+  - `ui_prefs: { sidebar: { order: ["control_room", "breakdowns", ...], colors: { moduleKey: "#RRGGBB" } } }`
+- Endpoints:
+  - `GET /api/users/me/ui-prefs`
+  - `PUT /api/users/me/ui-prefs` (validate hex colors + module keys)
+
+**Frontend**
+- Update `Layout.jsx` sidebar:
+  - Add DnD (e.g., dnd-kit) for ordering.
+  - Add icon color picker (simple hex input or palette) per item.
+  - Load/save prefs on login.
+
+**Exit Criteria**
+- User reorders modules and chooses colors; refresh preserves order/colors.
+
+#### E3) Custom Branding: Admin Uploadable Logo + Hex Brand Color (P0)
+**Requirements**
+- Replace top-left hardcoded mark with admin-uploaded logo/icon.
+- Admin-configurable **brand accent color** via **hex input** (not preset).
+- Accent color drives:
+  - icons, buttons, borders, highlights, focus rings, charts where applicable.
+- Integrate under existing Administration Branding settings.
+
+**Backend**
+- Add settings collection fields:
+  - `branding.logo_url` (or stored file id)
+  - `branding.brand_hex` (validated)
+- Add upload endpoint:
+  - `POST /api/admin/branding/logo` (multipart upload)
+  - Store file under `/app/backend/uploads/` (or similar) and serve via static route.
+- Add settings endpoints if not present:
+  - `GET /api/admin/settings/branding`
+  - `PUT /api/admin/settings/branding`
+
+**Frontend**
+- Administration → Branding tab:
+  - Logo upload control + preview
+  - Brand hex input + live preview
+- App-wide theming:
+  - Set CSS variable `--primary` (or equivalent) from fetched branding settings.
+  - Ensure it applies to existing cyber classes.
+
+**Exit Criteria**
+- Uploading logo updates top-left immediately.
+- Changing brand hex updates accent across app without redeploy.
+
+#### E4) Outlined Buttons / Icon Border Styling Standardization (P1)
+**Requirements**
+- All buttons/icons become outlined (1px border, transparent interior) consistently across:
+  - nav icons
+  - filter pills
+  - action buttons
+
+**Implementation**
+- Add/adjust global utility classes:
+  - `.cyber-outline-btn`, `.cyber-outline-icon`
+- Update instances still using filled styles (including `cyber-primary` if needed) to outlined variants.
+- Ensure hover glow remains neon but fill stays transparent.
+
+**Exit Criteria**
+- Visual consistency across all modules; no “solid fill” outliers.
+
+#### E5) Theme Background: Pure Black Base (P1)
+**Requirements**
+- Replace near-black/blue-tinted backgrounds with **pure black** (#000000 or close as contrast allows).
+
+**Implementation**
+- Update CSS variables in `index.css`:
+  - base background and panel backgrounds to neutral black/near-black without blue undertone.
+  - keep borders readable and text contrast acceptable.
+- Re-screenshot key pages to confirm removal of blue tint.
+
+**Exit Criteria**
+- Base app background and panels read as true black.
+- Text remains readable; charts and borders remain visible.
 
 ---
 
 ## 3) Next Actions
-> All continuation-session phases are complete. No blocking work remains.
+> All earlier phases are complete. Next work is Phase E.
 
-### Phase A — Control Room fixes (P0) ✅ COMPLETED
-1. **Remove infinite zoom** in the Control Room Digital Twin:
-   - ✅ Removed `react-zoom-pan-pinch` usage from `ControlRoom.jsx`.
-   - ✅ No zoom controls; no zoom-to-infinity behavior.
-2. **Fix the Control Room canvas sizing** so users can **scroll vertically** to see all machines:
-   - ✅ Implemented fixed tile layout with `overflow-y: auto` container (`data-testid="digital-twin-scroll"`).
-3. **Replace Plant Runtime display with current wall-clock time**:
-   - ✅ Rewrote `PlantClock.jsx` to show **current actual time** with date + HH:MM:SS, updating every second.
+### Completed (Prior Iteration) ✅
+- Removed infinite zoom in Control Room; enabled vertical scroll.
+- Replaced plant runtime clock display with wall-clock time.
+- Applied Cyberpunk HUD styling across all modules.
+- Verified Breakdown → auto-create WO end-to-end.
+- Completed testing pass (`/app/test_reports/iteration_2.json`).
 
-### Phase B — Cyberpunk 2077 UI audit & application across ALL modules (P0) ✅ COMPLETED
-4. Screenshot & audit secondary modules:
-   - ✅ Audited: `/work-orders`, `/preventive-maintenance`, `/runtime`, `/analytics`, `/aws`, `/inventory`, `/administration`.
-5. Update all non-compliant tables/cards/forms:
-   - ✅ Applied 138 targeted replacements across pages/components.
-   - ✅ Converted traffic-light colors (red/green/blue/orange/yellow) and chart colors to neon cyberpunk palette:
-     - #ff2e63 (neon red), #05ffa1 (neon green), #f9f871 (neon yellow), #ff9e1c (neon amber), #00fff5 (neon cyan)
-   - ✅ Converted filter chips to chamfered mono HUD style.
-   - ✅ Converted panels to `cyber-panel` styling where appropriate.
-   - ✅ Verified **zero remnants** of old classes and clean frontend bundle compilation.
+### Phase E — Next Actions (New Work)
+**P0**
+1) Implement backend KPI aggregation endpoint for line/section availability + downtime with configurable time window.
+2) Build Control Room Ribbon v2 UI with expand/collapse per line + window selector; demote plant-wide counts into collapsible secondary strip.
+3) Implement per-user sidebar customization: drag-and-drop reorder + per-icon color; persist in user prefs.
+4) Implement admin branding: logo upload + brand hex accent; apply as dynamic CSS variables globally.
 
-### Phase C — E2E test: Breakdown → auto-create Work Order (P1) ✅ COMPLETED
-6. Create a Breakdown in UI/API with **auto-create work order** checked.
-7. Verify:
-   - ✅ Backend creates Corrective Work Order instantly.
-   - ✅ Status becomes **ASSIGNED** when a technician is available.
-   - ✅ Breakdown record links to WO and WO links back to breakdown.
-   - Evidence: **BD-00011 → WO-00006**, Corrective, ASSIGNED to `tech`, bidirectional links.
+**P1**
+5) Standardize outlined button/icon styling across the entire app.
+6) Update theme to pure black base; verify across all pages via screenshots.
 
-### Phase D — Full testing pass + fixes (P1) ✅ COMPLETED
-8. ✅ Ran testing agent pass (iteration_2).
-9. ✅ Fixed/verified regressions (UI consistency, routing, schema, time display) — none found.
-10. ✅ Produced updated test report: `/app/test_reports/iteration_2.json`.
-   - Backend: 100% pass
-   - Frontend: 95% pass
-   - Single LOW issue: Radix Select portal automation artifact (not user-facing).
+**Testing (after Phase E)**
+- Frontend: screenshot audit of Control Room ribbon expanded/collapsed states; sidebar reorder persistence; icon color persistence; logo and brand color propagation.
+- Backend: API tests for KPI endpoint correctness on known seeded data; prefs endpoints; branding endpoints.
 
 ## 4) Success Criteria
-- ✅ First boot: system is fully seeded (hierarchy, users, templates, spares) and **not empty**.
-- ✅ Control Room renders Digital Twin dynamically from hierarchy + layout positions.
-- ✅ Control Room UX is bounded:
-  - ✅ **No zoom** / no infinite scaling.
-  - ✅ Users can **scroll vertically** to reach all machines without uncontrolled scaling.
-- ✅ App displays **current actual wall-clock time** prominently for cross-referencing timestamps.
-- ✅ Real-time WS notifications and timeline eventing work end-to-end for key actions.
-- ✅ Maintenance flows function: reports→review→convert, breakdown lifecycle, WO creation/assignment, PM generation/completion, inventory consumption.
-- ✅ **Breakdown auto-create WO flow** is verified end-to-end.
-- ✅ Cyberpunk HUD aesthetic is consistent across **every** module (Control Room, Breakdowns, Work Orders, PM, Runtime, Analytics, AWS, Inventory, Admin).
-- ✅ App remains responsive with pagination/indexes and avoids obvious degradation patterns.
-
----
-
-## STATUS UPDATE (Current)
-- Phase 1 POC: **COMPLETE** (WS hub + event pipeline + persistence)
-- Phase 2 (Core app): **COMPLETE** — 194 machines seeded, Control Room Digital Twin, Machine Drawer (11 tabs), Reports/Breakdowns/WOs/PM, Timeline + WS Notifications
-- Phase 3 (Reliability/Predictive/Analytics): **COMPLETE**
-- Phase 4 (Spares/Admin): **COMPLETE**
-
-### Recent completed work (latest continuation session)
-- ✅ Control Room: removed pan/zoom wrapper; implemented fixed layout with vertical scrolling (`data-testid="digital-twin-scroll"`).
-- ✅ PlantClock: replaced runtime display with **wall-clock** date + HH:MM:SS (ticks every second).
-- ✅ Cyberpunk aesthetic: audited all modules and applied 138 targeted replacements; verified no traffic-light remnants; charts recolored to neon palette.
-- ✅ Breakdown auto-create WO: verified E2E via API (BD-00011 → WO-00006 ASSIGNED to tech).
-- ✅ Testing: iteration_2 test report generated; services healthy.
-
-### Known low-priority note
-- LOW: Automated test tooling may sometimes report Radix Select portal overlay pointer-event artifacts; not observed as a user-facing defect.
+- Control Room ribbon is **line-first**:
+  - Availability + downtime per line always visible.
+  - Expandable to section/process-group breakdown.
+  - Plant-wide totals available but demoted.
+- Sidebar supports per-user:
+  - icon colors
+  - drag-and-drop ordering
+  - persistence across refresh/login.
+- Branding supports admin:
+  - uploadable logo
+  - hex brand accent
+  - immediate visual propagation.
+- Buttons/icons are consistently outlined across the app.
+- Theme background is true black without blue undertone.
+- All changes validated by updated test report (Phase E test report).

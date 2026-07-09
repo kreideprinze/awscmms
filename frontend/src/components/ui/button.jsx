@@ -10,13 +10,13 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] font-semibold hover:brightness-110 hover:shadow-[0_0_14px_rgba(0,255,245,0.45)]",
+          "border border-[hsl(var(--primary))]/70 bg-transparent text-[hsl(var(--primary))] font-semibold hover:bg-[hsl(var(--primary))]/10 hover:border-[hsl(var(--primary))] hover:shadow-[0_0_12px_rgba(var(--accent-rgb),0.3)]",
         destructive:
-          "border border-[hsl(var(--neon-magenta))]/60 bg-[hsl(var(--neon-magenta))]/10 text-[hsl(var(--neon-magenta))] hover:bg-[hsl(var(--neon-magenta))]/20 hover:shadow-[0_0_14px_rgba(255,46,99,0.4)]",
+          "border border-[hsl(var(--neon-magenta))]/60 bg-transparent text-[hsl(var(--neon-magenta))] hover:bg-[hsl(var(--neon-magenta))]/10 hover:shadow-[0_0_14px_rgba(255,46,99,0.4)]",
         outline:
-          "border border-[hsl(var(--primary))]/40 bg-transparent text-foreground hover:border-[hsl(var(--primary))]/80 hover:text-[hsl(var(--primary))] hover:shadow-[0_0_12px_rgba(0,255,245,0.25)]",
+          "border border-[hsl(var(--primary))]/40 bg-transparent text-foreground hover:border-[hsl(var(--primary))]/80 hover:text-[hsl(var(--primary))] hover:shadow-[0_0_12px_rgba(var(--accent-rgb),0.25)]",
         secondary:
-          "bg-secondary text-secondary-foreground border border-border hover:border-[hsl(var(--primary))]/50 hover:shadow-[0_0_10px_rgba(0,255,245,0.2)]",
+          "border border-border bg-transparent text-secondary-foreground hover:border-[hsl(var(--primary))]/50 hover:shadow-[0_0_10px_rgba(var(--accent-rgb),0.2)]",
         ghost: "text-muted-foreground hover:bg-white/5 hover:text-foreground",
         link: "text-[hsl(var(--primary))] underline-offset-4 hover:underline normal-case tracking-normal",
       },

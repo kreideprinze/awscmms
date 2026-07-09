@@ -78,7 +78,7 @@ export default function AWSPage() {
       <div className="mb-4 flex gap-2">
         {HEALTH_FILTERS.map((h) => (
           <button key={h} data-testid={`aws-health-filter-${h}`} onClick={() => setHealth(h)}
-            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors capitalize ${health === h ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors capitalize ${health === h ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {h.replace('_', ' ')}
           </button>
         ))}

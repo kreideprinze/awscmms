@@ -144,7 +144,7 @@ export default function Runtime() {
             <div className="flex gap-2">
               <Button variant="outline" onClick={doPreview} data-testid="runtime-csv-preview" className="border-border bg-[hsl(var(--panel-2))]">Preview</Button>
               {preview && preview.errors.length === 0 && preview.valid_rows > 0 && (
-                <Button onClick={doApply} data-testid="runtime-csv-apply" className="bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25">Apply {preview.valid_rows} rows</Button>
+                <Button onClick={doApply} data-testid="runtime-csv-apply" className="border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10">Apply {preview.valid_rows} rows</Button>
               )}
             </div>
             {preview && (

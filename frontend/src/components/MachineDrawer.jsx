@@ -150,10 +150,10 @@ function ReportsTab({ machineId, machineName }) {
                     <SelectTrigger className="h-7 w-44 bg-[hsl(var(--panel-2))] text-xs"><SelectValue placeholder="Failure mode" /></SelectTrigger>
                     <SelectContent>{failureModes.map((f) => <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>)}</SelectContent>
                   </Select>
-                  <Button size="sm" className="h-7 bg-[#ff2e63]/15 text-xs text-[#ff2e63] hover:bg-[#ff2e63]/25" data-testid={`report-convert-confirm-${r.report_number}`} onClick={() => review(r.id, 'convert')}>Confirm Convert</Button>
+                  <Button size="sm" className="h-7 border border-[#ff2e63]/60 bg-transparent text-xs text-[#ff2e63] hover:bg-[#ff2e63]/10" data-testid={`report-convert-confirm-${r.report_number}`} onClick={() => review(r.id, 'convert')}>Confirm Convert</Button>
                 </>
               ) : (
-                <Button size="sm" className="h-7 bg-[#ff9e1c]/15 text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/25" data-testid={`report-convert-${r.report_number}`} onClick={() => setConvertId(r.id)}>Convert to Breakdown</Button>
+                <Button size="sm" className="h-7 border border-[#ff9e1c]/60 bg-transparent text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/10" data-testid={`report-convert-${r.report_number}`} onClick={() => setConvertId(r.id)}>Convert to Breakdown</Button>
               )}
             </div>
           )}
@@ -198,7 +198,7 @@ export function BreakdownActions({ bd, onDone, compact }) {
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={() => act({ action: 'start' })}>Start Repair</Button>
         )}
         {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(bd.status) && !closing && (
-          <Button size="sm" className="h-7 bg-[#05ffa1]/15 text-xs text-[#05ffa1] hover:bg-[#05ffa1]/25" data-testid={`bd-close-open-${bd.ticket_number}`} onClick={() => setClosing(true)}>Complete / Close</Button>
+          <Button size="sm" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`bd-close-open-${bd.ticket_number}`} onClick={() => setClosing(true)}>Complete / Close</Button>
         )}
         {bd.status === 'COMPLETED' && (
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-final-close-${bd.ticket_number}`} onClick={() => act({ action: 'close', action_taken: bd.action_taken, root_cause: bd.root_cause })}>Final Close</Button>
@@ -212,7 +212,7 @@ export function BreakdownActions({ bd, onDone, compact }) {
           <Textarea data-testid={`bd-action-taken-${bd.ticket_number}`} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} placeholder="e.g. Replaced bearing 6205 ZZ, realigned shaft" className="bg-[hsl(var(--panel-1))]" />
           <SpareRows rows={spares} setRows={setSpares} />
           <div className="flex gap-2">
-            <Button size="sm" data-testid={`bd-complete-confirm-${bd.ticket_number}`} className="bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25"
+            <Button size="sm" data-testid={`bd-complete-confirm-${bd.ticket_number}`} className="border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10"
               onClick={() => act({ action: 'complete', root_cause: rootCause || undefined, action_taken: actionTaken || undefined, consumed_spares: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })) })}>
               Confirm Complete
             </Button>
@@ -505,7 +505,7 @@ function ReliabilityTab({ machineId }) {
               <XAxis dataKey="t" tick={chartTheme.tick} label={{ value: 'hours', fill: 'rgba(229,231,235,0.5)', fontSize: 10, position: 'insideBottomRight' }} />
               <YAxis tick={chartTheme.tick} width={35} domain={[0, 1]} />
               <RTooltip contentStyle={chartTheme.tooltip} />
-              <Area type="monotone" dataKey="reliability" stroke="#00fff5" fill="rgba(0,255,245,0.12)" strokeWidth={2} />
+              <Area type="monotone" dataKey="reliability" stroke="#00fff5" fill="rgba(var(--accent-rgb),0.12)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -624,7 +624,7 @@ export function MachineDrawer() {
                 <TabsList className="h-auto w-full flex-wrap justify-start gap-0.5 bg-transparent p-1">
                   {TABS.map((t) => (
                     <TabsTrigger key={t} value={t} data-testid={`machine-detail-tab-${t.toLowerCase().replace(/\s+/g, '-')}`}
-                      className="rounded-md px-2.5 py-1 text-xs data-[state=active]:bg-[hsl(var(--primary))]/10 data-[state=active]:text-[hsl(var(--primary))]">
+                      className="rounded-md px-2.5 py-1 text-xs data-[state=active]:bg-transparent data-[state=active]:border data-[state=active]:border-[hsl(var(--primary))]/50 data-[state=active]:text-[hsl(var(--primary))]">
                       {t}
                     </TabsTrigger>
                   ))}
