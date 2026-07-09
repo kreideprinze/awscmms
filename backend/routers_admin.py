@@ -99,6 +99,8 @@ async def create_department(req: DeptCreate, user: dict = Depends(require_admin)
 
 @router.delete('/departments/{dept_id}')
 async def delete_department(dept_id: str, user: dict = Depends(require_admin)):
+    if not await db.departments.find_one({'id': dept_id}):
+        raise HTTPException(status_code=404, detail='Department not found')
     cnt = await db.machines.count_documents({'department_id': dept_id})
     if cnt:
         raise HTTPException(status_code=400, detail=f'Department has {cnt} machines; move them first')
@@ -128,6 +130,8 @@ async def create_line(req: LineCreate, user: dict = Depends(require_admin)):
 
 @router.delete('/lines/{line_id}')
 async def delete_line(line_id: str, user: dict = Depends(require_admin)):
+    if not await db.lines.find_one({'id': line_id}):
+        raise HTTPException(status_code=404, detail='Line not found')
     cnt = await db.machines.count_documents({'line_id': line_id})
     if cnt:
         raise HTTPException(status_code=400, detail=f'Line has {cnt} machines; move them first')
@@ -158,6 +162,8 @@ async def create_process_group(req: PGCreate, user: dict = Depends(require_admin
 
 @router.delete('/process-groups/{pg_id}')
 async def delete_process_group(pg_id: str, user: dict = Depends(require_admin)):
+    if not await db.process_groups.find_one({'id': pg_id}):
+        raise HTTPException(status_code=404, detail='Process group not found')
     cnt = await db.machines.count_documents({'process_group_id': pg_id})
     if cnt:
         raise HTTPException(status_code=400, detail=f'Process group has {cnt} machines; move them first')
@@ -228,6 +234,8 @@ async def update_machine(machine_id: str, req: MachineUpdate, user: dict = Depen
 
 @router.delete('/machines/{machine_id}')
 async def delete_machine(machine_id: str, user: dict = Depends(require_admin)):
+    if not await db.machines.find_one({'id': machine_id}):
+        raise HTTPException(status_code=404, detail='Machine not found')
     await db.machines.delete_one({'id': machine_id})
     await audit(user, 'delete', 'machine', machine_id)
     return {'ok': True}
