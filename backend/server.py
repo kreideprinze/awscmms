@@ -1,133 +1,48 @@
+"""Factory Operations Platform - main server assembly.
+FastAPI + Motor + JWT + WebSocket hub + PM background scheduler + first-startup seeding."""
+import asyncio
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
-from pydantic import BaseModel
+from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect, Query
 from starlette.middleware.cors import CORSMiddleware
 
 from database import db, client
-from auth import (hash_password, verify_password, create_token, decode_token,
-                  get_current_user, require_admin, require_admin_or_tech, require_any)
+from auth import decode_token
 from ws_manager import manager
-from events import create_timeline_event, create_notification, broadcast_machine_update, next_counter, now_iso
+from events import create_timeline_event, create_notification, next_counter, now_iso
+from seed import seed_all
+
+import routers_core
+import routers_maintenance
+import routers_ops
+import routers_spares
+import routers_admin
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title='Factory Operations Platform')
+app = FastAPI(title='Factory Operations Platform', version='1.0')
 api_router = APIRouter(prefix='/api')
 
-
-# ------------------ POC SEED (minimal) ------------------
-async def seed_poc():
-    if await db.users.count_documents({}) > 0:
-        return
-    users = [
-        {'id': str(uuid.uuid4()), 'username': 'admin', 'password': hash_password('admin123'), 'role': 'admin', 'name': 'System Admin', 'active': True, 'created_at': now_iso()},
-        {'id': str(uuid.uuid4()), 'username': 'tech', 'password': hash_password('tech123'), 'role': 'technician', 'name': 'Maintenance Tech', 'active': True, 'created_at': now_iso()},
-        {'id': str(uuid.uuid4()), 'username': 'operator', 'password': hash_password('operator123'), 'role': 'operator', 'name': 'Floor Operator', 'active': True, 'created_at': now_iso()},
-    ]
-    await db.users.insert_many(users)
-    machines = [
-        {'id': str(uuid.uuid4()), 'name': 'Main Oil Pump', 'code': 'PC21-FRY-002', 'department': 'PROCESS', 'line': 'PC21', 'process_group': 'Frying', 'status': 'running', 'health': 'healthy', 'criticality': 'high', 'created_at': now_iso()},
-        {'id': str(uuid.uuid4()), 'name': 'Fryer', 'code': 'PC21-FRY-001', 'department': 'PROCESS', 'line': 'PC21', 'process_group': 'Frying', 'status': 'running', 'health': 'healthy', 'criticality': 'critical', 'created_at': now_iso()},
-        {'id': str(uuid.uuid4()), 'name': 'Slicer 1', 'code': 'PC21-SLC-003', 'department': 'PROCESS', 'line': 'PC21', 'process_group': 'Slicing', 'status': 'idle', 'health': 'healthy', 'criticality': 'medium', 'created_at': now_iso()},
-    ]
-    await db.machines.insert_many(machines)
-    logger.info('POC seed complete: 3 users, 3 machines')
+api_router.include_router(routers_core.router, tags=['core'])
+api_router.include_router(routers_maintenance.router, tags=['maintenance'])
+api_router.include_router(routers_ops.router, tags=['ops'])
+api_router.include_router(routers_spares.router, tags=['spares'])
+api_router.include_router(routers_admin.router, tags=['admin'])
 
 
-@app.on_event('startup')
-async def startup():
-    await seed_poc()
+@api_router.get('/')
+async def root():
+    return {'app': 'Factory Operations Platform', 'status': 'online'}
 
 
-# ------------------ AUTH ------------------
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+app.include_router(api_router)
 
 
-@api_router.post('/auth/login')
-async def login(req: LoginRequest):
-    user = await db.users.find_one({'username': req.username}, {'_id': 0})
-    if not user or not verify_password(req.password, user['password']):
-        raise HTTPException(status_code=401, detail='Invalid username or password')
-    token = create_token(user)
-    return {'token': token, 'user': {'id': user['id'], 'username': user['username'], 'role': user['role'], 'name': user.get('name')}}
-
-
-@api_router.get('/auth/me')
-async def me(user: dict = Depends(get_current_user)):
-    return user
-
-
-# ------------------ MACHINES (POC) ------------------
-@api_router.get('/machines')
-async def list_machines(user: dict = Depends(get_current_user)):
-    return await db.machines.find({}, {'_id': 0}).to_list(10000)
-
-
-# ------------------ BREAKDOWNS (POC pipeline) ------------------
-class BreakdownCreate(BaseModel):
-    machine_id: str
-    description: str
-    failure_mode: str = 'Mechanical'
-
-
-@api_router.post('/breakdowns')
-async def create_breakdown(req: BreakdownCreate, user: dict = Depends(get_current_user)):
-    machine = await db.machines.find_one({'id': req.machine_id}, {'_id': 0})
-    if not machine:
-        raise HTTPException(status_code=404, detail='Machine not found')
-    ticket = await next_counter('breakdowns', 'BD')
-    bd = {
-        'id': str(uuid.uuid4()),
-        'ticket_number': ticket,
-        'machine_id': machine['id'],
-        'machine_name': machine['name'],
-        'department': machine['department'],
-        'line': machine['line'],
-        'failure_mode': req.failure_mode,
-        'description': req.description,
-        'reporter': user['username'],
-        'status': 'OPEN',
-        'start_time': now_iso(),
-        'end_time': None,
-        'downtime_minutes': None,
-        'created_at': now_iso(),
-    }
-    await db.breakdowns.insert_one(dict(bd))
-    # Update machine derived state
-    await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'failed'}})
-    machine['status'] = 'failed'
-    await broadcast_machine_update(machine)
-    # Timeline + notification
-    await create_timeline_event('breakdown_created', machine_id=machine['id'], machine_name=machine['name'],
-                                title=f"Breakdown {ticket} created", description=req.description,
-                                user=user['username'], reference_id=bd['id'], reference_type='breakdown',
-                                department=machine['department'], line=machine['line'])
-    await create_notification('breakdown', f"Breakdown: {machine['name']}",
-                              f"{ticket} — {req.description}", severity='critical',
-                              machine_id=machine['id'], machine_name=machine['name'],
-                              reference_id=bd['id'], reference_type='breakdown')
-    bd.pop('_id', None)
-    return bd
-
-
-@api_router.get('/timeline')
-async def get_timeline(user: dict = Depends(get_current_user)):
-    return await db.timeline_events.find({}, {'_id': 0}).sort('created_at', -1).to_list(100)
-
-
-@api_router.get('/notifications')
-async def get_notifications(user: dict = Depends(get_current_user)):
-    return await db.notifications.find({}, {'_id': 0}).sort('created_at', -1).to_list(100)
-
-
-# ------------------ WEBSOCKET ------------------
+# ---------------- WEBSOCKET ----------------
 @app.websocket('/api/ws')
 async def websocket_endpoint(ws: WebSocket, token: str = Query(None)):
     payload = decode_token(token) if token else None
@@ -138,14 +53,91 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(None)):
     await manager.connect(conn_id, ws)
     try:
         while True:
-            await ws.receive_text()  # keepalive / ignore client messages
+            await ws.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(conn_id)
     except Exception:
         await manager.disconnect(conn_id)
 
 
-app.include_router(api_router)
+# ---------------- PM SCHEDULER (background) ----------------
+FREQ_DAYS = {'daily': 1, 'weekly': 7, 'monthly': 30, 'quarterly': 91, 'yearly': 365, 'once': 0}
+
+
+async def pm_scheduler_tick():
+    today = datetime.now(timezone.utc).date()
+    today_str = today.isoformat()
+    # due tasks -> generate PM work orders
+    cursor = db.pm_tasks.find({'active': True, 'status': {'$in': ['active', 'suggested']}, 'next_due_date': {'$lte': today_str}}, {'_id': 0})
+    async for task in cursor:
+        if task.get('last_generated_date') == task.get('next_due_date'):
+            # already generated for this occurrence; check overdue notification
+            if task.get('next_due_date') < today_str and task.get('overdue_sent_for') != task.get('next_due_date'):
+                await db.pm_tasks.update_one({'id': task['id']}, {'$set': {'overdue_sent_for': task['next_due_date']}})
+                await create_notification('pm_overdue', f"PM OVERDUE: {task['machine_name']}",
+                                          f"\u201c{task['task_name']}\u201d was due {task['next_due_date']}", severity='critical',
+                                          machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                          reference_id=task['id'], reference_type='pm_task')
+            continue
+        wo_num = await next_counter('work_orders', 'WO')
+        wo = {
+            'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Preventive',
+            'title': f"PM: {task['task_name']}",
+            'description': task.get('description') or f"Scheduled {task.get('frequency')} PM",
+            'machine_id': task['machine_id'], 'machine_name': task['machine_name'],
+            'department': task.get('department'), 'line': task.get('line'),
+            'assigned_to': task.get('assigned_to'), 'priority': task.get('priority', 'medium'),
+            'status': 'ASSIGNED' if task.get('assigned_to') else 'OPEN',
+            'root_cause': None, 'action_taken': None, 'spare_parts': [],
+            'duration_minutes': None, 'source': 'pm_scheduler', 'pm_task_id': task['id'],
+            'checklist': task.get('checklist', []), 'auto_generated': True, 'created_at': now_iso(),
+        }
+        await db.work_orders.insert_one(dict(wo))
+        await db.pm_tasks.update_one({'id': task['id']}, {'$set': {'last_generated_date': task['next_due_date']}})
+        await create_timeline_event('pm_generated', machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                    title=f"PM WO {wo_num} generated: {task['task_name']}", user='scheduler',
+                                    reference_id=wo['id'], reference_type='work_order',
+                                    department=task.get('department'), line=task.get('line'))
+        await create_notification('pm_due', f"PM Due: {task['machine_name']}",
+                                  f"\u201c{task['task_name']}\u201d \u2014 WO {wo_num} generated", severity='warning',
+                                  machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                  reference_id=wo['id'], reference_type='work_order')
+    # reminders (due within reminder_offset_days)
+    cursor = db.pm_tasks.find({'active': True, 'status': 'active', 'next_due_date': {'$gt': today_str}}, {'_id': 0})
+    async for task in cursor:
+        try:
+            due = datetime.fromisoformat(task['next_due_date']).date()
+        except (ValueError, TypeError):
+            continue
+        offset = int(task.get('reminder_offset_days', 1) or 0)
+        if offset > 0 and (due - today).days <= offset and task.get('reminder_sent_for') != task['next_due_date']:
+            await db.pm_tasks.update_one({'id': task['id']}, {'$set': {'reminder_sent_for': task['next_due_date']}})
+            await create_notification('pm_due', f"PM Reminder: {task['machine_name']}",
+                                      f"\u201c{task['task_name']}\u201d due {task['next_due_date']}", severity='warning',
+                                      machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                      reference_id=task['id'], reference_type='pm_task')
+
+
+async def pm_scheduler_loop():
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await pm_scheduler_tick()
+        except Exception as e:
+            logger.error(f'PM scheduler error: {e}')
+        await asyncio.sleep(60)
+
+
+@app.on_event('startup')
+async def startup():
+    try:
+        seeded = await seed_all()
+        if seeded:
+            logger.info('First-startup seed completed')
+    except Exception as e:
+        logger.error(f'Seed error: {e}')
+    asyncio.create_task(pm_scheduler_loop())
+
 
 app.add_middleware(
     CORSMiddleware,
