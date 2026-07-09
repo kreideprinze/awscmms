@@ -124,11 +124,45 @@ export function TechnicianSelect({ value, onChange, testId = 'technician-select'
   );
 }
 
+// Animated numeric display: count-up on value change (cyberpunk data readout)
+export function AnimatedNumber({ value }) {
+  const str = value == null ? '—' : String(value);
+  const match = str.match(/^(-?\d+(?:\.\d+)?)(.*)$/);
+  const target = match ? parseFloat(match[1]) : null;
+  const suffix = match ? match[2] : '';
+  const decimals = match && match[1].includes('.') ? match[1].split('.')[1].length : 0;
+  const [display, setDisplay] = useState(target);
+  const prevRef = React.useRef(target);
+
+  useEffect(() => {
+    if (target == null) return undefined;
+    const from = prevRef.current == null || Number.isNaN(prevRef.current) ? 0 : prevRef.current;
+    prevRef.current = target;
+    if (from === target) { setDisplay(target); return undefined; }
+    const start = performance.now();
+    const dur = 450;
+    let raf;
+    const step = (t) => {
+      const p = Math.min((t - start) / dur, 1);
+      const eased = 1 - (1 - p) ** 3;
+      setDisplay(from + (target - from) * eased);
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+
+  if (target == null) return <>{str}</>;
+  return <>{Number(display ?? target).toFixed(decimals)}{suffix}</>;
+}
+
 export function KpiCard({ label, value, sub, accent, testId }) {
   return (
-    <div data-testid={testId} className="rounded-lg border border-border bg-[hsl(var(--panel-1))] px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${accent || ''}`}>{value ?? '—'}</div>
+    <div data-testid={testId} className="cyber-panel px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{label}</div>
+      <div className={`mt-1 font-mono text-2xl tabular-nums ${accent || ''}`}>
+        <AnimatedNumber value={value} />
+      </div>
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );

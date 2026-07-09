@@ -15,6 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge, HealthBadge, LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
 import { SpareRows, TechnicianSelect } from '@/components/Shared';
+import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 const TABS = ['Overview', 'Reports', 'Breakdowns', 'Work Orders', 'PM Tasks', 'Analytics', 'Timeline', 'Notes', 'Documents', 'Reliability', 'Spares'];
 
@@ -149,10 +150,10 @@ function ReportsTab({ machineId, machineName }) {
                     <SelectTrigger className="h-7 w-44 bg-[hsl(var(--panel-2))] text-xs"><SelectValue placeholder="Failure mode" /></SelectTrigger>
                     <SelectContent>{failureModes.map((f) => <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>)}</SelectContent>
                   </Select>
-                  <Button size="sm" className="h-7 bg-red-500/20 text-xs text-red-200 hover:bg-red-500/30" data-testid={`report-convert-confirm-${r.report_number}`} onClick={() => review(r.id, 'convert')}>Confirm Convert</Button>
+                  <Button size="sm" className="h-7 bg-[#ff2e63]/15 text-xs text-[#ff2e63] hover:bg-[#ff2e63]/25" data-testid={`report-convert-confirm-${r.report_number}`} onClick={() => review(r.id, 'convert')}>Confirm Convert</Button>
                 </>
               ) : (
-                <Button size="sm" className="h-7 bg-orange-500/20 text-xs text-orange-200 hover:bg-orange-500/30" data-testid={`report-convert-${r.report_number}`} onClick={() => setConvertId(r.id)}>Convert to Breakdown</Button>
+                <Button size="sm" className="h-7 bg-[#ff9e1c]/15 text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/25" data-testid={`report-convert-${r.report_number}`} onClick={() => setConvertId(r.id)}>Convert to Breakdown</Button>
               )}
             </div>
           )}
@@ -197,7 +198,7 @@ export function BreakdownActions({ bd, onDone, compact }) {
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={() => act({ action: 'start' })}>Start Repair</Button>
         )}
         {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(bd.status) && !closing && (
-          <Button size="sm" className="h-7 bg-green-500/20 text-xs text-green-200 hover:bg-green-500/30" data-testid={`bd-close-open-${bd.ticket_number}`} onClick={() => setClosing(true)}>Complete / Close</Button>
+          <Button size="sm" className="h-7 bg-[#05ffa1]/15 text-xs text-[#05ffa1] hover:bg-[#05ffa1]/25" data-testid={`bd-close-open-${bd.ticket_number}`} onClick={() => setClosing(true)}>Complete / Close</Button>
         )}
         {bd.status === 'COMPLETED' && (
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-final-close-${bd.ticket_number}`} onClick={() => act({ action: 'close', action_taken: bd.action_taken, root_cause: bd.root_cause })}>Final Close</Button>
@@ -211,7 +212,7 @@ export function BreakdownActions({ bd, onDone, compact }) {
           <Textarea data-testid={`bd-action-taken-${bd.ticket_number}`} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} placeholder="e.g. Replaced bearing 6205 ZZ, realigned shaft" className="bg-[hsl(var(--panel-1))]" />
           <SpareRows rows={spares} setRows={setSpares} />
           <div className="flex gap-2">
-            <Button size="sm" data-testid={`bd-complete-confirm-${bd.ticket_number}`} className="bg-green-500/20 text-green-200 hover:bg-green-500/30"
+            <Button size="sm" data-testid={`bd-complete-confirm-${bd.ticket_number}`} className="bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25"
               onClick={() => act({ action: 'complete', root_cause: rootCause || undefined, action_taken: actionTaken || undefined, consumed_spares: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })) })}>
               Confirm Complete
             </Button>
@@ -223,48 +224,31 @@ export function BreakdownActions({ bd, onDone, compact }) {
   );
 }
 
-function BreakdownsTab({ machineId }) {
+function BreakdownsTab({ machineId, machine }) {
   const [items, setItems] = useState([]);
-  const [failureModes, setFailureModes] = useState([]);
-  const [mode, setMode] = useState('');
-  const [desc, setDesc] = useState('');
+  const [reportOpen, setReportOpen] = useState(false);
 
   const load = useCallback(() => {
     api.get(`/breakdowns?machine_id=${machineId}`).then((r) => setItems(r.data.items));
-    api.get('/failure-modes').then((r) => setFailureModes(r.data));
   }, [machineId]);
   useEffect(() => { load(); }, [load]);
 
-  const create = async () => {
-    if (!mode || !desc) { toast.error('Select failure mode and describe the breakdown'); return; }
-    try {
-      await api.post('/breakdowns', { machine_id: machineId, failure_mode: mode, description: desc });
-      toast.success('Breakdown reported');
-      setDesc(''); setMode('');
-      load();
-    } catch (e) { toast.error(errMsg(e)); }
-  };
-
   return (
     <div className="space-y-4">
-      <div className="space-y-2 rounded-lg border border-red-500/20 bg-red-500/5 p-3">
-        <div className="text-xs font-semibold uppercase tracking-widest text-red-300">Report breakdown</div>
-        <Select value={mode} onValueChange={setMode}>
-          <SelectTrigger data-testid="bd-failure-mode-select" className="bg-[hsl(var(--panel-1))]"><SelectValue placeholder="Failure mode" /></SelectTrigger>
-          <SelectContent>{failureModes.map((f) => <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>)}</SelectContent>
-        </Select>
-        <Textarea data-testid="bd-description-input" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="What happened?" className="bg-[hsl(var(--panel-1))]" />
-        <Button size="sm" onClick={create} data-testid="bd-create-button" className="bg-red-500/20 text-red-200 hover:bg-red-500/30">Report Breakdown</Button>
-      </div>
+      <Button data-testid="drawer-report-breakdown-button" onClick={() => setReportOpen(true)}
+        className="w-full border border-[#ff2e63]/60 bg-[#ff2e63]/10 text-[#ff2e63] hover:bg-[#ff2e63]/20 hover:shadow-[0_0_14px_rgba(255,46,99,0.4)]">
+        Report Breakdown
+      </Button>
+      <ReportBreakdownDialog open={reportOpen} setOpen={setReportOpen} prefillMachine={machine} onCreated={load} />
       {items.length === 0 ? <Empty text="No breakdowns recorded" /> : items.map((bd) => (
         <div key={bd.id} className="rounded-md border border-border bg-[hsl(var(--panel-1))] p-3" data-testid={`bd-item-${bd.ticket_number}`}>
           <div className="flex items-center justify-between">
-            <span className="font-mono text-xs text-[hsl(var(--primary))]">{bd.ticket_number}</span>
+            <span className="font-mono text-xs text-[hsl(var(--primary))]">{bd.ticket_number} {bd.breakdown_type ? `· ${bd.breakdown_type.replace('_', ' ')}` : ''}</span>
             <LifecycleBadge status={bd.status} />
           </div>
           <div className="mt-1 text-sm">{bd.failure_mode}: {bd.description}</div>
           <div className="mt-1 text-[11px] text-muted-foreground">
-            {fmtDate(bd.start_time)} {bd.downtime_minutes != null && `· downtime ${Math.round(bd.downtime_minutes)} min`} {bd.assigned_to && `· ${bd.assigned_to}`}
+            {fmtDate(bd.start_time)} {bd.downtime_minutes != null && `· downtime ${Math.round(bd.downtime_minutes)} min`} {bd.assigned_to && `· ${bd.assigned_to}`} {bd.work_order_number && `· WO ${bd.work_order_number}`}
           </div>
           {bd.root_cause && <div className="mt-1 text-[11px]"><span className="text-muted-foreground">Root cause:</span> {bd.root_cause}</div>}
           <BreakdownActions bd={bd} onDone={load} />
@@ -315,7 +299,7 @@ function PMTab({ machineId }) {
         <div key={t.id} className="rounded-md border border-border bg-[hsl(var(--panel-1))] p-3">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">{t.task_name}</span>
-            <span className={`text-xs ${t.next_due_date < today ? 'text-red-400' : 'text-muted-foreground'}`}>due {t.next_due_date}</span>
+            <span className={`text-xs ${t.next_due_date < today ? 'text-[#ff2e63]' : 'text-muted-foreground'}`}>due {t.next_due_date}</span>
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">{t.frequency} · {t.priority} · {t.assigned_to || 'unassigned'} {t.source === 'predictive' && '· auto-suggested'}</div>
           {t.checklist?.length > 0 && <div className="mt-1 text-[11px] text-muted-foreground">Checklist: {t.checklist.join(' · ')}</div>}
@@ -359,7 +343,7 @@ function AnalyticsTab({ machineId }) {
               <XAxis dataKey="month" tick={chartTheme.tick} />
               <YAxis tick={chartTheme.tick} width={30} />
               <RTooltip contentStyle={chartTheme.tooltip} />
-              <Bar dataKey="downtime_hours" fill="hsl(0 84% 58%)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="downtime_hours" fill="#ff2e63" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -502,7 +486,7 @@ function ReliabilityTab({ machineId }) {
         </div>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-[hsl(var(--panel-3))]">
-        <div className={`h-full ${m.life_pct >= 100 ? 'bg-red-500' : m.life_pct >= 80 ? 'bg-orange-500' : m.life_pct >= 70 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(m.life_pct, 100)}%` }} />
+        <div className={`h-full ${m.life_pct >= 100 ? 'bg-[#ff2e63]' : m.life_pct >= 80 ? 'bg-[#ff9e1c]' : m.life_pct >= 70 ? 'bg-[#f9f871]' : 'bg-[#05ffa1]'}`} style={{ width: `${Math.min(m.life_pct, 100)}%` }} />
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border bg-[hsl(var(--panel-1))] p-3">
         {rows.map(([k, v]) => (
@@ -521,7 +505,7 @@ function ReliabilityTab({ machineId }) {
               <XAxis dataKey="t" tick={chartTheme.tick} label={{ value: 'hours', fill: 'rgba(229,231,235,0.5)', fontSize: 10, position: 'insideBottomRight' }} />
               <YAxis tick={chartTheme.tick} width={35} domain={[0, 1]} />
               <RTooltip contentStyle={chartTheme.tooltip} />
-              <Area type="monotone" dataKey="reliability" stroke="hsl(205 100% 58%)" fill="rgba(46,168,255,0.15)" strokeWidth={2} />
+              <Area type="monotone" dataKey="reliability" stroke="#00fff5" fill="rgba(0,255,245,0.12)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -563,7 +547,7 @@ function SparesTab({ machineId }) {
                   <span className="font-mono text-xs text-[hsl(var(--primary))]">{r.sap_code}</span>
                   <span className="ml-2 text-sm">{r.material_name}</span>
                 </div>
-                <div className="text-xs text-muted-foreground">{r.location} · stock <span className={r.quantity > 0 ? 'text-green-400' : 'text-red-400'}>{r.quantity}</span></div>
+                <div className="text-xs text-muted-foreground">{r.location} · stock <span className={r.quantity > 0 ? 'text-[#05ffa1]' : 'text-[#ff2e63]'}>{r.quantity}</span></div>
               </div>
             ))}
           </div>
@@ -640,7 +624,7 @@ export function MachineDrawer() {
                 <TabsList className="h-auto w-full flex-wrap justify-start gap-0.5 bg-transparent p-1">
                   {TABS.map((t) => (
                     <TabsTrigger key={t} value={t} data-testid={`machine-detail-tab-${t.toLowerCase().replace(/\s+/g, '-')}`}
-                      className="rounded-md px-2.5 py-1 text-xs data-[state=active]:bg-[rgba(46,168,255,0.12)] data-[state=active]:text-[hsl(var(--primary))]">
+                      className="rounded-md px-2.5 py-1 text-xs data-[state=active]:bg-[hsl(var(--primary))]/10 data-[state=active]:text-[hsl(var(--primary))]">
                       {t}
                     </TabsTrigger>
                   ))}
@@ -650,7 +634,7 @@ export function MachineDrawer() {
                 <div className="p-5">
                   {tab === 'Overview' && <OverviewTab detail={detail} reload={reload} />}
                   {tab === 'Reports' && <ReportsTab machineId={m.id} machineName={m.name} />}
-                  {tab === 'Breakdowns' && <BreakdownsTab machineId={m.id} />}
+                  {tab === 'Breakdowns' && <BreakdownsTab machineId={m.id} machine={m} />}
                   {tab === 'Work Orders' && <WorkOrdersTab machineId={m.id} />}
                   {tab === 'PM Tasks' && <PMTab machineId={m.id} />}
                   {tab === 'Analytics' && <AnalyticsTab machineId={m.id} />}

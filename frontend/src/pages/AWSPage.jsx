@@ -57,7 +57,7 @@ export default function AWSPage() {
     <div className="p-6" data-testid="aws-page">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Siren className="h-6 w-6 text-orange-400" /> AWS — Advance Warning System</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Siren className="h-6 w-6 text-[#ff9e1c]" /> AWS — Advance Warning System</h1>
           <p className="text-sm text-muted-foreground">Statistical reliability engineering (MTBF → Weighted MTBF → Weibull) — not AI. Calculations begin after the first breakdown.</p>
         </div>
         {isAdmin && (
@@ -69,22 +69,22 @@ export default function AWSPage() {
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
         <KpiCard testId="aws-kpi-tracked" label="Machines Tracked" value={metrics.length} />
-        <KpiCard testId="aws-kpi-watch" label="Watch (70–80%)" value={counts.watch} accent={counts.watch ? 'text-yellow-400' : ''} />
-        <KpiCard testId="aws-kpi-inspection" label="Inspection Due (80–100%)" value={counts.inspection} accent={counts.inspection ? 'text-orange-400' : ''} />
-        <KpiCard testId="aws-kpi-overdue" label="Overdue (100%+)" value={counts.overdue} accent={counts.overdue ? 'text-red-400' : ''} />
+        <KpiCard testId="aws-kpi-watch" label="Watch (70–80%)" value={counts.watch} accent={counts.watch ? 'text-[#f9f871]' : ''} />
+        <KpiCard testId="aws-kpi-inspection" label="Inspection Due (80–100%)" value={counts.inspection} accent={counts.inspection ? 'text-[#ff9e1c]' : ''} />
+        <KpiCard testId="aws-kpi-overdue" label="Overdue (100%+)" value={counts.overdue} accent={counts.overdue ? 'text-[#ff2e63]' : ''} />
         <KpiCard testId="aws-kpi-weibull" label="Weibull Active (L3)" value={counts.weibull} accent="text-[hsl(var(--primary))]" />
       </div>
 
       <div className="mb-4 flex gap-2">
         {HEALTH_FILTERS.map((h) => (
           <button key={h} data-testid={`aws-health-filter-${h}`} onClick={() => setHealth(h)}
-            className={`rounded-full border px-3 py-1 text-xs capitalize ${health === h ? 'border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.12)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors capitalize ${health === h ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {h.replace('_', ' ')}
           </button>
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
+      <div className="overflow-hidden border border-border">
         <Table data-testid="aws-metrics-table">
           <TableHeader>
             <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
@@ -117,7 +117,7 @@ export default function AWSPage() {
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[hsl(var(--panel-3))]">
-                      <div className={`h-full ${m.life_pct >= 100 ? 'bg-red-500' : m.life_pct >= 80 ? 'bg-orange-500' : m.life_pct >= 70 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(m.life_pct, 100)}%` }} />
+                      <div className={`h-full ${m.life_pct >= 100 ? 'bg-[#ff2e63]' : m.life_pct >= 80 ? 'bg-[#ff9e1c]' : m.life_pct >= 70 ? 'bg-[#f9f871]' : 'bg-[#05ffa1]'}`} style={{ width: `${Math.min(m.life_pct, 100)}%` }} />
                     </div>
                     <span className="tabular-nums text-xs">{m.life_pct}%</span>
                   </div>
@@ -131,7 +131,7 @@ export default function AWSPage() {
       </div>
 
       {isAdmin && settings && (
-        <div className="mt-6 rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4" data-testid="aws-settings-panel">
+        <div className="mt-6 cyber-panel p-4" data-testid="aws-settings-panel">
           <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Reliability Rules (Admin)</div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[['healthy_threshold_pct', 'Healthy < %'], ['watch_threshold_pct', 'Watch < %'], ['alert_trigger_pct', 'Alert Trigger %'], ['root_cause_downtime_minutes', 'Root Cause > min'],

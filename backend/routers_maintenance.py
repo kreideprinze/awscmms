@@ -21,28 +21,40 @@ class SpareUse(BaseModel):
 
 
 # ============ BREAKDOWNS ============
+BREAKDOWN_TYPES = ['MECHANICAL', 'ELECTRICAL', 'CONTROL_PLC']
+
+
 class BreakdownCreate(BaseModel):
     machine_id: str
     description: str
-    failure_mode: str
+    failure_mode: Optional[str] = None
+    breakdown_type: str = 'MECHANICAL'
+    reporter_name: Optional[str] = None
+    auto_create_work_order: bool = True
     start_time: Optional[str] = None
 
 
-async def _create_breakdown_internal(machine_id: str, description: str, failure_mode: str, reporter: str, start_time: str = None):
+async def _create_breakdown_internal(machine_id: str, description: str, failure_mode: str, reporter: str,
+                                     start_time: str = None, breakdown_type: str = 'MECHANICAL',
+                                     auto_create_work_order: bool = True):
     machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
+    if breakdown_type not in BREAKDOWN_TYPES:
+        raise HTTPException(status_code=400, detail=f'Invalid breakdown_type. Valid: {BREAKDOWN_TYPES}')
     ticket = await next_counter('breakdowns', 'BD')
     bd = {
         'id': str(uuid.uuid4()), 'ticket_number': ticket,
         'machine_id': machine['id'], 'machine_name': machine['name'],
         'department': machine['department'], 'line': machine['line'], 'process_group': machine.get('process_group'),
-        'failure_mode': failure_mode, 'description': description, 'reporter': reporter,
+        'failure_mode': failure_mode or breakdown_type.replace('_', ' ').title(),
+        'breakdown_type': breakdown_type,
+        'description': description, 'reporter': reporter,
         'status': 'OPEN', 'assigned_to': None,
         'start_time': start_time or now_iso(), 'end_time': None,
         'downtime_minutes': None, 'repair_duration_minutes': None,
         'root_cause': None, 'action_taken': None, 'consumed_spares': [],
-        'rca_task_id': None, 'created_at': now_iso(),
+        'rca_task_id': None, 'work_order_id': None, 'created_at': now_iso(),
     }
     await db.breakdowns.insert_one(dict(bd))
     await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'failed'}})
@@ -55,16 +67,48 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
     severity = 'critical'
     notif_type = 'critical_failure' if machine.get('criticality') == 'critical' else 'breakdown'
     title = f"CRITICAL FAILURE: {machine['name']}" if notif_type == 'critical_failure' else f"Breakdown: {machine['name']}"
-    await create_notification(notif_type, title, f"{ticket} \u2014 {failure_mode}: {description}", severity=severity,
+    await create_notification(notif_type, title, f"{ticket} \u2014 [{breakdown_type}] {bd['failure_mode']}: {description}", severity=severity,
                               machine_id=machine['id'], machine_name=machine['name'],
                               reference_id=bd['id'], reference_type='breakdown')
+
+    # Auto-dispatch a Corrective Work Order to maintenance immediately
+    if auto_create_work_order:
+        tech = await db.users.find_one({'role': 'technician', 'active': True}, {'_id': 0, 'username': 1})
+        assigned = tech['username'] if tech else None
+        wo_num = await next_counter('work_orders', 'WO')
+        wo = {
+            'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Corrective',
+            'title': f"Corrective \u2014 {machine['name']} ({ticket})",
+            'description': f"Auto-dispatched from breakdown {ticket} [{breakdown_type}]: {description}",
+            'machine_id': machine['id'], 'machine_name': machine['name'],
+            'department': machine['department'], 'line': machine['line'],
+            'assigned_to': assigned, 'priority': 'critical' if machine.get('criticality') == 'critical' else 'high',
+            'status': 'ASSIGNED' if assigned else 'OPEN',
+            'root_cause': None, 'action_taken': None, 'spare_parts': [],
+            'duration_minutes': None, 'source': 'breakdown_auto', 'source_breakdown_id': bd['id'],
+            'auto_generated': True, 'created_at': now_iso(),
+        }
+        await db.work_orders.insert_one(dict(wo))
+        await db.breakdowns.update_one({'id': bd['id']}, {'$set': {'work_order_id': wo['id'], 'work_order_number': wo_num}})
+        bd['work_order_id'] = wo['id']
+        bd['work_order_number'] = wo_num
+        await create_notification('work_order', f"Maintenance Dispatched: {machine['name']}",
+                                  f"{wo_num} auto-created from {ticket}" + (f" \u2014 assigned to {assigned}" if assigned else ''),
+                                  severity='warning', machine_id=machine['id'], machine_name=machine['name'],
+                                  reference_id=wo['id'], reference_type='work_order')
+        await create_timeline_event('wo_created', machine_id=machine['id'], machine_name=machine['name'],
+                                    title=f"WO {wo_num} auto-dispatched to maintenance", user='system',
+                                    reference_id=wo['id'], reference_type='work_order',
+                                    department=machine['department'], line=machine['line'])
     bd.pop('_id', None)
     return bd
 
 
 @router.post('/breakdowns')
 async def create_breakdown(req: BreakdownCreate, user: dict = Depends(get_current_user)):
-    return await _create_breakdown_internal(req.machine_id, req.description, req.failure_mode, user['username'], req.start_time)
+    reporter = req.reporter_name or user['username']
+    return await _create_breakdown_internal(req.machine_id, req.description, req.failure_mode, reporter,
+                                            req.start_time, req.breakdown_type, req.auto_create_work_order)
 
 
 @router.get('/breakdowns')

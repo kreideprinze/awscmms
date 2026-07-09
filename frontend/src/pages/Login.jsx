@@ -33,11 +33,11 @@ export default function Login() {
     <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
       <div
         className="pointer-events-none absolute inset-0"
-        style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(46,168,255,0.10), transparent 60%), radial-gradient(700px 420px at 80% 0%, rgba(34,197,94,0.06), transparent 55%)' }}
+        style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(0,255,245,0.08), transparent 60%), radial-gradient(700px 420px at 80% 0%, rgba(255,46,99,0.05), transparent 55%)' }}
       />
       <div className="relative w-full max-w-md rounded-xl border border-border bg-[hsl(var(--panel-1))] p-8">
         <div className="mb-8 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[hsl(var(--primary))]/30 bg-[rgba(46,168,255,0.10)]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/10">
             <Factory className="h-6 w-6 text-[hsl(var(--primary))]" />
           </div>
           <div>
@@ -54,8 +54,8 @@ export default function Login() {
             <Label htmlFor="password">Password</Label>
             <Input id="password" data-testid="login-password-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" required className="bg-[hsl(var(--panel-2))]" />
           </div>
-          {error && <div data-testid="login-error" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
-          <Button type="submit" data-testid="login-submit-button" disabled={loading} className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[rgba(46,168,255,0.9)]">
+          {error && <div data-testid="login-error" className="rounded-md border border-[#ff2e63]/40 bg-[#ff2e63]/10 px-3 py-2 text-sm text-[#ff2e63]">{error}</div>}
+          <Button type="submit" data-testid="login-submit-button" disabled={loading} className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign in to Control Room'}
           </Button>
         </form>

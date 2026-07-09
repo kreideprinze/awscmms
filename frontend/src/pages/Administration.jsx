@@ -14,7 +14,7 @@ import { fmtDate } from '@/components/StatusBits';
 
 function Section({ title, children, action }) {
   return (
-    <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+    <div className="cyber-panel p-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{title}</div>
         {action}
@@ -224,7 +224,7 @@ function UsersTab() {
               <TableCell className="text-xs uppercase text-[hsl(var(--primary))]">{u.role}</TableCell>
               <TableCell className="text-xs">{u.active ? 'Yes' : 'No'}</TableCell>
               <TableCell>
-                {u.active && <Button size="sm" variant="ghost" className="h-6 text-[10px] text-red-300" onClick={async () => { try { await api.delete(`/users/${u.id}`); toast.success('User deactivated'); load(); } catch (e) { toast.error(errMsg(e)); } }}>Deactivate</Button>}
+                {u.active && <Button size="sm" variant="ghost" className="h-6 text-[10px] text-[#ff2e63]" onClick={async () => { try { await api.delete(`/users/${u.id}`); toast.success('User deactivated'); load(); } catch (e) { toast.error(errMsg(e)); } }}>Deactivate</Button>}
               </TableCell>
             </TableRow>
           ))}
@@ -300,7 +300,7 @@ function CatalogsTab() {
           {locations.map((l) => (
             <div key={l.id} className="flex items-center justify-between border-b border-border/50 py-1 text-sm">
               <span className={l.active ? '' : 'line-through text-muted-foreground'}>{l.name}</span>
-              {l.active && <Button size="sm" variant="ghost" className="h-6 text-[10px] text-red-300" onClick={() => call(() => api.put(`/spare-locations/${l.id}`, { active: false }), 'Location retired')}>Retire</Button>}
+              {l.active && <Button size="sm" variant="ghost" className="h-6 text-[10px] text-[#ff2e63]" onClick={() => call(() => api.put(`/spare-locations/${l.id}`, { active: false }), 'Location retired')}>Retire</Button>}
             </div>
           ))}
         </div>

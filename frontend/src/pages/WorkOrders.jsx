@@ -59,7 +59,7 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
           <div><Label className="text-xs">Root Cause (optional)</Label><Textarea data-testid="wo-complete-root-cause" value={rootCause} onChange={(e) => setRootCause(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
           <div><Label className="text-xs">Action Taken</Label><Textarea data-testid="wo-complete-action-taken" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
           <SpareRows rows={spares} setRows={setSpares} />
-          <Button onClick={submit} data-testid="wo-complete-confirm" className="w-full bg-green-500/20 text-green-200 hover:bg-green-500/30">Complete Work Order</Button>
+          <Button onClick={submit} data-testid="wo-complete-confirm" className="w-full bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25">Complete Work Order</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -115,7 +115,7 @@ export default function WorkOrders() {
       <div className="mt-1 text-[10px] text-muted-foreground">{wo.wo_type} · {wo.assigned_to || 'unassigned'} · {fmtDate(wo.created_at)}</div>
       <div className="mt-2 flex flex-wrap gap-1">
         {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" onClick={() => act(wo, 'start')}>Start</Button>}
-        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 bg-green-500/20 text-[10px] text-green-200 hover:bg-green-500/30" onClick={() => { setCompleteWo(wo); setCompleteOpen(true); }}>Complete</Button>}
+        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 bg-[#05ffa1]/15 text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/25" onClick={() => { setCompleteWo(wo); setCompleteOpen(true); }}>Complete</Button>}
         {wo.status === 'COMPLETED' && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" onClick={() => act(wo, 'close')}>Close</Button>}
       </div>
     </div>
@@ -141,14 +141,14 @@ export default function WorkOrders() {
       <div className="mb-4 flex flex-wrap gap-2">
         {['all', ...LIFE].map((s) => (
           <button key={s} onClick={() => setStatus(s)} data-testid={`wo-filter-${s}`}
-            className={`rounded-full border px-3 py-1 text-xs ${status === s ? 'border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.12)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${status === s ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {s === 'all' ? 'All' : s}
           </button>
         ))}
         <span className="mx-1 text-border">|</span>
         {TYPES.map((t) => (
           <button key={t} onClick={() => setWoType(t)} data-testid={`wo-type-filter-${t}`}
-            className={`rounded-md border px-3 py-1 text-xs ${woType === t ? 'border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.12)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${woType === t ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {t === 'all' ? 'All Types' : t}
           </button>
         ))}
@@ -170,7 +170,7 @@ export default function WorkOrders() {
           ))}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <div className="overflow-hidden border border-border">
           <Table data-testid="work-orders-table">
             <TableHeader>
               <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
@@ -200,7 +200,7 @@ export default function WorkOrders() {
                   <TableCell>
                     <div className="flex gap-1">
                       {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" data-testid={`wo-start-${wo.wo_number}`} onClick={() => act(wo, 'start')}>Start</Button>}
-                      {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 bg-green-500/20 text-[10px] text-green-200 hover:bg-green-500/30" data-testid={`wo-complete-${wo.wo_number}`} onClick={() => { setCompleteWo(wo); setCompleteOpen(true); }}>Complete</Button>}
+                      {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 bg-[#05ffa1]/15 text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/25" data-testid={`wo-complete-${wo.wo_number}`} onClick={() => { setCompleteWo(wo); setCompleteOpen(true); }}>Complete</Button>}
                       {wo.status === 'COMPLETED' && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" data-testid={`wo-close-${wo.wo_number}`} onClick={() => act(wo, 'close')}>Close</Button>}
                     </div>
                   </TableCell>

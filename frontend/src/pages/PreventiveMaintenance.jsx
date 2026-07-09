@@ -53,7 +53,7 @@ function CompletePMDialog({ task, open, setOpen, onDone }) {
           )}
           <div><Label className="text-xs">Remarks / Action Taken</Label><Textarea data-testid="pm-complete-remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
           <SpareRows rows={spares} setRows={setSpares} />
-          <Button onClick={submit} data-testid="pm-complete-confirm" className="w-full bg-green-500/20 text-green-200 hover:bg-green-500/30">Complete PM Task</Button>
+          <Button onClick={submit} data-testid="pm-complete-confirm" className="w-full bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25">Complete PM Task</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -116,21 +116,21 @@ export default function PreventiveMaintenance() {
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <KpiCard testId="pm-kpi-total" label="Active Tasks" value={data.items.filter((t) => t.active).length} />
-        <KpiCard testId="pm-kpi-overdue" label="Overdue" value={overdueCnt} accent={overdueCnt ? 'text-red-400' : ''} />
-        <KpiCard testId="pm-kpi-suggested" label="Predictive Suggestions" value={data.items.filter((t) => t.source === 'predictive').length} accent="text-orange-300" />
+        <KpiCard testId="pm-kpi-overdue" label="Overdue" value={overdueCnt} accent={overdueCnt ? 'text-[#ff2e63]' : ''} />
+        <KpiCard testId="pm-kpi-suggested" label="Predictive Suggestions" value={data.items.filter((t) => t.source === 'predictive').length} accent="text-[#ff9e1c]" />
         <KpiCard testId="pm-kpi-due-week" label="Due in 7 days" value={data.items.filter((t) => t.active && t.next_due_date >= today && new Date(t.next_due_date) - new Date(today) <= 7 * 864e5).length} />
       </div>
 
       <div className="mb-4 flex gap-2">
         {['all', 'overdue'].map((f) => (
           <button key={f} onClick={() => setFilter(f)} data-testid={`pm-filter-${f}`}
-            className={`rounded-full border px-3 py-1 text-xs capitalize ${filter === f ? 'border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.12)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors capitalize ${filter === f ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {f}
           </button>
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
+      <div className="overflow-hidden border border-border">
         <Table data-testid="pm-table">
           <TableHeader>
             <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
@@ -148,17 +148,17 @@ export default function PreventiveMaintenance() {
             {data.items.map((t) => (
               <TableRow key={t.id} data-testid={`pm-row-${t.id}`} className="border-border hover:bg-white/[0.03]">
                 <TableCell>
-                  <div className="text-sm font-medium">{t.task_name} {t.source === 'predictive' && <span className="ml-1 rounded bg-orange-500/15 px-1 text-[9px] uppercase text-orange-300">AWS</span>}</div>
+                  <div className="text-sm font-medium">{t.task_name} {t.source === 'predictive' && <span className="ml-1 rounded bg-[#ff9e1c]/15 px-1 text-[9px] uppercase text-[#ff9e1c]">AWS</span>}</div>
                   {t.checklist?.length > 0 && <div className="text-[10px] text-muted-foreground">{t.checklist.length} checklist items</div>}
                 </TableCell>
                 <TableCell><button className="text-sm hover:text-[hsl(var(--primary))]" onClick={() => openMachine(t.machine_id)}>{t.machine_name}</button></TableCell>
                 <TableCell className="text-xs capitalize">{t.frequency}</TableCell>
                 <TableCell><CritBadge level={t.priority} /></TableCell>
-                <TableCell className={`font-mono text-xs ${t.next_due_date < today && t.active ? 'text-red-400' : ''}`}>{t.next_due_date}</TableCell>
+                <TableCell className={`font-mono text-xs ${t.next_due_date < today && t.active ? 'text-[#ff2e63]' : ''}`}>{t.next_due_date}</TableCell>
                 <TableCell className="text-sm">{t.assigned_to || '—'}</TableCell>
                 <TableCell>
                   {t.active !== false && (
-                    <Button size="sm" className="h-6 bg-green-500/20 text-[10px] text-green-200 hover:bg-green-500/30" data-testid={`pm-complete-${t.id}`}
+                    <Button size="sm" className="h-6 bg-[#05ffa1]/15 text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/25" data-testid={`pm-complete-${t.id}`}
                       onClick={() => { setCompleteTask(t); setCompleteOpen(true); }}>
                       <CheckCircle2 className="mr-1 h-3 w-3" /> Complete
                     </Button>

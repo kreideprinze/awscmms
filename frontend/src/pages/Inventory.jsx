@@ -16,8 +16,8 @@ import { fmtDate } from '@/components/StatusBits';
 import { KpiCard } from '@/components/Shared';
 
 const TX_COLORS = {
-  CSV_IMPORT: 'text-blue-300', MANUAL_ADJUSTMENT: 'text-slate-300', BREAKDOWN_CONSUMPTION: 'text-red-300',
-  WORKORDER_CONSUMPTION: 'text-orange-300', PM_CONSUMPTION: 'text-yellow-300', STOCK_ADDITION: 'text-green-300', STOCK_REDUCTION: 'text-red-300',
+  CSV_IMPORT: 'text-[#00fff5]', MANUAL_ADJUSTMENT: 'text-slate-300', BREAKDOWN_CONSUMPTION: 'text-[#ff2e63]',
+  WORKORDER_CONSUMPTION: 'text-[#ff9e1c]', PM_CONSUMPTION: 'text-[#f9f871]', STOCK_ADDITION: 'text-[#05ffa1]', STOCK_REDUCTION: 'text-[#ff2e63]',
 };
 
 export default function Inventory() {
@@ -103,8 +103,8 @@ export default function Inventory() {
         <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <KpiCard testId="inventory-kpi-materials" label="SAP Materials" value={dash.total_materials} />
           <KpiCard testId="inventory-kpi-quantity" label="Total Quantity" value={dash.total_quantity} />
-          <KpiCard testId="inventory-kpi-in-stock" label="In Stock" value={dash.in_stock} accent="text-green-400" />
-          <KpiCard testId="inventory-kpi-out-stock" label="Out of Stock" value={dash.out_of_stock} accent={dash.out_of_stock ? 'text-red-400' : ''} />
+          <KpiCard testId="inventory-kpi-in-stock" label="In Stock" value={dash.in_stock} accent="text-[#05ffa1]" />
+          <KpiCard testId="inventory-kpi-out-stock" label="Out of Stock" value={dash.out_of_stock} accent={dash.out_of_stock ? 'text-[#ff2e63]' : ''} />
         </div>
       )}
 
@@ -123,13 +123,13 @@ export default function Inventory() {
             </div>
             {['all', 'in', 'out'].map((s) => (
               <button key={s} onClick={() => setStockFilter(s)} data-testid={`inventory-stock-filter-${s}`}
-                className={`rounded-full border px-3 py-1 text-xs ${stockFilter === s ? 'border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.12)]' : 'border-border text-muted-foreground'}`}>
+                className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${stockFilter === s ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground'}`}>
                 {s === 'all' ? 'All' : s === 'in' ? 'In Stock' : 'Out of Stock'}
               </button>
             ))}
             <span className="text-xs text-muted-foreground">{spares.total} materials</span>
           </div>
-          <div className="overflow-hidden rounded-lg border border-border">
+          <div className="overflow-hidden border border-border">
             <Table data-testid="inventory-table">
               <TableHeader>
                 <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
@@ -155,7 +155,7 @@ export default function Inventory() {
                     <TableCell className="tabular-nums text-sm font-semibold">{s.quantity}</TableCell>
                     <TableCell className="text-xs">{s.uom}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={s.quantity > 0 ? 'border-green-500/30 bg-green-500/15 text-[10px] text-green-300' : 'border-red-500/30 bg-red-500/15 text-[10px] text-red-300'}>
+                      <Badge variant="outline" className={s.quantity > 0 ? 'border-[#05ffa1]/40 bg-[#05ffa1]/15 text-[10px] text-[#05ffa1]' : 'border-[#ff2e63]/40 bg-[#ff2e63]/15 text-[10px] text-[#ff2e63]'}>
                         {s.quantity > 0 ? 'IN STOCK' : 'OUT OF STOCK'}
                       </Badge>
                     </TableCell>
@@ -173,7 +173,7 @@ export default function Inventory() {
         </TabsContent>
 
         <TabsContent value="transactions" className="mt-4">
-          <div className="overflow-hidden rounded-lg border border-border">
+          <div className="overflow-hidden border border-border">
             <Table data-testid="transactions-table">
               <TableHeader>
                 <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
@@ -193,7 +193,7 @@ export default function Inventory() {
                     <TableCell className="font-mono text-xs">{fmtDate(t.created_at)}</TableCell>
                     <TableCell className="font-mono text-xs text-[hsl(var(--primary))]">{t.sap_code}</TableCell>
                     <TableCell><span className={`text-xs ${TX_COLORS[t.transaction_type] || ''}`}>{t.transaction_type}</span></TableCell>
-                    <TableCell className={`tabular-nums text-sm font-semibold ${t.quantity_change < 0 ? 'text-red-400' : t.quantity_change > 0 ? 'text-green-400' : 'text-muted-foreground'}`}>
+                    <TableCell className={`tabular-nums text-sm font-semibold ${t.quantity_change < 0 ? 'text-[#ff2e63]' : t.quantity_change > 0 ? 'text-[#05ffa1]' : 'text-muted-foreground'}`}>
                       {t.quantity_change > 0 ? '+' : ''}{t.quantity_change}
                     </TableCell>
                     <TableCell className="tabular-nums text-xs text-muted-foreground">{t.old_quantity ?? '—'} → {t.new_quantity ?? '—'}</TableCell>
@@ -209,7 +209,7 @@ export default function Inventory() {
         <TabsContent value="analytics" className="mt-4">
           {dash && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+              <div className="cyber-panel p-4">
                 <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Top 10 Consumed SAP Materials</div>
                 {dash.most_used.length === 0 ? <div className="py-6 text-center text-sm text-muted-foreground">No consumption yet</div> :
                   dash.most_used.map((m) => (
@@ -219,7 +219,7 @@ export default function Inventory() {
                     </div>
                   ))}
               </div>
-              <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+              <div className="cyber-panel p-4">
                 <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Recently Used</div>
                 {dash.recently_used.length === 0 ? <div className="py-6 text-center text-sm text-muted-foreground">No usage yet</div> :
                   dash.recently_used.map((m) => (
@@ -229,7 +229,7 @@ export default function Inventory() {
                     </div>
                   ))}
               </div>
-              <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+              <div className="cyber-panel p-4">
                 <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Top Machines by Consumption</div>
                 {dash.top_machines.length === 0 ? <div className="py-6 text-center text-sm text-muted-foreground">No consumption yet</div> :
                   dash.top_machines.map((m) => (
@@ -312,13 +312,13 @@ export default function Inventory() {
             <div className="flex gap-2">
               <Button variant="outline" onClick={doPreview} data-testid="csv-preview-button" className="border-border bg-[hsl(var(--panel-2))]">Preview</Button>
               {preview && preview.errors.length === 0 && preview.valid_rows > 0 && (
-                <Button onClick={doApply} data-testid="csv-apply-button" className="bg-green-500/20 text-green-200 hover:bg-green-500/30">Apply {preview.valid_rows} rows</Button>
+                <Button onClick={doApply} data-testid="csv-apply-button" className="bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25">Apply {preview.valid_rows} rows</Button>
               )}
             </div>
             {preview && (
               <div className="space-y-2" data-testid="csv-preview-panel">
                 {preview.errors.length > 0 && (
-                  <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300" data-testid="csv-preview-errors">
+                  <div className="rounded-md border border-[#ff2e63]/40 bg-[#ff2e63]/10 p-2 text-xs text-[#ff2e63]" data-testid="csv-preview-errors">
                     {preview.errors.map((e, i) => <div key={i}>{e}</div>)}
                   </div>
                 )}
@@ -330,7 +330,7 @@ export default function Inventory() {
                         <tr key={i} className="border-t border-border">
                           <td className="p-1.5 font-mono">{r.sap_code}</td><td className="p-1.5">{r.material_name}</td>
                           <td className="p-1.5 text-center">{r.old_quantity}</td>
-                          <td className={`p-1.5 text-center ${r.change < 0 ? 'text-red-400' : 'text-green-400'}`}>{r.change > 0 ? '+' : ''}{r.change}</td>
+                          <td className={`p-1.5 text-center ${r.change < 0 ? 'text-[#ff2e63]' : 'text-[#05ffa1]'}`}>{r.change > 0 ? '+' : ''}{r.change}</td>
                           <td className="p-1.5 text-center font-semibold">{r.new_quantity}</td>
                           <td className="p-1.5 text-center">{r.is_new ? 'NEW' : ''}</td>
                         </tr>

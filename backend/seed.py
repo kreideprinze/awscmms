@@ -229,119 +229,160 @@ RELIABILITY_SETTINGS = {
 }
 
 
+async def _dupe_check(coll, key):
+    dupes = await db[coll].aggregate([
+        {'$group': {'_id': f'${key}', 'n': {'$sum': 1}}}, {'$match': {'n': {'$gt': 1}}}, {'$limit': 20},
+    ]).to_list(20)
+    return [d['_id'] for d in dupes]
+
+
 async def seed_all():
-    if await db.settings.find_one({'id': 'seed_complete'}):
-        return False
-    logger.info('Seeding Factory Operations Platform master data...')
-
-    # wipe partial POC data for clean full seed
-    for c in ['users', 'departments', 'lines', 'process_groups', 'machines', 'failure_modes', 'error_codes',
-              'pm_templates', 'runtime_templates', 'notification_templates', 'spare_locations', 'spares_inventory',
-              'machine_spares', 'settings', 'branding']:
-        await db[c].delete_many({})
-
+    """Idempotent master-data seeding. Each collection is verified independently;
+    missing records are created, existing ones are never duplicated.
+    Prints a per-collection summary at startup so gaps are immediately visible."""
     ts = now_iso()
+    summary = {}
 
-    # Users
-    await db.users.insert_many([
+    # ---------- Users ----------
+    existing_users = {u['username'] async for u in db.users.find({}, {'username': 1})}
+    user_docs = [
         {'id': nid(), 'username': 'admin', 'password': hash_password('admin123'), 'role': 'admin', 'name': 'System Administrator', 'email': 'admin@factory.local', 'active': True, 'created_at': ts},
         {'id': nid(), 'username': 'tech', 'password': hash_password('tech123'), 'role': 'technician', 'name': 'Maintenance Technician', 'email': 'tech@factory.local', 'active': True, 'created_at': ts},
         {'id': nid(), 'username': 'operator', 'password': hash_password('operator123'), 'role': 'operator', 'name': 'Floor Operator', 'email': 'operator@factory.local', 'active': True, 'created_at': ts},
-    ])
+    ]
+    new_users = [u for u in user_docs if u['username'] not in existing_users]
+    if new_users:
+        await db.users.insert_many([dict(u) for u in new_users])
+    summary['users'] = {'created': len(new_users), 'total': await db.users.count_documents({})}
 
-    # Departments
-    departments = []
+    # ---------- Departments ----------
+    dept_map = {d['name']: d for d in await db.departments.find({}, {'_id': 0}).to_list(100)}
+    created = 0
     for i, dname in enumerate(['PROCESS', 'PACKAGING', 'UTILITIES']):
-        departments.append({'id': nid(), 'name': dname, 'order': i, 'created_at': ts})
-    await db.departments.insert_many([dict(d) for d in departments])
-    dept_map = {d['name']: d for d in departments}
+        if dname not in dept_map:
+            doc = {'id': nid(), 'name': dname, 'order': i, 'created_at': ts}
+            await db.departments.insert_one(dict(doc))
+            dept_map[dname] = doc
+            created += 1
+    summary['departments'] = {'created': created, 'total': await db.departments.count_documents({})}
 
-    lines, process_groups, machines = [], [], []
-    sap_seq = 10000001
-    line_order = 0
+    # ---------- Lines ----------
+    line_defs = [(name, 'PROCESS') for name in APPENDIX_A] + [(name, 'PACKAGING') for name in PACKAGING_LINES] + [('Utilities', 'UTILITIES')]
+    line_map = {l['name']: l for l in await db.lines.find({}, {'_id': 0}).to_list(1000)}
+    created = 0
+    for order, (name, dept) in enumerate(line_defs):
+        if name not in line_map:
+            doc = {'id': nid(), 'name': name, 'department': dept, 'department_id': dept_map[dept]['id'], 'order': order, 'created_at': ts}
+            await db.lines.insert_one(dict(doc))
+            line_map[name] = doc
+            created += 1
+    summary['lines'] = {'created': created, 'total': await db.lines.count_documents({})}
 
-    # PROCESS lines from Appendix A
+    # ---------- Process Groups ----------
+    pg_map = {(p['line'], p['name']): p for p in await db.process_groups.find({}, {'_id': 0}).to_list(10000)}
+    created = 0
     for line_name, pgs in APPENDIX_A.items():
-        line = {'id': nid(), 'name': line_name, 'department': 'PROCESS', 'department_id': dept_map['PROCESS']['id'], 'order': line_order, 'created_at': ts}
-        lines.append(line)
-        line_order += 1
-        pg_order = 0
-        for pg_name, machine_names in pgs.items():
-            pg = {'id': nid(), 'name': pg_name, 'line': line_name, 'line_id': line['id'], 'department': 'PROCESS', 'department_id': dept_map['PROCESS']['id'], 'order': pg_order, 'created_at': ts}
-            process_groups.append(pg)
+        for pg_order, pg_name in enumerate(pgs):
+            if (line_name, pg_name) not in pg_map:
+                doc = {'id': nid(), 'name': pg_name, 'line': line_name, 'line_id': line_map[line_name]['id'],
+                       'department': 'PROCESS', 'department_id': dept_map['PROCESS']['id'], 'order': pg_order, 'created_at': ts}
+                await db.process_groups.insert_one(dict(doc))
+                pg_map[(line_name, pg_name)] = doc
+                created += 1
+    summary['process_groups'] = {'created': created, 'total': await db.process_groups.count_documents({})}
+
+    # ---------- Machines (exact Appendix A; keyed by machine code) ----------
+    existing_codes = {m['code'] async for m in db.machines.find({}, {'code': 1})}
+    expected_codes = set()
+    new_machines = []
+    sap_seq = 10000001
+    for line_name, pgs in APPENDIX_A.items():
+        for pg_order, (pg_name, machine_names) in enumerate(pgs.items()):
             abbr = pg_abbr(pg_name)
+            pg = pg_map[(line_name, pg_name)]
             for idx, mname in enumerate(machine_names):
                 code = f"{line_name}-{abbr}-{idx + 1:03d}"
-                machines.append({
-                    'id': nid(), 'name': mname, 'code': code, 'sap_code': str(sap_seq),
-                    'department': 'PROCESS', 'department_id': dept_map['PROCESS']['id'],
-                    'line': line_name, 'line_id': line['id'],
-                    'process_group': pg_name, 'process_group_id': pg['id'],
-                    'machine_type': infer_type(mname), 'criticality': infer_criticality(mname),
-                    'status': 'running', 'health': 'healthy', 'reliability_state': 'no_data',
-                    'position_x': idx * 220, 'position_y': pg_order * 130, 'width': 200, 'height': 110,
-                    'total_run_hours': 0.0, 'inspection_recommended': False,
-                    'created_at': ts, 'commissioned_at': ts,
-                })
+                expected_codes.add(code)
+                if code not in existing_codes:
+                    new_machines.append({
+                        'id': nid(), 'name': mname, 'code': code, 'sap_code': str(sap_seq),
+                        'department': 'PROCESS', 'department_id': dept_map['PROCESS']['id'],
+                        'line': line_name, 'line_id': line_map[line_name]['id'],
+                        'process_group': pg_name, 'process_group_id': pg['id'],
+                        'machine_type': infer_type(mname), 'criticality': infer_criticality(mname),
+                        'status': 'running', 'health': 'healthy', 'reliability_state': 'no_data',
+                        'position_x': idx * 220, 'position_y': pg_order * 130, 'width': 200, 'height': 110,
+                        'total_run_hours': 0.0, 'inspection_recommended': False,
+                        'created_at': ts, 'commissioned_at': ts,
+                    })
                 sap_seq += 1
-            pg_order += 1
+    if new_machines:
+        await db.machines.insert_many([dict(m) for m in new_machines])
+    dupes = await _dupe_check('machines', 'code')
+    machine_total = await db.machines.count_documents({})
+    missing = expected_codes - existing_codes - {m['code'] for m in new_machines}
+    summary['machines'] = {'created': len(new_machines), 'total': machine_total,
+                           'expected_from_appendix_a': len(expected_codes),
+                           'missing': sorted(missing), 'duplicates': dupes}
 
-    # PACKAGING lines (structure per section 6.2; Appendix A defines machines only for PROCESS)
-    for pk in PACKAGING_LINES:
-        lines.append({'id': nid(), 'name': pk, 'department': 'PACKAGING', 'department_id': dept_map['PACKAGING']['id'], 'order': line_order, 'created_at': ts})
-        line_order += 1
+    # ---------- Catalog collections (keyed) ----------
+    async def ensure(coll, docs, key):
+        existing = {d[key] async for d in db[coll].find({}, {key: 1})}
+        new = [dict(d) for d in docs if d[key] not in existing]
+        if new:
+            await db[coll].insert_many(new)
+        summary[coll] = {'created': len(new), 'total': await db[coll].count_documents({})}
 
-    # UTILITIES line placeholder structure
-    lines.append({'id': nid(), 'name': 'Utilities', 'department': 'UTILITIES', 'department_id': dept_map['UTILITIES']['id'], 'order': line_order, 'created_at': ts})
-
-    await db.lines.insert_many([dict(x) for x in lines])
-    await db.process_groups.insert_many([dict(x) for x in process_groups])
-    await db.machines.insert_many([dict(x) for x in machines])
-
-    # Failure modes
-    await db.failure_modes.insert_many([{'id': nid(), 'name': fm, 'active': True, 'created_at': ts} for fm in FAILURE_MODES])
-    # Report error codes
-    await db.error_codes.insert_many([{'id': nid(), **ec, 'active': True, 'created_at': ts} for ec in ERROR_CODES])
-    # PM templates
-    await db.pm_templates.insert_many([{'id': nid(), **t, 'created_at': ts} for t in PM_TEMPLATES])
-    # Runtime templates
-    await db.runtime_templates.insert_many([{'id': nid(), **t, 'created_at': ts} for t in RUNTIME_TEMPLATES])
-    # Notification templates
-    await db.notification_templates.insert_many([{'id': nid(), **t, 'created_at': ts} for t in NOTIFICATION_TEMPLATES])
-    # Spare locations
-    await db.spare_locations.insert_many([{'id': nid(), 'name': loc, 'active': True, 'created_at': ts} for loc in SPARE_LOCATIONS])
-    # Spares inventory
-    await db.spares_inventory.insert_many([
+    await ensure('failure_modes', [{'id': nid(), 'name': fm, 'active': True, 'created_at': ts} for fm in FAILURE_MODES], 'name')
+    await ensure('error_codes', [{'id': nid(), **ec, 'active': True, 'created_at': ts} for ec in ERROR_CODES], 'code')
+    await ensure('pm_templates', [{'id': nid(), **t, 'created_at': ts} for t in PM_TEMPLATES], 'name')
+    await ensure('runtime_templates', [{'id': nid(), **t, 'created_at': ts} for t in RUNTIME_TEMPLATES], 'name')
+    await ensure('notification_templates', [{'id': nid(), **t, 'created_at': ts} for t in NOTIFICATION_TEMPLATES], 'notif_type')
+    await ensure('spare_locations', [{'id': nid(), 'name': loc, 'active': True, 'created_at': ts} for loc in SPARE_LOCATIONS], 'name')
+    await ensure('spares_inventory', [
         {'id': nid(), 'sap_code': s[0], 'material_name': s[1], 'long_text': s[2], 'location': s[3],
          'quantity': s[4], 'uom': s[5], 'category': s[6], 'manufacturer': s[7], 'vendor': s[7],
          'active': True, 'total_consumed': 0, 'created_at': ts, 'updated_at': ts}
         for s in SPARES
-    ])
+    ], 'sap_code')
 
-    # Machine recommended spares (example set per spec 21.9)
-    oil_pumps = [m for m in machines if m['name'] == 'Main Oil Pump']
-    recs = []
-    for m in oil_pumps:
-        for sap in ['400001234', '400003001', '400004001', '400002101', '400009002']:
-            recs.append({'id': nid(), 'machine_id': m['id'], 'machine_name': m['name'], 'sap_code': sap, 'created_at': ts})
-    slicers = [m for m in machines if m['machine_type'] == 'Slicer' and 'Slicer' in m['name'] and 'Conveyor' not in m['name']]
-    for m in slicers[:8]:
-        for sap in ['400009003', '400001235', '400002102']:
-            recs.append({'id': nid(), 'machine_id': m['id'], 'machine_name': m['name'], 'sap_code': sap, 'created_at': ts})
-    fryers = [m for m in machines if m['name'] == 'Fryer']
-    for m in fryers:
-        for sap in ['400009001', '400003001', '400007002']:
-            recs.append({'id': nid(), 'machine_id': m['id'], 'machine_name': m['name'], 'sap_code': sap, 'created_at': ts})
-    if recs:
-        await db.machine_spares.insert_many(recs)
+    # ---------- Machine recommended spares (only when empty) ----------
+    if await db.machine_spares.count_documents({}) == 0:
+        machines_all = await db.machines.find({}, {'_id': 0}).to_list(20000)
+        recs = []
+        for m in [x for x in machines_all if x['name'] == 'Main Oil Pump']:
+            for sap in ['400001234', '400003001', '400004001', '400002101', '400009002']:
+                recs.append({'id': nid(), 'machine_id': m['id'], 'machine_name': m['name'], 'sap_code': sap, 'created_at': ts})
+        slicers = [x for x in machines_all if x['machine_type'] == 'Slicer' and 'Slicer' in x['name'] and 'Conveyor' not in x['name']]
+        for m in slicers[:8]:
+            for sap in ['400009003', '400001235', '400002102']:
+                recs.append({'id': nid(), 'machine_id': m['id'], 'machine_name': m['name'], 'sap_code': sap, 'created_at': ts})
+        for m in [x for x in machines_all if x['name'] == 'Fryer']:
+            for sap in ['400009001', '400003001', '400007002']:
+                recs.append({'id': nid(), 'machine_id': m['id'], 'machine_name': m['name'], 'sap_code': sap, 'created_at': ts})
+        if recs:
+            await db.machine_spares.insert_many(recs)
+        summary['machine_spares'] = {'created': len(recs), 'total': len(recs)}
+    else:
+        summary['machine_spares'] = {'created': 0, 'total': await db.machine_spares.count_documents({})}
 
-    # Settings + branding
-    await db.settings.insert_one({**RELIABILITY_SETTINGS, 'updated_at': ts})
-    await db.settings.insert_one({'id': 'system_settings', 'plant_name': 'Factory Operations Platform', 'timezone': 'UTC', 'updated_at': ts})
-    await db.branding.insert_one({'id': 'branding', 'app_name': 'ForgeOps', 'plant_name': 'Snack Foods Factory', 'accent': '#2ea8ff', 'updated_at': ts})
-    await db.settings.insert_one({'id': 'seed_complete', 'seeded_at': ts, 'machine_count': len(machines)})
+    # ---------- Settings / branding / plant clock ----------
+    created_settings = 0
+    if not await db.settings.find_one({'id': 'reliability_settings'}):
+        await db.settings.insert_one({**RELIABILITY_SETTINGS, 'updated_at': ts})
+        created_settings += 1
+    if not await db.settings.find_one({'id': 'system_settings'}):
+        await db.settings.insert_one({'id': 'system_settings', 'plant_name': 'Factory Operations Platform', 'timezone': 'UTC', 'updated_at': ts})
+        created_settings += 1
+    if not await db.settings.find_one({'id': 'plant_clock'}):
+        await db.settings.insert_one({'id': 'plant_clock', 'started_at': ts, 'last_tick_at': ts})
+        created_settings += 1
+    if not await db.branding.find_one({'id': 'branding'}):
+        await db.branding.insert_one({'id': 'branding', 'app_name': 'ForgeOps', 'plant_name': 'Snack Foods Factory', 'accent': '#00fff5', 'updated_at': ts})
+        created_settings += 1
+    summary['settings'] = {'created': created_settings, 'total': await db.settings.count_documents({})}
 
-    # Indexes for performance targets
+    # ---------- Indexes ----------
     await db.machines.create_index('id')
     await db.machines.create_index([('line', 1), ('process_group', 1)])
     await db.breakdowns.create_index([('machine_id', 1), ('created_at', -1)])
@@ -360,5 +401,20 @@ async def seed_all():
     await db.machine_reports.create_index([('machine_id', 1), ('created_at', -1)])
     await db.audit_logs.create_index([('created_at', -1)])
 
-    logger.info(f'Seed complete: {len(machines)} machines, {len(lines)} lines, {len(process_groups)} process groups')
-    return True
+    # ---------- Startup summary log ----------
+    logger.info('=' * 60)
+    logger.info('SEED VERIFICATION SUMMARY (idempotent)')
+    for coll, info in summary.items():
+        extra = ''
+        if coll == 'machines':
+            extra = f" | expected {info['expected_from_appendix_a']}"
+            if info['missing']:
+                extra += f" | MISSING: {info['missing']}"
+            if info['duplicates']:
+                extra += f" | DUPLICATES: {info['duplicates']}"
+        logger.info(f"  {coll:<24} created={info['created']:<4} total={info['total']}{extra}")
+    logger.info('=' * 60)
+
+    await db.settings.update_one({'id': 'seed_summary'}, {'$set': {'id': 'seed_summary', 'summary': summary, 'seeded_at': ts}}, upsert=True)
+    await db.settings.update_one({'id': 'seed_complete'}, {'$set': {'id': 'seed_complete', 'seeded_at': ts, 'machine_count': machine_total}}, upsert=True)
+    return summary

@@ -80,12 +80,12 @@ export default function Runtime() {
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <KpiCard testId="runtime-kpi-records" label="Records" value={data.total} />
-        <KpiCard testId="runtime-kpi-run" label="Run Hours" value={`${summary.run}h`} accent="text-green-400" />
+        <KpiCard testId="runtime-kpi-run" label="Run Hours" value={`${summary.run}h`} accent="text-[#05ffa1]" />
         <KpiCard testId="runtime-kpi-dark" label="Dark Hours" value={`${summary.cal - summary.run}h`} />
         <KpiCard testId="runtime-kpi-availability" label="Availability" value={avail != null ? `${avail}%` : '—'} accent="text-[hsl(var(--primary))]" />
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
+      <div className="overflow-hidden border border-border">
         <Table data-testid="runtime-table">
           <TableHeader>
             <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
@@ -107,7 +107,7 @@ export default function Runtime() {
                 <TableCell><button className="text-sm hover:text-[hsl(var(--primary))]" onClick={() => openMachine(r.machine_id)}>{r.machine_name}</button></TableCell>
                 <TableCell className="text-xs">{r.line}</TableCell>
                 <TableCell className="tabular-nums text-sm">{r.calendar_hours}</TableCell>
-                <TableCell className="tabular-nums text-sm text-green-400">{r.run_hours}</TableCell>
+                <TableCell className="tabular-nums text-sm text-[#05ffa1]">{r.run_hours}</TableCell>
                 <TableCell className="tabular-nums text-sm">{r.dark_hours}</TableCell>
                 <TableCell className="tabular-nums text-sm">{r.availability}%</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{r.source}</TableCell>
@@ -144,13 +144,13 @@ export default function Runtime() {
             <div className="flex gap-2">
               <Button variant="outline" onClick={doPreview} data-testid="runtime-csv-preview" className="border-border bg-[hsl(var(--panel-2))]">Preview</Button>
               {preview && preview.errors.length === 0 && preview.valid_rows > 0 && (
-                <Button onClick={doApply} data-testid="runtime-csv-apply" className="bg-green-500/20 text-green-200 hover:bg-green-500/30">Apply {preview.valid_rows} rows</Button>
+                <Button onClick={doApply} data-testid="runtime-csv-apply" className="bg-[#05ffa1]/15 text-[#05ffa1] hover:bg-[#05ffa1]/25">Apply {preview.valid_rows} rows</Button>
               )}
             </div>
             {preview && (
               <div className="space-y-2">
                 {preview.errors.length > 0 && (
-                  <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300" data-testid="runtime-csv-errors">
+                  <div className="rounded-md border border-[#ff2e63]/40 bg-[#ff2e63]/10 p-2 text-xs text-[#ff2e63]" data-testid="runtime-csv-errors">
                     {preview.errors.map((e, i) => <div key={i}>{e}</div>)}
                   </div>
                 )}

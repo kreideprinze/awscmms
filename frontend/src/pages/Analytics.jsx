@@ -53,7 +53,7 @@ export default function Analytics() {
       <div className="mb-5 flex flex-wrap items-center gap-2">
         {LEVELS.map((l) => (
           <button key={l.key} data-testid={`analytics-level-${l.key}`} onClick={() => { setLevel(l.key); setValue(''); setKpis(l.key === 'plant' ? kpis : null); }}
-            className={`rounded-md border px-3 py-1.5 text-xs ${level === l.key ? 'border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.12)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition-colors ${level === l.key ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {l.label}
           </button>
         ))}
@@ -79,12 +79,12 @@ export default function Analytics() {
             <KpiCard testId="analytics-kpi-availability" label="Availability" value={kpis.availability != null ? `${kpis.availability}%` : '—'} accent="text-[hsl(var(--primary))]" />
             <KpiCard testId="analytics-kpi-failure-rate" label="Failure Rate" value={kpis.failure_rate_per_1000h != null ? kpis.failure_rate_per_1000h : '—'} sub="per 1000 run-h" />
             <KpiCard testId="analytics-kpi-pm-compliance" label="PM Compliance" value={kpis.pm_compliance != null ? `${kpis.pm_compliance}%` : '—'} />
-            <KpiCard testId="analytics-kpi-failures" label="Failures" value={kpis.failures_total} accent={kpis.failures_total ? 'text-red-400' : ''} />
+            <KpiCard testId="analytics-kpi-failures" label="Failures" value={kpis.failures_total} accent={kpis.failures_total ? 'text-[#ff2e63]' : ''} />
             <KpiCard testId="analytics-kpi-downtime" label="Downtime" value={`${kpis.downtime_hours_total}h`} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+            <div className="cyber-panel p-4">
               <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Downtime Trend (hours / month)</div>
               {kpis.downtime_trend.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No downtime recorded</div> : (
                 <ResponsiveContainer width="100%" height={220}>
@@ -93,12 +93,12 @@ export default function Analytics() {
                     <XAxis dataKey="month" tick={chartTheme.tick} />
                     <YAxis tick={chartTheme.tick} width={35} />
                     <RTooltip contentStyle={chartTheme.tooltip} />
-                    <Bar dataKey="downtime_hours" fill="hsl(0 84% 58%)" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="downtime_hours" fill="#ff2e63" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
-            <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+            <div className="cyber-panel p-4">
               <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Failure Trend (count / month)</div>
               {kpis.failure_trend.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No failures recorded</div> : (
                 <ResponsiveContainer width="100%" height={220}>
@@ -107,12 +107,12 @@ export default function Analytics() {
                     <XAxis dataKey="month" tick={chartTheme.tick} />
                     <YAxis tick={chartTheme.tick} width={35} allowDecimals={false} />
                     <RTooltip contentStyle={chartTheme.tooltip} />
-                    <Line type="monotone" dataKey="failures" stroke="hsl(24 95% 55%)" strokeWidth={2} dot />
+                    <Line type="monotone" dataKey="failures" stroke="#ff9e1c" strokeWidth={2} dot />
                   </LineChart>
                 </ResponsiveContainer>
               )}
             </div>
-            <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+            <div className="cyber-panel p-4">
               <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Availability Trend (%)</div>
               {kpis.availability_trend.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No runtime data yet</div> : (
                 <ResponsiveContainer width="100%" height={220}>
@@ -121,12 +121,12 @@ export default function Analytics() {
                     <XAxis dataKey="month" tick={chartTheme.tick} />
                     <YAxis tick={chartTheme.tick} width={35} domain={[0, 100]} />
                     <RTooltip contentStyle={chartTheme.tooltip} />
-                    <Area type="monotone" dataKey="availability" stroke="hsl(205 100% 58%)" fill="rgba(46,168,255,0.15)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="availability" stroke="#00fff5" fill="rgba(0,255,245,0.12)" strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
             </div>
-            <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4">
+            <div className="cyber-panel p-4">
               <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Top Failing Machines</div>
               {kpis.top_failing_machines.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No failures recorded</div> : (
                 <div className="space-y-1.5">
@@ -139,7 +139,7 @@ export default function Analytics() {
                 </div>
               )}
             </div>
-            <div className="rounded-lg border border-border bg-[hsl(var(--panel-1))] p-4 xl:col-span-2">
+            <div className="cyber-panel p-4 xl:col-span-2">
               <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Failure Modes Distribution</div>
               {kpis.failure_modes.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No failures recorded</div> : (
                 <ResponsiveContainer width="100%" height={220}>
@@ -148,7 +148,7 @@ export default function Analytics() {
                     <XAxis type="number" tick={chartTheme.tick} allowDecimals={false} />
                     <YAxis type="category" dataKey="mode" tick={chartTheme.tick} width={160} />
                     <RTooltip contentStyle={chartTheme.tooltip} />
-                    <Bar dataKey="count" fill="hsl(205 100% 58%)" radius={[0, 3, 3, 0]} />
+                    <Bar dataKey="count" fill="#00fff5" radius={[0, 3, 3, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}

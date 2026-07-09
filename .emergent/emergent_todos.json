@@ -1,30 +1,26 @@
 [
   {
-    "content": "Phase 1: POC - WebSocket hub + event pipeline tested in isolation (14/14 PASS)",
+    "content": "Phase A: Replace infinite zoom TransformWrapper with fixed-size scrollable canvas in ControlRoom",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Design guidelines via design_agent (SCADA/HMI dark theme)",
+    "content": "Phase A: PlantClock shows current actual wall-clock time (date + time) instead of runtime",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Backend - full data model, Appendix A seed (194 machines), auth/RBAC, all modules, timeline+notifications",
+    "content": "Phase B: Screenshot & audit secondary modules for Cyberpunk compliance",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Frontend - Control Room Digital Twin, Machine Drawer (11 tabs), all 9 module pages",
+    "content": "Phase B: Update non-compliant pages with Cyberpunk aesthetic (138 fixes applied + verified)",
     "status": "completed"
   },
   {
-    "content": "Phase 3: Reliability/AWS engine (MTBF L1-L3, Weibull), Predictive engine, Analytics multi-level",
+    "content": "Phase C: E2E test breakdown -> auto-create work order flow (verified: BD-00011 -> WO-00006 ASSIGNED)",
     "status": "completed"
   },
   {
-    "content": "Phase 4: Spares Inventory (SAP-centric, ledger, CSV import), Administration module, seeded spares",
-    "status": "completed"
-  },
-  {
-    "content": "E2E testing via testing_agent_v3 (backend 98.7%, frontend 100%) - minor 404 issue fixed and verified",
-    "status": "completed"
+    "content": "Phase D: Full testing agent pass + fix issues",
+    "status": "in_progress"
   }
 ]

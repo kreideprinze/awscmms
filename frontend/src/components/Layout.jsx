@@ -65,7 +65,7 @@ export function Layout({ children }) {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors ${
                   isActive
-                    ? 'border-l-2 border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.10)] text-foreground'
+                    ? 'border-l-2 border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-foreground'
                     : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
                 }`
               }
@@ -92,8 +92,8 @@ export function Layout({ children }) {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-[hsl(var(--panel-1))] px-4">
           <div className="flex items-center gap-3">
             <span className="text-xs uppercase tracking-widest text-muted-foreground">{branding.plant_name || 'Plant'}</span>
-            <span className="hidden items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-green-300 sm:flex">
-              <span className="h-1.5 w-1.5 rounded-full bg-green-400 alarm-pulse" /> Live
+            <span className="hidden items-center gap-1.5 rounded-full border border-[#05ffa1]/40 bg-[#05ffa1]/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[#05ffa1] sm:flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#05ffa1] alarm-pulse" /> Live
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -103,7 +103,7 @@ export function Layout({ children }) {
                 <Button variant="ghost" size="icon" data-testid="notification-center-bell" className="relative">
                   <Bell className="h-5 w-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff2e63] px-1 text-[10px] font-semibold text-white">
                       {unreadCount > 99 ? '99+' : unreadCount}
                     </span>
                   )}

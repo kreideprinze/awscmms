@@ -1,9 +1,15 @@
 # plan.md
 
 ## 1) Objectives
-- Deliver a production-ready, LAN-only Factory Operations Platform (Digital Twin Control Room + CMMS + Reliability/AWS + Predictive + Analytics + Runtime + Spares + Admin) that is **machine-centric** in every workflow.
+- Deliver a production-ready, LAN-only Factory Operations Platform (Digital Twin Control Room + CMMS + Reliability/AWS + Predictive + Analytics + Spares + Admin) that is **machine-centric** in every workflow.
 - Ship **non-empty** on first boot: seed full hierarchy (Appendix A), machine layout positions, templates/rules, **default users** (admin/admin123, tech/tech123, operator/operator123), and realistic starter spares.
 - Provide real-time **timeline + notifications** (WebSocket) and scalable MongoDB data model (indexes/pagination) to hit performance targets.
+- Ensure Control Room UX is **bounded and usable**:
+  - **No infinite zoom** behavior.
+  - A **fixed/controlled canvas size** with **vertical scrolling** to view all machines.
+- Ensure time references are unambiguous across operations:
+  - Replace “plant runtime clock” display with **current actual wall-clock time** so users can cross-reference Breakdown/WO timestamps.
+- Apply a coherent, app-wide **Cyberpunk 2077 HUD aesthetic** across *every module* (not just Control Room): dark charcoal base (not pure black), neon accents (cyan/magenta/yellow), monospace data typography, chamfered corners, scanlines, glow hovers, and subtle glitch/flicker where appropriate.
 
 ## 2) Implementation Steps
 
@@ -141,24 +147,70 @@
 4. As an Admin, I can create/edit/retire spare locations without technicians changing the location list.
 5. As a user, I can open a machine and see its most-consumed spares and recent usage history.
 
+---
+
 ## 3) Next Actions
-1. Implement Phase 1 POC: backend WS hub + minimal models/seed + event pipeline + minimal React live page.
-2. Run POC exit test; fix until stable.
-3. Start Phase 2 bulk build: seed full Appendix A + Control Room + Machine Drawer + Reports/Breakdowns/WOs/PM + timeline/notifications + runtime entry/import.
+> Updated to reflect current status + the latest user requests.
+
+### Phase A — Control Room fixes (P0)
+1. **Remove infinite zoom** in the Control Room Digital Twin:
+   - Constrain zoom to a sensible min/max (or disable zoom entirely if required).
+   - Prevent “zoom till infinity” behavior.
+2. **Fix the Control Room canvas sizing** so users can **scroll vertically** to see all machines:
+   - Ensure the Digital Twin container uses a bounded height (viewport-based) and `overflow-y: auto`.
+   - Ensure layout does not expand infinitely in a way that forces awkward scaling.
+3. **Replace Plant Runtime display with current wall-clock time**:
+   - Update the PlantClock component to show the current actual time (local plant time) and refresh every second.
+   - Keep breakdown/report timestamps consistent and easy to cross-reference.
+
+### Phase B — Cyberpunk 2077 UI audit & application across ALL modules (P0)
+4. Screenshot & audit secondary modules:
+   - `/work-orders`, `/pm`, `/runtime`, `/analytics`, `/aws`, `/inventory`, `/administration`.
+5. Update all non-compliant tables/cards/forms:
+   - dark charcoal base (avoid pure black)
+   - neon cyan/magenta/yellow accents (avoid traffic-light status colors)
+   - monospace/tabular numbers for KPI/table data
+   - chamfered corners, scanlines, glow hover states, consistent HUD framing
+   - consistent button/input styling (replace lingering default Shadcn styling where needed)
+
+### Phase C — E2E test: Breakdown → auto-create Work Order (P1)
+6. Create a Breakdown in UI with **auto-create work order** checked.
+7. Verify:
+   - Backend creates Corrective Work Order instantly
+   - Status is **ASSIGNED** (and appears in Work Orders UI)
+   - Breakdown record links to WO (and WO links back to Breakdown)
+
+### Phase D — Full testing pass + fixes (P1)
+8. Run testing agent pass (frontend screenshots + backend API checks).
+9. Fix any regressions found (UI consistency, routing, schema mismatches, time display).
+10. Produce updated test report.
 
 ## 4) Success Criteria
 - First boot: system is fully seeded (hierarchy, users, templates, spares) and **not empty**.
-- Control Room renders Digital Twin dynamically from hierarchy + layout positions; machine drawer contains all required tabs.
+- Control Room renders Digital Twin dynamically from hierarchy + layout positions.
+- Control Room UX is bounded:
+  - **No infinite zoom**.
+  - Users can **scroll vertically** to reach all machines without uncontrolled scaling.
+- App displays **current actual wall-clock time** prominently for cross-referencing timestamps.
 - Real-time WS notifications and timeline eventing work end-to-end for key actions.
-- Maintenance flows function: reports→review→convert, breakdown lifecycle + 30-min root cause rule, WO completion updates spares, PM scheduler generates tasks.
-- Reliability + predictive start after first breakdown; analytics available at all hierarchy levels.
-- Inventory ledger is enforced; CSV preview/validation prevents invalid imports.
+- Maintenance flows function: reports→review→convert, breakdown lifecycle, WO creation/assignment, PM generation/completion.
+- **Breakdown auto-create WO flow** is verified end-to-end.
+- Cyberpunk HUD aesthetic is consistent across **every** module (Control Room, Breakdowns, Work Orders, PM, Runtime, Analytics, AWS, Inventory, Admin).
 - App remains responsive with pagination/indexes and avoids obvious degradation patterns.
 
 ---
-## STATUS UPDATE (Final)
-- Phase 1 POC: PASSED 14/14 (WS hub + event pipeline + JWT + persistence)
-- Phase 2 (Core app): COMPLETE — 194 machines seeded from Appendix A, Control Room Digital Twin, Machine Drawer (11 tabs), Reports/Breakdowns/WOs/PM, Timeline+WS Notifications, Runtime manual+CSV
-- Phase 3 (Reliability/Predictive/Analytics): COMPLETE — MTBF L1-L3, Weibull (scipy), health states, 80% predictive alerts + suggested PM tasks, multi-level analytics
-- Phase 4 (Spares/Admin): COMPLETE — SAP-centric ledger inventory, CSV import w/ preview, machine spares, Administration (hierarchy/users/catalogs/branding/audit)
-- E2E Testing: testing_agent iteration_1 — backend 75/76 (98.7%), frontend 100%. The 1 minor issue (404 on nonexistent delete) FIXED and verified.
+
+## STATUS UPDATE (Current)
+- Phase 1 POC: **COMPLETE** (WS hub + event pipeline + persistence)
+- Phase 2 (Core app): **COMPLETE** — 194 machines seeded, Control Room Digital Twin, Machine Drawer (11 tabs), Reports/Breakdowns/WOs/PM, Timeline+WS Notifications
+- Phase 3 (Reliability/Predictive/Analytics): **COMPLETE**
+- Phase 4 (Spares/Admin): **COMPLETE**
+- Recent completed work (latest iteration):
+  - Seed script refactored to be idempotent with summary logging (`/app/backend/seed.py`) — **DONE**
+  - Plant clock backend ticker integration — **DONE (but to be replaced in UI with wall-clock time display per latest request)**
+  - Breakdown schema updated + backend auto-create work order logic — **DONE (E2E verification pending)**
+  - New `ReportBreakdownDialog.jsx` built to spec — **DONE**
+  - Control Room sorting/grouping + dynamic zoom limits attempted — **IN PROGRESS (must remove “infinite zoom” and enable vertical scroll per latest request)**
+  - Cyberpunk global CSS + primary screens partially updated — **IN PROGRESS (needs audit across secondary modules)**
+- Testing:
+  - Prior testing_agent iteration_1 passed; **new targeted testing pending** for: Control Room scroll/zoom behavior, wall-clock time display, and Breakdown → auto-create WO flow.

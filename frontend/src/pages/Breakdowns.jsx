@@ -1,18 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { toast } from 'sonner';
 import { Plus, Search } from 'lucide-react';
-import { api, errMsg } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { LifecycleBadge, fmtDate } from '@/components/StatusBits';
-import { MachineSelect } from '@/components/Shared';
+import { LifecycleBadge, TypeBadge, fmtDate } from '@/components/StatusBits';
 import { BreakdownActions } from '@/components/MachineDrawer';
+import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 const STATUSES = ['all', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CLOSED'];
 
@@ -22,10 +17,6 @@ export default function Breakdowns() {
   const [status, setStatus] = useState('all');
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [machineId, setMachineId] = useState('');
-  const [failureModes, setFailureModes] = useState([]);
-  const [mode, setMode] = useState('');
-  const [desc, setDesc] = useState('');
   const [expanded, setExpanded] = useState(null);
 
   const load = useCallback(() => {
@@ -37,17 +28,6 @@ export default function Breakdowns() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { load(); }, [liveFeed.length]); // refresh on live events
-  useEffect(() => { api.get('/failure-modes').then((r) => setFailureModes(r.data)); }, []);
-
-  const create = async () => {
-    if (!machineId || !mode || !desc) { toast.error('Machine, failure mode and description are required'); return; }
-    try {
-      const res = await api.post('/breakdowns', { machine_id: machineId, failure_mode: mode, description: desc });
-      toast.success(`Breakdown ${res.data.ticket_number} created`);
-      setCreateOpen(false); setMachineId(''); setMode(''); setDesc('');
-      load();
-    } catch (e) { toast.error(errMsg(e)); }
-  };
 
   return (
     <div className="p-6" data-testid="breakdowns-page">
@@ -56,7 +36,7 @@ export default function Breakdowns() {
           <h1 className="text-2xl font-semibold tracking-tight">Breakdowns</h1>
           <p className="text-sm text-muted-foreground">{data.total} total · lifecycle OPEN → ASSIGNED → IN_PROGRESS → COMPLETED → CLOSED</p>
         </div>
-        <Button data-testid="breakdowns-create-button" onClick={() => setCreateOpen(true)} className="bg-red-500/20 text-red-200 hover:bg-red-500/30">
+        <Button data-testid="breakdowns-create-button" onClick={() => setCreateOpen(true)} className="bg-[#ff2e63]/15 text-[#ff2e63] hover:bg-[#ff2e63]/25">
           <Plus className="mr-1 h-4 w-4" /> Report Breakdown
         </Button>
       </div>
@@ -68,18 +48,19 @@ export default function Breakdowns() {
         </div>
         {STATUSES.map((s) => (
           <button key={s} data-testid={`breakdowns-filter-${s}`} onClick={() => setStatus(s)}
-            className={`rounded-full border px-3 py-1 text-xs ${status === s ? 'border-[hsl(var(--primary))] bg-[rgba(46,168,255,0.12)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${status === s ? 'power-on border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {s === 'all' ? 'All' : s}
           </button>
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
+      <div className="overflow-hidden border border-border">
         <Table data-testid="breakdowns-table">
           <TableHeader>
             <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
               <TableHead className="text-xs uppercase">Ticket</TableHead>
               <TableHead className="text-xs uppercase">Machine</TableHead>
+              <TableHead className="text-xs uppercase">Type</TableHead>
               <TableHead className="text-xs uppercase">Failure Mode</TableHead>
               <TableHead className="text-xs uppercase">Status</TableHead>
               <TableHead className="text-xs uppercase">Start</TableHead>
@@ -89,7 +70,7 @@ export default function Breakdowns() {
           </TableHeader>
           <TableBody>
             {data.items.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No breakdowns match filters</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No breakdowns match filters</TableCell></TableRow>
             )}
             {data.items.map((bd) => (
               <React.Fragment key={bd.id}>
@@ -102,6 +83,7 @@ export default function Breakdowns() {
                     </button>
                     <div className="text-[10px] text-muted-foreground">{bd.line} / {bd.process_group}</div>
                   </TableCell>
+                  <TableCell><TypeBadge type={bd.breakdown_type} /></TableCell>
                   <TableCell className="text-sm">{bd.failure_mode}</TableCell>
                   <TableCell><LifecycleBadge status={bd.status} /></TableCell>
                   <TableCell className="font-mono text-xs">{fmtDate(bd.start_time)}</TableCell>
@@ -110,8 +92,9 @@ export default function Breakdowns() {
                 </TableRow>
                 {expanded === bd.id && (
                   <TableRow className="border-border bg-[hsl(var(--panel-1))]/60 hover:bg-[hsl(var(--panel-1))]/60">
-                    <TableCell colSpan={7} className="p-4">
+                    <TableCell colSpan={8} className="p-4">
                       <div className="text-sm">{bd.description}</div>
+                      <div className="mt-1 text-[11px] text-muted-foreground">Reported by {bd.reporter}{bd.work_order_number ? ` · auto WO: ${bd.work_order_number}` : ''}</div>
                       {bd.root_cause && <div className="mt-1 text-xs"><span className="text-muted-foreground">Root cause:</span> {bd.root_cause}</div>}
                       {bd.action_taken && <div className="mt-1 text-xs"><span className="text-muted-foreground">Action taken:</span> {bd.action_taken}</div>}
                       {bd.consumed_spares?.length > 0 && (
@@ -127,23 +110,7 @@ export default function Breakdowns() {
         </Table>
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="border-border bg-[hsl(var(--panel-1))]">
-          <DialogHeader><DialogTitle>Report Breakdown</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label className="text-xs">Machine</Label><MachineSelect value={machineId} onChange={(id) => setMachineId(id)} testId="bd-create-machine-select" /></div>
-            <div>
-              <Label className="text-xs">Failure Mode</Label>
-              <Select value={mode} onValueChange={setMode}>
-                <SelectTrigger data-testid="bd-create-failure-mode" className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Select failure mode" /></SelectTrigger>
-                <SelectContent>{failureModes.map((f) => <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div><Label className="text-xs">Description</Label><Textarea data-testid="bd-create-description" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="What happened?" className="bg-[hsl(var(--panel-2))]" /></div>
-            <Button onClick={create} data-testid="bd-create-submit" className="w-full bg-red-500/20 text-red-200 hover:bg-red-500/30">Create Breakdown Ticket</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ReportBreakdownDialog open={createOpen} setOpen={setCreateOpen} onCreated={load} />
     </div>
   );
 }

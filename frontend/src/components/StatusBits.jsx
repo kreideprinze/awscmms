@@ -1,51 +1,67 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
 
+// Cyberpunk neon status palette — functionally distinct, reskinned from traffic-light colors
 export const STATUS_META = {
-  running: { label: 'Running', color: 'hsl(var(--status-running))', cls: 'bg-green-500/15 text-green-300 border-green-500/30' },
-  watch: { label: 'Watch', color: 'hsl(var(--status-watch))', cls: 'bg-yellow-500/15 text-yellow-200 border-yellow-500/30' },
-  inspection_due: { label: 'Inspection Due', color: 'hsl(var(--status-inspection))', cls: 'bg-orange-500/15 text-orange-200 border-orange-500/30' },
-  repair: { label: 'Repair', color: 'hsl(var(--status-repair))', cls: 'bg-blue-500/15 text-blue-200 border-blue-500/30' },
-  failed: { label: 'Failed', color: 'hsl(var(--status-failed))', cls: 'bg-red-500/15 text-red-300 border-red-500/30' },
-  idle: { label: 'Idle', color: 'hsl(var(--status-idle))', cls: 'bg-slate-500/15 text-slate-300 border-slate-500/30' },
+  running: { label: 'Running', color: '#05ffa1', cls: 'bg-[#05ffa1]/10 text-[#05ffa1] border-[#05ffa1]/40' },
+  watch: { label: 'Watch', color: '#f9f871', cls: 'bg-[#f9f871]/10 text-[#f9f871] border-[#f9f871]/40' },
+  inspection_due: { label: 'Inspection Due', color: '#ff9e1c', cls: 'bg-[#ff9e1c]/10 text-[#ff9e1c] border-[#ff9e1c]/40' },
+  repair: { label: 'Repair', color: '#00fff5', cls: 'bg-[#00fff5]/10 text-[#00fff5] border-[#00fff5]/40' },
+  failed: { label: 'Failed', color: '#ff2e63', cls: 'bg-[#ff2e63]/10 text-[#ff2e63] border-[#ff2e63]/40' },
+  idle: { label: 'Idle', color: '#7b84a8', cls: 'bg-[#7b84a8]/10 text-[#9aa2c0] border-[#7b84a8]/40' },
 };
 
 export const HEALTH_META = {
-  healthy: { label: 'Healthy', cls: 'bg-green-500/15 text-green-300 border-green-500/30' },
-  watch: { label: 'Watch', cls: 'bg-yellow-500/15 text-yellow-200 border-yellow-500/30' },
-  inspection_due: { label: 'Inspection Due', cls: 'bg-orange-500/15 text-orange-200 border-orange-500/30' },
-  overdue: { label: 'OVERDUE', cls: 'bg-red-500/15 text-red-300 border-red-500/30' },
+  healthy: { label: 'Healthy', cls: 'bg-[#05ffa1]/10 text-[#05ffa1] border-[#05ffa1]/40' },
+  watch: { label: 'Watch', cls: 'bg-[#f9f871]/10 text-[#f9f871] border-[#f9f871]/40' },
+  inspection_due: { label: 'Inspection Due', cls: 'bg-[#ff9e1c]/10 text-[#ff9e1c] border-[#ff9e1c]/40' },
+  overdue: { label: 'OVERDUE', cls: 'bg-[#ff2e63]/10 text-[#ff2e63] border-[#ff2e63]/40' },
 };
 
 export const LIFECYCLE_META = {
-  OPEN: 'bg-red-500/15 text-red-200 border-red-500/30',
-  ASSIGNED: 'bg-blue-500/15 text-blue-200 border-blue-500/30',
-  IN_PROGRESS: 'bg-yellow-500/15 text-yellow-100 border-yellow-500/30',
-  COMPLETED: 'bg-green-500/15 text-green-200 border-green-500/30',
-  CLOSED: 'bg-slate-500/15 text-slate-200 border-slate-500/30',
-  PENDING_REVIEW: 'bg-yellow-500/15 text-yellow-100 border-yellow-500/30',
-  ACKNOWLEDGED: 'bg-blue-500/15 text-blue-200 border-blue-500/30',
-  CONVERTED: 'bg-orange-500/15 text-orange-200 border-orange-500/30',
-  DISMISSED: 'bg-slate-500/15 text-slate-200 border-slate-500/30',
+  OPEN: 'bg-[#ff2e63]/10 text-[#ff2e63] border-[#ff2e63]/40',
+  ASSIGNED: 'bg-[#00fff5]/10 text-[#00fff5] border-[#00fff5]/40',
+  IN_PROGRESS: 'bg-[#f9f871]/10 text-[#f9f871] border-[#f9f871]/40',
+  COMPLETED: 'bg-[#05ffa1]/10 text-[#05ffa1] border-[#05ffa1]/40',
+  CLOSED: 'bg-[#7b84a8]/10 text-[#9aa2c0] border-[#7b84a8]/40',
+  PENDING_REVIEW: 'bg-[#f9f871]/10 text-[#f9f871] border-[#f9f871]/40',
+  ACKNOWLEDGED: 'bg-[#00fff5]/10 text-[#00fff5] border-[#00fff5]/40',
+  CONVERTED: 'bg-[#ff9e1c]/10 text-[#ff9e1c] border-[#ff9e1c]/40',
+  DISMISSED: 'bg-[#7b84a8]/10 text-[#9aa2c0] border-[#7b84a8]/40',
+};
+
+export const BREAKDOWN_TYPE_META = {
+  MECHANICAL: 'bg-[#00fff5]/10 text-[#00fff5] border-[#00fff5]/40',
+  ELECTRICAL: 'bg-[#f9f871]/10 text-[#f9f871] border-[#f9f871]/40',
+  CONTROL_PLC: 'bg-[#ff2e63]/10 text-[#ff2e63] border-[#ff2e63]/40',
 };
 
 export const StatusBadge = ({ status }) => {
   const meta = STATUS_META[status] || STATUS_META.idle;
-  return <Badge variant="outline" className={`${meta.cls} text-[10px] uppercase tracking-wide`}>{meta.label}</Badge>;
+  return <Badge variant="outline" className={`${meta.cls} text-[10px] uppercase tracking-wider font-mono`}>{meta.label}</Badge>;
 };
 
 export const HealthBadge = ({ health }) => {
   const meta = HEALTH_META[health] || HEALTH_META.healthy;
-  return <Badge variant="outline" className={`${meta.cls} text-[10px] uppercase tracking-wide`}>{meta.label}</Badge>;
+  return <Badge variant="outline" className={`${meta.cls} text-[10px] uppercase tracking-wider font-mono`}>{meta.label}</Badge>;
 };
 
 export const LifecycleBadge = ({ status }) => (
-  <Badge variant="outline" className={`${LIFECYCLE_META[status] || LIFECYCLE_META.CLOSED} text-[10px] tracking-wide`}>{status}</Badge>
+  <Badge variant="outline" className={`${LIFECYCLE_META[status] || LIFECYCLE_META.CLOSED} text-[10px] tracking-wider font-mono`}>{status}</Badge>
 );
+
+export const TypeBadge = ({ type }) => type ? (
+  <Badge variant="outline" className={`${BREAKDOWN_TYPE_META[type] || BREAKDOWN_TYPE_META.MECHANICAL} text-[10px] tracking-wider font-mono`}>{type.replace('_', ' ')}</Badge>
+) : null;
 
 export const StatusDot = ({ status, pulse }) => {
   const meta = STATUS_META[status] || STATUS_META.idle;
-  return <span className={`inline-block h-2 w-2 rounded-full ${pulse && status === 'failed' ? 'alarm-pulse' : ''}`} style={{ backgroundColor: meta.color }} />;
+  return (
+    <span
+      className={`inline-block h-2 w-2 rounded-full ${pulse && status === 'failed' ? 'alarm-pulse' : ''}`}
+      style={{ backgroundColor: meta.color, boxShadow: `0 0 6px ${meta.color}` }}
+    />
+  );
 };
 
 export const fmtDate = (iso) => {
@@ -57,12 +73,12 @@ export const fmtDate = (iso) => {
 };
 
 export const CRIT_META = {
-  critical: 'bg-red-500/15 text-red-300 border-red-500/30',
-  high: 'bg-orange-500/15 text-orange-200 border-orange-500/30',
-  medium: 'bg-blue-500/15 text-blue-200 border-blue-500/30',
-  low: 'bg-slate-500/15 text-slate-300 border-slate-500/30',
+  critical: 'bg-[#ff2e63]/10 text-[#ff2e63] border-[#ff2e63]/40',
+  high: 'bg-[#ff9e1c]/10 text-[#ff9e1c] border-[#ff9e1c]/40',
+  medium: 'bg-[#00fff5]/10 text-[#00fff5] border-[#00fff5]/40',
+  low: 'bg-[#7b84a8]/10 text-[#9aa2c0] border-[#7b84a8]/40',
 };
 
 export const CritBadge = ({ level }) => (
-  <Badge variant="outline" className={`${CRIT_META[level] || CRIT_META.medium} text-[10px] uppercase`}>{level}</Badge>
+  <Badge variant="outline" className={`${CRIT_META[level] || CRIT_META.medium} text-[10px] uppercase tracking-wider font-mono`}>{level}</Badge>
 );

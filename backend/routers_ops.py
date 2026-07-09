@@ -16,6 +16,29 @@ from events import create_timeline_event, now_iso
 router = APIRouter()
 
 
+# ============ PLANT RUNTIME CLOCK ============
+@router.get('/plant-clock')
+async def get_plant_clock(user: dict = Depends(get_current_user)):
+    clock = await db.settings.find_one({'id': 'plant_clock'}, {'_id': 0})
+    if not clock:
+        clock = {'id': 'plant_clock', 'started_at': now_iso(), 'last_tick_at': now_iso()}
+        await db.settings.insert_one(dict(clock))
+        clock.pop('_id', None)
+    started = datetime.fromisoformat(str(clock['started_at']).replace('Z', '+00:00'))
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    uptime = max((datetime.now(timezone.utc) - started).total_seconds(), 0)
+    return {'started_at': clock['started_at'], 'last_tick_at': clock.get('last_tick_at'), 'uptime_seconds': int(uptime)}
+
+
+@router.post('/plant-clock/reset')
+async def reset_plant_clock(user: dict = Depends(require_admin)):
+    ts = now_iso()
+    await db.settings.update_one({'id': 'plant_clock'}, {'$set': {'started_at': ts, 'last_tick_at': ts}}, upsert=True)
+    await create_timeline_event('plant_clock_reset', title='Plant runtime clock reset (shift start)', user=user['username'])
+    return {'ok': True, 'started_at': ts}
+
+
 # ============ RUNTIME ============
 class RuntimeLogCreate(BaseModel):
     machine_id: str
@@ -64,6 +87,13 @@ async def list_runtime_logs(machine_id: Optional[str] = None, line: Optional[str
             q['date']['$lte'] = date_to
     total = await db.runtime_logs.count_documents(q)
     items = await db.runtime_logs.find(q, {'_id': 0}).sort('date', -1).skip(skip).limit(limit).to_list(limit)
+    for it in items:  # auto-accumulated logs compute availability on read
+        cal = it.get('calendar_hours') or 0
+        run = it.get('run_hours') or 0
+        it['calendar_hours'] = round(cal, 2)
+        it['run_hours'] = round(run, 2)
+        it['dark_hours'] = round(it.get('dark_hours') or (cal - run), 2)
+        it['availability'] = it.get('availability') if it.get('source') in ('manual', 'csv_import') else (round(run / cal * 100, 1) if cal else 0)
     return {'items': items, 'total': total}
 
 

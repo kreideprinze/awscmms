@@ -128,15 +128,72 @@ async def pm_scheduler_loop():
         await asyncio.sleep(60)
 
 
+# ---------------- PLANT RUNTIME CLOCK (auto runtime accumulation) ----------------
+async def runtime_clock_tick():
+    """Accumulate Run/Calendar/Dark hours per machine off the single plant clock.
+    Machines in running/watch/inspection_due accrue run hours; all accrue calendar hours."""
+    from pymongo import UpdateOne
+    from datetime import datetime as dt_cls
+    now = datetime.now(timezone.utc)
+    clock = await db.settings.find_one({'id': 'plant_clock'}, {'_id': 0})
+    if not clock:
+        await db.settings.insert_one({'id': 'plant_clock', 'started_at': now_iso(), 'last_tick_at': now_iso()})
+        return
+    try:
+        last = dt_cls.fromisoformat(str(clock.get('last_tick_at')).replace('Z', '+00:00'))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+    except Exception:
+        last = now
+    dt_hours = round(min(max((now - last).total_seconds() / 3600.0, 0), 0.25), 5)  # cap 15min catch-up
+    await db.settings.update_one({'id': 'plant_clock'}, {'$set': {'last_tick_at': now_iso()}})
+    if dt_hours <= 0:
+        return
+    today = now_iso()[:10]
+    running_statuses = ['running', 'watch', 'inspection_due']
+    machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'name': 1, 'status': 1, 'department': 1, 'line': 1, 'process_group': 1}).to_list(20000)
+    ops = []
+    for m in machines:
+        is_running = m.get('status') in running_statuses
+        ops.append(UpdateOne(
+            {'machine_id': m['id'], 'date': today},
+            {'$inc': {'calendar_hours': dt_hours, 'run_hours': dt_hours if is_running else 0.0, 'dark_hours': 0.0 if is_running else dt_hours},
+             '$setOnInsert': {'id': str(uuid.uuid4()), 'machine_id': m['id'], 'machine_name': m['name'],
+                              'department': m.get('department'), 'line': m.get('line'), 'process_group': m.get('process_group'),
+                              'date': today, 'entered_by': 'plant_clock', 'source': 'plant_clock', 'created_at': now_iso()},
+             '$set': {'updated_at': now_iso()}},
+            upsert=True))
+    if ops:
+        await db.runtime_logs.bulk_write(ops, ordered=False)
+    await db.machines.update_many({'status': {'$in': running_statuses}}, {'$inc': {'total_run_hours': dt_hours}})
+
+
+_clock_tick_count = 0
+
+
+async def runtime_clock_loop():
+    global _clock_tick_count
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await runtime_clock_tick()
+            _clock_tick_count += 1
+            if _clock_tick_count % 15 == 0:  # refresh reliability life % every ~15 min
+                from reliability import recompute_all
+                await recompute_all(trigger='plant_clock')
+        except Exception as e:
+            logger.error(f'Plant clock ticker error: {e}')
+        await asyncio.sleep(60)
+
+
 @app.on_event('startup')
 async def startup():
     try:
-        seeded = await seed_all()
-        if seeded:
-            logger.info('First-startup seed completed')
+        await seed_all()
     except Exception as e:
         logger.error(f'Seed error: {e}')
     asyncio.create_task(pm_scheduler_loop())
+    asyncio.create_task(runtime_clock_loop())
 
 
 app.add_middleware(

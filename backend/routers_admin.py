@@ -343,3 +343,22 @@ async def update_branding(req: BrandingUpdate, user: dict = Depends(require_admi
 @router.get('/audit-logs')
 async def list_audit_logs(limit: int = 200, user: dict = Depends(require_admin)):
     return await db.audit_logs.find({}, {'_id': 0}).sort('created_at', -1).limit(min(limit, 1000)).to_list(1000)
+
+
+@router.get('/system/seed-summary')
+async def seed_summary(user: dict = Depends(require_admin)):
+    stored = await db.settings.find_one({'id': 'seed_summary'}, {'_id': 0})
+    live = {}
+    for coll in ['users', 'departments', 'lines', 'process_groups', 'machines', 'failure_modes', 'error_codes',
+                 'pm_templates', 'runtime_templates', 'notification_templates', 'spare_locations', 'spares_inventory', 'machine_spares']:
+        live[coll] = await db[coll].count_documents({})
+    return {'seed_summary': stored, 'live_counts': live}
+
+
+@router.post('/system/reseed-verify')
+async def reseed_verify(user: dict = Depends(require_admin)):
+    """Re-run the idempotent seed to top-up any missing master data (never duplicates)."""
+    from seed import seed_all
+    summary = await seed_all()
+    await audit(user, 'reseed_verify', 'system', 'seed')
+    return summary
