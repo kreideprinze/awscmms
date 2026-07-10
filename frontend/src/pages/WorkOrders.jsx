@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
-import { MachineSelect, TechnicianSelect, SpareRows } from '@/components/Shared';
+import { MachineSelect, TechnicianSelect, SpareRows, DateTimeField } from '@/components/Shared';
 
 // Lifecycle: OPEN -> ASSIGNED -> IN_PROGRESS -> (tech completes) PENDING_ADMIN_CLOSURE -> (admin) CLOSED
 const LIFE = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSED'];
@@ -141,11 +141,13 @@ function WODetailModal({ wo, open, setOpen, onDone, onAct, onStartComplete }) {
               <div>
                 <Label className="text-[10px] text-muted-foreground">Start Time</Label>
                 <Input type="datetime-local" data-testid="wo-detail-start-time" value={startT} disabled={!canEditTimes}
+                  onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
                   onChange={(e) => setStartT(e.target.value)} className="mt-0.5 bg-[hsl(var(--panel-1))] font-mono text-xs" />
               </div>
               <div>
                 <Label className="text-[10px] text-muted-foreground">End Time</Label>
                 <Input type="datetime-local" data-testid="wo-detail-end-time" value={endT} disabled={!canEditTimes}
+                  onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
                   onChange={(e) => setEndT(e.target.value)} className="mt-0.5 bg-[hsl(var(--panel-1))] font-mono text-xs" />
               </div>
             </div>
@@ -198,19 +200,27 @@ function WODetailModal({ wo, open, setOpen, onDone, onAct, onStartComplete }) {
 
 function CompleteDialog({ wo, open, setOpen, onDone }) {
   const [actionTaken, setActionTaken] = useState('');
-  const [rootCause, setRootCause] = useState('');
   const [spares, setSpares] = useState([]);
   const [checklist, setChecklist] = useState({});
+  const [startT, setStartT] = useState('');
+  const [endT, setEndT] = useState('');
 
   useEffect(() => {
     if (wo?.checklist) setChecklist(Object.fromEntries(wo.checklist.map((c) => [c, false])));
+    if (wo) {
+      setStartT(toLocalInput(wo.started_at || wo.created_at));
+      setEndT(toLocalInput(new Date().toISOString()));
+    }
   }, [wo]);
 
   if (!wo) return null;
   const submit = async () => {
+    if (startT && endT && new Date(endT) < new Date(startT)) { toast.error('End time cannot be before start time'); return; }
     try {
       await api.put(`/work-orders/${wo.id}`, {
-        action: 'complete', action_taken: actionTaken || undefined, root_cause: rootCause || undefined,
+        action: 'complete', action_taken: actionTaken || undefined,
+        started_at: startT ? toIso(startT) : undefined,
+        completed_at: endT ? toIso(endT) : undefined,
         spare_parts: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
         checklist_results: Object.keys(checklist).length ? checklist : undefined,
       });
@@ -235,7 +245,11 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
               ))}
             </div>
           )}
-          <div><Label className="text-xs">Root Cause (optional)</Label><Textarea data-testid="wo-complete-root-cause" value={rootCause} onChange={(e) => setRootCause(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
+          {/* Corrected execution times: duration + RCA trigger evaluate against these */}
+          <div className="grid grid-cols-2 gap-3">
+            <DateTimeField label="Start Time" value={startT} onChange={setStartT} testId="wo-complete-start-time" />
+            <DateTimeField label="End Time" value={endT} onChange={setEndT} testId="wo-complete-end-time" />
+          </div>
           <div><Label className="text-xs">Action Taken</Label><Textarea data-testid="wo-complete-action-taken" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
           <SpareRows rows={spares} setRows={setSpares} />
           <Button onClick={submit} data-testid="wo-complete-confirm" className="w-full border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10">Complete Work Order</Button>

@@ -162,6 +162,7 @@ export default function ControlRoom() {
       >
         <LineKpiRibbon
           refreshSignal={machineUpdates}
+          selectedLine={lineFilter}
           onSelectLine={(line) => { setLineFilter(line); setDeptFilter('all'); }}
         />
 

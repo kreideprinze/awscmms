@@ -32,7 +32,7 @@ function availGlow(a) {
 
 // Primary Control Room ribbon: availability + downtime per Line, expandable to
 // per-Section (process group) breakdown. This is the primary at-a-glance info.
-export function LineKpiRibbon({ onSelectLine, refreshSignal }) {
+export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
   const [data, setData] = useState(null);
   const [windowH, setWindowH] = useState(24);
   const [expandedLine, setExpandedLine] = useState(null);
@@ -84,13 +84,23 @@ export function LineKpiRibbon({ onSelectLine, refreshSignal }) {
         {!data && <div className="cyber-loading w-full" />}
         {data?.lines?.map((l) => {
           const isOpen = expandedLine === l.line;
+          const isSelected = selectedLine === l.line;
           return (
             <button
               key={l.line}
               data-testid={`line-kpi-${l.line.replace(/\s+/g, '-')}`}
-              onClick={() => setExpandedLine(isOpen ? null : l.line)}
+              onClick={() => {
+                // card click = expand sections AND filter the Digital Twin to this line (toggle)
+                if (isSelected) {
+                  setExpandedLine(null);
+                  onSelectLine && onSelectLine('all');
+                } else {
+                  setExpandedLine(l.line);
+                  onSelectLine && onSelectLine(l.line);
+                }
+              }}
               className={`cyber-chamfer-sm min-w-[170px] shrink-0 border bg-transparent px-3 py-2 text-left transition-all duration-150 hover:-translate-y-0.5 ${
-                isOpen
+                isSelected || isOpen
                   ? 'border-[hsl(var(--primary))] shadow-[0_0_12px_rgba(var(--accent-rgb),0.2)]'
                   : 'border-border hover:border-[hsl(var(--primary))]/60'
               }`}

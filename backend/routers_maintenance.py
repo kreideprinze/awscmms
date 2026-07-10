@@ -191,7 +191,9 @@ async def list_breakdowns(machine_id: Optional[str] = None, status: Optional[str
         q['$or'] = [{'ticket_number': {'$regex': search, '$options': 'i'}}, {'machine_name': {'$regex': search, '$options': 'i'}}, {'description': {'$regex': search, '$options': 'i'}}]
     total = await db.breakdowns.count_documents(q)
     items = await db.breakdowns.find(q, {'_id': 0}).sort('created_at', -1).skip(skip).limit(limit).to_list(limit)
-    return {'items': items, 'total': total}
+    # subtitle metric: count of OPEN/ACTIVE breakdowns only (not all-time total)
+    open_total = await db.breakdowns.count_documents({'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS']}})
+    return {'items': items, 'total': total, 'open_total': open_total}
 
 
 @router.get('/breakdowns/{bd_id}')
@@ -208,7 +210,8 @@ class BreakdownUpdate(BaseModel):
     root_cause: Optional[str] = None
     action_taken: Optional[str] = None
     consumed_spares: Optional[List[SpareUse]] = None
-    end_time: Optional[str] = None
+    start_time: Optional[str] = None  # editable corrected start (downtime reflects reality)
+    end_time: Optional[str] = None    # editable corrected end
     description: Optional[str] = None
     failure_mode: Optional[str] = None
 
@@ -269,19 +272,26 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         return {'ok': True, 'status': 'IN_PROGRESS'}
 
     if req.action in ('complete', 'close'):
+        # Corrected/edited times take precedence over the raw elapsed timer — downtime,
+        # availability and the RCA trigger all evaluate against the EDITED duration.
+        start_time = req.start_time or bd['start_time']
         end_time = req.end_time or bd.get('end_time') or now_iso()
-        start = parse_dt(bd['start_time'])
+        start = parse_dt(start_time)
         end = parse_dt(end_time)
+        if start and end and end < start:
+            raise HTTPException(status_code=400, detail='End time cannot be before start time')
         downtime = round((end - start).total_seconds() / 60.0, 1) if start and end else 0
         settings = await db.settings.find_one({'id': 'reliability_settings'}, {'_id': 0}) or {}
         rc_threshold = settings.get('root_cause_downtime_minutes', 30)
 
+        # Root cause is NOT captured here — it belongs exclusively to the dedicated
+        # 5-Why RCA work order (auto-generated below when downtime exceeds the threshold).
         root_cause = req.root_cause or bd.get('root_cause')
-        if downtime > rc_threshold and not root_cause:
-            raise HTTPException(status_code=400, detail=f'Root cause is mandatory: downtime {downtime:.0f} min exceeds {rc_threshold} min')
 
         repair_start = parse_dt(bd.get('repair_started_at')) or start
         repair_duration = round((end - repair_start).total_seconds() / 60.0, 1) if repair_start and end else downtime
+        if repair_duration < 0:
+            repair_duration = downtime
 
         consumed = [s.model_dump() for s in (req.consumed_spares or [])]
         if consumed:
@@ -291,14 +301,14 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
 
         new_status = 'COMPLETED' if req.action == 'complete' else 'CLOSED'
         updates = {
-            'status': new_status, 'end_time': end_time, 'downtime_minutes': downtime,
+            'status': new_status, 'start_time': start_time, 'end_time': end_time, 'downtime_minutes': downtime,
             'repair_duration_minutes': repair_duration, 'root_cause': root_cause,
             'action_taken': req.action_taken or bd.get('action_taken'),
         }
         if consumed:
             updates['consumed_spares'] = (bd.get('consumed_spares') or []) + consumed
 
-        # RCA rule: downtime above threshold auto-triggers a 5-Why RCA WO for the attending technician
+        # RCA rule: EDITED/corrected downtime above threshold auto-triggers a 5-Why RCA WO
         rca_task_id = bd.get('rca_task_id')
         if downtime > rc_threshold and not rca_task_id:
             tech = bd.get('assigned_to') or user['username']
@@ -310,6 +320,45 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
             updates['rca_task_id'] = rca_wo['id']
 
         await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
+
+        # SYNC: breakdown resolution must immediately propagate to the linked Work Order
+        linked_wo = None
+        if bd.get('work_order_id'):
+            linked_wo = await db.work_orders.find_one({'id': bd['work_order_id']}, {'_id': 0})
+        if not linked_wo:
+            linked_wo = await db.work_orders.find_one(
+                {'source_breakdown_id': bd_id, 'wo_type': {'$ne': 'RCA'}, 'status': {'$ne': 'CLOSED'}}, {'_id': 0})
+        if linked_wo and linked_wo.get('status') != 'CLOSED':
+            if req.action == 'close' and user.get('role') == 'admin':
+                await db.work_orders.update_one({'id': linked_wo['id']}, {'$set': {
+                    'status': 'CLOSED', 'closed_by': user['username'], 'closed_at': now_iso(),
+                    'completed_at': linked_wo.get('completed_at') or end_time,
+                    'started_at': linked_wo.get('started_at') or start_time,
+                    'duration_minutes': linked_wo.get('duration_minutes') or repair_duration,
+                    'action_taken': req.action_taken or linked_wo.get('action_taken'),
+                }})
+                await create_timeline_event('wo_closed', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
+                                            title=f"WO {linked_wo['wo_number']} closed (breakdown {bd['ticket_number']} closed)",
+                                            user=user['username'], reference_id=linked_wo['id'], reference_type='work_order',
+                                            department=bd['department'], line=bd['line'])
+            elif linked_wo.get('status') != 'PENDING_ADMIN_CLOSURE':
+                await db.work_orders.update_one({'id': linked_wo['id']}, {'$set': {
+                    'status': 'PENDING_ADMIN_CLOSURE',
+                    'started_at': linked_wo.get('started_at') or start_time,
+                    'completed_at': end_time,
+                    'duration_minutes': repair_duration,
+                    'action_taken': req.action_taken or linked_wo.get('action_taken'),
+                }})
+                await create_timeline_event('wo_completed', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
+                                            title=f"WO {linked_wo['wo_number']} completed — awaiting admin closure",
+                                            description=f"Synced from breakdown {bd['ticket_number']} resolution",
+                                            user=user['username'], reference_id=linked_wo['id'], reference_type='work_order',
+                                            department=bd['department'], line=bd['line'])
+                await create_notification('work_order', f"Admin Review Required: {bd['machine_name']}",
+                                          f"{linked_wo['wo_number']} — repair of {bd['ticket_number']} completed by {user['username']}. Admin closure required.",
+                                          severity='warning', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
+                                          reference_id=linked_wo['id'], reference_type='work_order', target_role='admin')
+
         # repair event record
         await db.repair_events.insert_one({
             'id': str(uuid.uuid4()), 'breakdown_id': bd_id, 'ticket_number': bd['ticket_number'],
@@ -449,21 +498,26 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
             from routers_spares import consume_spares
             spares = await consume_spares(spares, 'WORKORDER_CONSUMPTION', wo_id, f"Work Order {wo['wo_number']}",
                                           wo['machine_id'], wo['machine_name'], user['username'])
-        started = wo.get('started_at') or wo.get('created_at')
+        # Corrected/edited execution times take precedence over the raw timer — the duration
+        # (and therefore the RCA trigger) evaluates against the edited values.
+        started = req.started_at or wo.get('started_at') or wo.get('created_at')
+        ended = req.completed_at or now_iso()
+        s_dt, e_dt = (parse_dt(started) if started else None), parse_dt(ended)
+        if s_dt and e_dt and e_dt < s_dt:
+            raise HTTPException(status_code=400, detail='End time cannot be before start time')
         duration = req.duration_minutes
-        if duration is None and started:
-            try:
-                duration = round((datetime.now(timezone.utc) - parse_dt(started)).total_seconds() / 60.0, 1)
-            except Exception:
-                duration = None
+        if duration is None and s_dt and e_dt:
+            duration = round((e_dt - s_dt).total_seconds() / 60.0, 1)
         # Lifecycle: tech completion parks the WO at PENDING_ADMIN_CLOSURE; only admin can CLOSE
         new_status = 'PENDING_ADMIN_CLOSURE' if req.action == 'complete' else 'CLOSED'
         updates = {
-            'status': new_status, 'completed_at': now_iso(),
+            'status': new_status, 'completed_at': ended,
             'root_cause': req.root_cause or wo.get('root_cause'),
             'action_taken': req.action_taken or wo.get('action_taken'),
             'duration_minutes': duration if req.action == 'complete' else (wo.get('duration_minutes') or duration),
         }
+        if req.started_at:
+            updates['started_at'] = req.started_at
         if req.action == 'close':
             updates['closed_at'] = now_iso()
             updates['closed_by'] = user['username']
@@ -488,6 +542,29 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                 await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'running'}})
                 machine['status'] = 'running'
                 await broadcast_machine_update(machine)
+
+        # SYNC: WO admin-closure is the single closure point — auto-close the linked breakdown.
+        # (The redundant breakdown-level "Final Close" has been removed from the UI.)
+        if req.action == 'close' and wo.get('source_breakdown_id') and wo.get('wo_type') != 'RCA':
+            origin_bd = await db.breakdowns.find_one({'id': wo['source_breakdown_id']}, {'_id': 0})
+            if origin_bd and origin_bd.get('status') != 'CLOSED':
+                bd_updates = {'status': 'CLOSED'}
+                if not origin_bd.get('end_time'):
+                    end_now = now_iso()
+                    bd_updates['end_time'] = end_now
+                    s_dt, e_dt = parse_dt(origin_bd.get('start_time')), parse_dt(end_now)
+                    if s_dt and e_dt:
+                        bd_updates['downtime_minutes'] = round((e_dt - s_dt).total_seconds() / 60.0, 1)
+                await db.breakdowns.update_one({'id': origin_bd['id']}, {'$set': bd_updates})
+                machine = await db.machines.find_one({'id': origin_bd['machine_id']}, {'_id': 0})
+                if machine and machine.get('status') in ('failed', 'down', 'repair'):
+                    await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'running'}})
+                    machine['status'] = 'running'
+                    await broadcast_machine_update(machine)
+                await create_timeline_event('breakdown_closed', machine_id=origin_bd['machine_id'], machine_name=origin_bd['machine_name'],
+                                            title=f"Breakdown {origin_bd['ticket_number']} closed (via WO {wo['wo_number']} admin closure)",
+                                            user=user['username'], reference_id=origin_bd['id'], reference_type='breakdown',
+                                            department=origin_bd.get('department'), line=origin_bd.get('line'))
 
         # RCA rule: WO duration above threshold auto-triggers a 5-Why RCA WO for the attending technician
         # (skipped for RCA WOs themselves, and when the originating breakdown already triggered one)
@@ -751,6 +828,7 @@ class PMComplete(BaseModel):
     row_results: Optional[List[dict]] = None  # [{sn, description, checked_for, parameter, status: OK|NOT_OK, remarks}]
     done_by: Optional[str] = None
     checked_by: Optional[str] = None
+    checklist_date: Optional[str] = None  # editable Date on the checklist sheet (YYYY-MM-DD)
     spares_consumed: Optional[List[SpareUse]] = None
 
 
@@ -782,6 +860,7 @@ async def complete_pm_task(task_id: str, req: PMComplete, user: dict = Depends(r
         'checklist_results': req.checklist_results, 'row_results': rows,
         'done_by': req.done_by or user.get('name') or user['username'],
         'checked_by': req.checked_by, 'spares_consumed': spares,
+        'checklist_date': req.checklist_date or now_iso()[:10],
         'due_date': task.get('next_due_date'), 'completed_at': now_iso(),
         'on_time': task.get('next_due_date', '9999') >= now_iso()[:10],
     }
@@ -869,15 +948,19 @@ def _task_rows(task, completion=None):
 
 
 @router.get('/pm-tasks/{task_id}/pdf')
-async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, date: Optional[str] = None,
+                      user: dict = Depends(get_current_user)):
     """Printable PM checklist sheet. Blank template by default; pass completion_id
-    (or 'latest') to render a completed instance with per-row status + remarks."""
+    (or 'latest') to render a completed instance with per-row status + remarks.
+    Optional `date` overrides the Date field (editable on-screen and in the PDF)."""
+    import base64 as _b64
     from io import BytesIO
     from fastapi.responses import Response
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     task = await db.pm_tasks.find_one({'id': task_id}, {'_id': 0})
@@ -899,11 +982,40 @@ async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, user: d
     title_style = ParagraphStyle('t', parent=styles['Title'], fontSize=14, spaceAfter=2)
     story = []
 
-    story.append(Paragraph(branding.get('app_name') or 'Factory Operations', ParagraphStyle('org', parent=styles['Normal'], fontSize=9, textColor=colors.grey)))
-    story.append(Paragraph('PREVENTIVE MAINTENANCE CHECKLIST', title_style))
-    story.append(Paragraph(task['task_name'], ParagraphStyle('sub', parent=styles['Heading2'], fontSize=11, spaceAfter=6)))
+    # Header: embedded branding logo (real image, not placeholder text) + titles
+    logo_flowable = None
+    logo_data = branding.get('logo_data') or ''
+    if logo_data.startswith('data:image') and ';base64,' in logo_data and 'svg' not in logo_data.split(';')[0]:
+        try:
+            raw = _b64.b64decode(logo_data.split(';base64,', 1)[1])
+            img_reader = ImageReader(BytesIO(raw))
+            iw, ih = img_reader.getSize()
+            h = 14 * mm
+            w = min(h * (iw / ih) if ih else h, 45 * mm)
+            logo_flowable = RLImage(BytesIO(raw), width=w, height=h)
+        except Exception:
+            logo_flowable = None
+    title_block = [
+        Paragraph(branding.get('app_name') or 'Factory Operations', ParagraphStyle('org', parent=styles['Normal'], fontSize=9, textColor=colors.grey)),
+        Paragraph('PREVENTIVE MAINTENANCE CHECKLIST', title_style),
+        Paragraph(task['task_name'], ParagraphStyle('sub', parent=styles['Heading2'], fontSize=11, spaceAfter=0)),
+    ]
+    if logo_flowable:
+        hdr = Table([[logo_flowable, title_block]], colWidths=[50 * mm, 136 * mm])
+        hdr.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('LEFTPADDING', (0, 0), (0, 0), 0)]))
+        story.append(hdr)
+        story.append(Spacer(1, 3 * mm))
+    else:
+        story.extend(title_block)
+        story.append(Spacer(1, 2 * mm))
 
-    date_val = (completion['completed_at'][:10] if completion else task.get('next_due_date', ''))
+    # Editable Date: explicit `date` param wins; else completion date; else blank line for handwriting
+    if date:
+        date_val = date
+    elif completion:
+        date_val = completion.get('checklist_date') or completion['completed_at'][:10]
+    else:
+        date_val = '_' * 16
     info = [[
         Paragraph(f"<b>Machine:</b> {task['machine_name']}", cell),
         Paragraph(f"<b>Line:</b> {task.get('line', '')}", cell),
@@ -920,16 +1032,30 @@ async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, user: d
     story.append(info_t)
     story.append(Spacer(1, 4 * mm))
 
+    def status_boxes():
+        """Outlined EMPTY checkboxes (☐ OK ☐ NOT OK) drawn as real bordered cells —
+        never solid glyph squares that print unusable."""
+        t = Table([['', 'OK', '', 'NOT OK']], colWidths=[3.6 * mm, 7 * mm, 3.6 * mm, 11 * mm], rowHeights=[3.6 * mm])
+        t.setStyle(TableStyle([
+            ('BOX', (0, 0), (0, 0), 0.7, colors.black),
+            ('BOX', (2, 0), (2, 0), 0.7, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 1), ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+            ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        return t
+
     rows = _task_rows(task, completion)
     header = [Paragraph(f'<b>{h}</b>', cell_b) for h in ['S.N.', 'Description', 'Checked For', 'Parameter / Process', 'Status', 'Remarks']]
     data = [header]
     span_cmds = []
     for idx, r in enumerate(rows, start=1):
-        status_txt = r['status'] if completion else '\u2610 OK   \u2610 NOT OK'
+        status_cell = Paragraph(r['status'], cell) if completion else status_boxes()
         data.append([
             Paragraph(r['sn'], cell), Paragraph(r['description'], cell_b if r['first_of_group'] else cell),
             Paragraph(r['checked_for'], cell), Paragraph(r['parameter'], cell),
-            Paragraph(status_txt, cell), Paragraph(r['remarks'], cell),
+            status_cell, Paragraph(r['remarks'], cell),
         ])
         if r['first_of_group'] and r['group_size'] > 1:
             span_cmds.append(('SPAN', (0, idx), (0, idx + r['group_size'] - 1)))
@@ -970,6 +1096,50 @@ async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, user: d
                     headers={'Content-Disposition': f'attachment; filename="{fname}"'})
 
 
+class WarningWOGenerate(BaseModel):
+    assigned_to: str
+    wo_type: str = 'Inspection'  # Inspection | Corrective
+
+
+@router.post('/warnings/{warning_id}/generate-wo')
+async def generate_warning_wo(warning_id: str, req: WarningWOGenerate, user: dict = Depends(get_current_user)):
+    """Generate a Work Order directly from a Warning with explicit technician assignment
+    (for warnings without a linked WO, or when an additional dispatch is needed)."""
+    warning = await db.warnings.find_one({'id': warning_id}, {'_id': 0})
+    if not warning:
+        raise HTTPException(status_code=404, detail='Warning not found')
+    assigned_to = await _validate_technician(req.assigned_to)
+    if warning.get('work_order_id'):
+        existing = await db.work_orders.find_one({'id': warning['work_order_id']}, {'_id': 0, 'status': 1, 'wo_number': 1})
+        if existing and existing.get('status') not in ('CLOSED',):
+            raise HTTPException(status_code=400, detail=f"Warning already has an open work order ({existing['wo_number']})")
+    wo_type = req.wo_type if req.wo_type in ('Inspection', 'Corrective') else 'Inspection'
+    wo_num = await next_counter('work_orders', 'WO')
+    wo = {
+        'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': wo_type,
+        'title': f"{wo_type} \u2014 {warning['machine_name']} ({warning['tag_number']})",
+        'description': f"Generated from warning {warning['tag_number']} [{warning.get('warning_type', 'MECHANICAL')}]: {warning['description']}",
+        'machine_id': warning['machine_id'], 'machine_name': warning['machine_name'],
+        'department': warning.get('department'), 'line': warning.get('line'),
+        'assigned_to': assigned_to, 'priority': 'medium', 'status': 'ASSIGNED',
+        'root_cause': None, 'action_taken': None, 'spare_parts': [],
+        'duration_minutes': None, 'source': 'warning_manual', 'source_warning_id': warning_id,
+        'auto_generated': False, 'created_at': now_iso(),
+    }
+    await db.work_orders.insert_one(dict(wo))
+    await db.warnings.update_one({'id': warning_id}, {'$set': {'work_order_id': wo['id'], 'work_order_number': wo_num}})
+    await create_timeline_event('wo_created', machine_id=warning['machine_id'], machine_name=warning['machine_name'],
+                                title=f"WO {wo_num} generated from warning {warning['tag_number']} \u2192 {assigned_to}",
+                                user=user['username'], reference_id=wo['id'], reference_type='work_order',
+                                department=warning.get('department'), line=warning.get('line'))
+    await create_notification('work_order', f"Work Order Dispatched: {warning['machine_name']}",
+                              f"{wo_num} generated from {warning['tag_number']} \u2014 assigned to {assigned_to}",
+                              severity='warning', machine_id=warning['machine_id'], machine_name=warning['machine_name'],
+                              reference_id=wo['id'], reference_type='work_order')
+    wo.pop('_id', None)
+    return wo
+
+
 # ============ PUBLIC (NO-LOGIN) BREAKDOWN REPORTING ============
 @router.get('/public/report-context')
 async def public_report_context():
@@ -986,6 +1156,7 @@ class PublicBreakdownCreate(BaseModel):
     breakdown_type: str = 'MECHANICAL'
     reporter_name: str
     assigned_to: Optional[str] = None  # REQUIRED (validated) — technician who will attend
+    start_time: Optional[str] = None   # editable actual start (calendar picker on the form)
 
 
 @router.post('/public/breakdowns')
@@ -999,7 +1170,7 @@ async def public_create_breakdown(req: PublicBreakdownCreate):
         raise HTTPException(status_code=400, detail='Description is required')
     assigned_to = await _validate_technician(req.assigned_to)
     bd = await _create_breakdown_internal(req.machine_id, req.description.strip(), None, reporter,
-                                          None, req.breakdown_type, assigned_to)
+                                          req.start_time, req.breakdown_type, assigned_to)
     await db.breakdowns.update_one({'id': bd['id']}, {'$set': {'submitted_via': 'public_kiosk'}})
     bd['submitted_via'] = 'public_kiosk'
     return bd

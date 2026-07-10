@@ -209,7 +209,9 @@ export function BreakdownActions({ bd, onDone, compact }) {
           <Button size="sm" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`bd-open-repair-${bd.ticket_number}`} onClick={() => navigate(`/breakdowns/repair/${bd.id}`)}>Open Repair Page</Button>
         )}
         {bd.status === 'COMPLETED' && (
-          <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-final-close-${bd.ticket_number}`} onClick={() => act({ action: 'close', action_taken: bd.action_taken, root_cause: bd.root_cause })}>Final Close</Button>
+          <span className="self-center font-mono text-[10px] uppercase tracking-wide text-[#ff9e1c]" data-testid={`bd-awaiting-admin-${bd.ticket_number}`}>
+            closure via WO admin approval
+          </span>
         )}
       </div>
     </div>

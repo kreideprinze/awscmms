@@ -38,6 +38,7 @@ export default function ClosePMTask() {
   const [doneBy, setDoneBy] = useState('');
   const [checkedBy, setCheckedBy] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [checklistDate, setChecklistDate] = useState(new Date().toISOString().slice(0, 10));
   const [spares, setSpares] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -67,6 +68,7 @@ export default function ClosePMTask() {
         remarks: remarks || undefined,
         done_by: doneBy.trim(),
         checked_by: checkedBy.trim() || undefined,
+        checklist_date: checklistDate || undefined,
         row_results: rows.map((r) => ({
           sn: r.sn, description: r.description, checked_for: r.checked_for, parameter: r.parameter,
           status: results[r.key].status, remarks: results[r.key]?.remarks || '',
@@ -115,14 +117,21 @@ export default function ClosePMTask() {
         </div>
       </div>
 
-      {/* Header sheet fields — mirrors the printed form */}
+      {/* Header sheet fields — mirrors the printed form. Date is EDITABLE (calendar picker). */}
       <div className="cyber-panel mb-4 grid grid-cols-2 gap-x-6 gap-y-2 p-4 sm:grid-cols-5" data-testid="close-pm-header">
-        {[['Machine', task.machine_name], ['Line', task.line], ['Location / Area', task.location || '—'], ['Frequency', task.frequency], ['Date', new Date().toISOString().slice(0, 10)]].map(([k, v]) => (
+        {[['Machine', task.machine_name], ['Line', task.line], ['Location / Area', task.location || '—'], ['Frequency', task.frequency]].map(([k, v]) => (
           <div key={k}>
             <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">{k}</div>
             <div className="text-sm font-semibold capitalize">{v}</div>
           </div>
         ))}
+        <div>
+          <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Date</div>
+          <Input type="date" data-testid="close-pm-date" value={checklistDate}
+            onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
+            onChange={(e) => setChecklistDate(e.target.value)}
+            className="mt-0.5 h-7 w-36 cursor-pointer bg-[hsl(var(--panel-2))] font-mono text-xs" />
+        </div>
       </div>
 
       {/* Checklist table */}

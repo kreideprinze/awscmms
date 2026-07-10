@@ -1,26 +1,58 @@
 [
   {
-    "content": "Backend: mandatory assigned_to on breakdowns/warnings (all 4 endpoints), WO always created, remove auto_create_work_order, technicians in public report-context",
-    "status": "completed"
+    "content": "B1: Breakdown complete/close syncs linked WO (PENDING_ADMIN_CLOSURE/CLOSED) + WO admin close auto-closes breakdown",
+    "status": "in_progress"
   },
   {
-    "content": "Backend: DELETE /line-runtime-logs (admin) with machine fan-out cleanup",
-    "status": "completed"
+    "content": "B2: Editable start/end times on breakdown complete + WO complete (backend), RCA uses edited downtime, remove mandatory root_cause",
+    "status": "pending"
   },
   {
-    "content": "Frontend: ReportBreakdownDialog — required Technician dropdown, remove Auto-WO checkbox (all entry points)",
-    "status": "completed"
+    "content": "B3: list_breakdowns open_total + warnings generate-wo endpoint + public start_time",
+    "status": "pending"
   },
   {
-    "content": "Frontend: Runtime calendar view — month grid with logged/partial/missing coloring + per-line day dialog (admin CRUD, others view-only)",
-    "status": "completed"
+    "content": "B4: Line availability formula fix (union intervals, window-based) in routers_core",
+    "status": "pending"
   },
   {
-    "content": "Build check + backend smoke tests",
-    "status": "completed"
+    "content": "B5: PM PDF fixes - embedded logo, outlined checkboxes, date param",
+    "status": "pending"
   },
   {
-    "content": "Comprehensive testing via testing agent",
-    "status": "completed"
+    "content": "F1: SpareRows fuzzy combobox (Shared.jsx)",
+    "status": "pending"
+  },
+  {
+    "content": "F2: RepairBreakdown - remove root cause, add start/end time pickers",
+    "status": "pending"
+  },
+  {
+    "content": "F3: WO CompleteDialog + WODetailModal time pickers with showPicker",
+    "status": "pending"
+  },
+  {
+    "content": "F4: Remove FINAL CLOSE from MachineDrawer",
+    "status": "pending"
+  },
+  {
+    "content": "F5: Breakdowns subtitle open count + warning click dialog with WO link/generate",
+    "status": "pending"
+  },
+  {
+    "content": "F6: Line KPI card click filters Digital Twin (sync state)",
+    "status": "pending"
+  },
+  {
+    "content": "F7: Report form editable Start Time picker",
+    "status": "pending"
+  },
+  {
+    "content": "F8: ClosePMTask editable Date + PDF date param",
+    "status": "pending"
+  },
+  {
+    "content": "Build + smoke tests + testing agent",
+    "status": "pending"
   }
 ]

@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DateTimeField, toLocalInput, toIsoUtc } from '@/components/Shared';
 
 const DEPARTMENTS = ['PROCESS', 'PACKAGING', 'UTILITIES'];
 const BREAKDOWN_TYPES = [
@@ -69,6 +70,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
   const [woType, setWoType] = useState('Inspection');
   const [remarks, setRemarks] = useState('');
   const [technician, setTechnician] = useState('');
+  const [startTime, setStartTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
 
@@ -90,6 +92,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
     setWoType('Inspection');
     setRemarks('');
     setTechnician('');
+    setStartTime(toLocalInput(new Date().toISOString()));
     setErrors({});
     if (prefillMachine) {
       setDept(prefillMachine.department || 'PROCESS');
@@ -143,6 +146,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
           breakdown_type: breakdownType,
           reporter_name: reporterName,
           assigned_to: technician,
+          start_time: startTime ? toIsoUtc(startTime) : undefined,
         });
         toast.success(`Breakdown ${res.data.ticket_number} created — ${res.data.work_order_number} assigned to ${technician}`);
       }
@@ -259,6 +263,11 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
               className={`bg-[hsl(var(--panel-2))] ${errors.remarks ? 'input-error' : ''}`}
             />
           </div>
+
+          {/* Actual breakdown start — calendar picker, editable so downtime reflects reality */}
+          {!isWarning && (
+            <DateTimeField label="Breakdown Start Time" value={startTime} onChange={setStartTime} testId="bd-start-time" />
+          )}
 
           {/* Mandatory technician assignment — a WO is ALWAYS created for the selected technician */}
           <div>

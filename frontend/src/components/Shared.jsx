@@ -6,6 +6,33 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { X, Plus } from 'lucide-react';
 
+// ISO <-> datetime-local helpers (local timezone aware)
+export const toLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+export const toIsoUtc = (local) => (local ? new Date(local).toISOString() : '');
+
+// Datetime input that ALWAYS opens the native calendar picker on click (no manual typing needed)
+export function DateTimeField({ label, value, onChange, testId, disabled, required }) {
+  return (
+    <div>
+      {label && <Label className="text-xs">{label}{required ? ' *' : ''}</Label>}
+      <Input
+        type="datetime-local"
+        data-testid={testId}
+        value={value}
+        disabled={disabled}
+        onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-0.5 cursor-pointer bg-[hsl(var(--panel-2))] font-mono text-xs"
+      />
+    </div>
+  );
+}
+
 // Searchable machine picker
 export function MachineSelect({ value, onChange, testId = 'machine-select' }) {
   const [machines, setMachines] = useState([]);
@@ -56,6 +83,56 @@ export function MachineSelect({ value, onChange, testId = 'machine-select' }) {
 }
 
 // Dynamic spare consumption rows (SAP code + qty)
+// Fuzzy typeahead search: type partial SAP code, material name or description —
+// results filter live (all typed tokens must match somewhere in the record).
+function SpareSearch({ value, onChange, spares, testId }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const selected = spares.find((s) => s.sap_code === value);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return spares.slice(0, 50);
+    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return spares.filter((s) => {
+      const hay = `${s.sap_code} ${s.material_name || ''} ${s.description || ''}`.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    }).slice(0, 50);
+  }, [spares, query]);
+
+  return (
+    <div className="relative flex-1">
+      <Input
+        data-testid={testId}
+        value={open ? query : selected ? `${selected.sap_code} — ${selected.material_name}` : query}
+        placeholder="Search SAP code / material / description..."
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        className="bg-[hsl(var(--panel-2))]"
+      />
+      {open && (
+        <div className="absolute z-50 mt-1 max-h-64 w-full min-w-[320px] overflow-y-auto rounded-md border border-border bg-[hsl(var(--panel-1))] shadow-xl">
+          {filtered.length === 0 && <div className="px-3 py-2 text-sm text-muted-foreground">No matching material</div>}
+          {filtered.map((s) => (
+            <button
+              key={s.sap_code}
+              type="button"
+              data-testid={`spare-option-${s.sap_code}`}
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-white/5"
+              onMouseDown={(e) => { e.preventDefault(); onChange(s.sap_code); setOpen(false); setQuery(''); }}
+            >
+              <span className="font-mono text-xs text-[hsl(var(--primary))]">{s.sap_code}</span>
+              <span className="ml-2 font-medium">{s.material_name}</span>
+              <span className="ml-2 text-xs text-muted-foreground">stock: {s.quantity}</span>
+              {s.description && <div className="truncate text-[11px] text-muted-foreground">{s.description}</div>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SpareRows({ rows, setRows }) {
   const [spares, setSpares] = useState([]);
   useEffect(() => {
@@ -73,18 +150,7 @@ export function SpareRows({ rows, setRows }) {
       <Label className="text-xs text-muted-foreground">Used Spares (SAP material + quantity)</Label>
       {rows.map((row, i) => (
         <div key={i} className="flex items-center gap-2">
-          <Select value={row.sap_code} onValueChange={(v) => update(i, 'sap_code', v)}>
-            <SelectTrigger className="flex-1 bg-[hsl(var(--panel-2))]" data-testid={`spare-row-select-${i}`}>
-              <SelectValue placeholder="Select SAP material" />
-            </SelectTrigger>
-            <SelectContent>
-              {spares.map((s) => (
-                <SelectItem key={s.sap_code} value={s.sap_code}>
-                  <span className="font-mono text-xs">{s.sap_code}</span> — {s.material_name} (stock: {s.quantity})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SpareSearch value={row.sap_code} onChange={(v) => update(i, 'sap_code', v)} spares={spares} testId={`spare-row-select-${i}`} />
           <Input
             type="number" min="0.1" step="any"
             value={row.quantity}

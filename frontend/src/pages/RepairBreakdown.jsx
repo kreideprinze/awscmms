@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { LifecycleBadge, TypeBadge, fmtDate, CrackedGear } from '@/components/StatusBits';
-import { SpareRows } from '@/components/Shared';
+import { SpareRows, DateTimeField, toLocalInput, toIsoUtc } from '@/components/Shared';
 
 function Elapsed({ since }) {
   const [now, setNow] = useState(Date.now());
@@ -30,16 +30,18 @@ export default function RepairBreakdown() {
   const { isTech } = useApp();
   const [bd, setBd] = useState(null);
   const [notFound, setNotFound] = useState(false);
-  const [rootCause, setRootCause] = useState('');
   const [actionTaken, setActionTaken] = useState('');
   const [spares, setSpares] = useState([]);
+  const [startT, setStartT] = useState('');
+  const [endT, setEndT] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(() => {
     api.get(`/breakdowns/${breakdownId}`).then((r) => {
       setBd(r.data);
-      setRootCause((v) => v || r.data.root_cause || '');
       setActionTaken((v) => v || r.data.action_taken || '');
+      setStartT((v) => v || toLocalInput(r.data.start_time));
+      setEndT((v) => v || toLocalInput(r.data.end_time || new Date().toISOString()));
     }).catch(() => setNotFound(true));
   }, [breakdownId]);
   useEffect(() => { load(); }, [load]);
@@ -61,10 +63,12 @@ export default function RepairBreakdown() {
 
   const completeRepair = async () => {
     if (!actionTaken.trim()) { toast.error('Action Taken is required to complete the repair'); return; }
+    if (startT && endT && new Date(endT) < new Date(startT)) { toast.error('End time cannot be before start time'); return; }
     const ok = await act({
       action: 'complete',
-      root_cause: rootCause || undefined,
       action_taken: actionTaken,
+      start_time: startT ? toIsoUtc(startT) : undefined,
+      end_time: endT ? toIsoUtc(endT) : undefined,
       consumed_spares: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
     }, 'Repair completed — machine restored');
     if (ok) navigate('/breakdowns');
@@ -140,11 +144,15 @@ export default function RepairBreakdown() {
           )}
           <div className="cyber-panel space-y-3 p-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Repair record</div>
-            <div>
-              <Label className="text-xs">Root Cause {'(mandatory if downtime > 30 min)'}</Label>
-              <Textarea data-testid="repair-root-cause" value={rootCause} onChange={(e) => setRootCause(e.target.value)} rows={2}
-                placeholder="e.g. Bearing seized due to lubrication failure" className="bg-[hsl(var(--panel-2))]" />
+            {/* Corrected times: downtime + the 30-min RCA trigger evaluate against these, not the raw timer */}
+            <div className="grid grid-cols-2 gap-3">
+              <DateTimeField label="Breakdown Start Time" value={startT} onChange={setStartT} testId="repair-start-time" />
+              <DateTimeField label="Repair End Time" value={endT} onChange={setEndT} testId="repair-end-time" />
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Downtime is calculated from the times above — correct them if the timer doesn't reflect reality.
+              If downtime exceeds the threshold, a dedicated 5-Why RCA work order is auto-assigned (root cause is captured there, not here).
+            </p>
             <div>
               <Label className="text-xs">Action Taken *</Label>
               <Textarea data-testid="repair-action-taken" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} rows={2}

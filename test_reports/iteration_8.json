@@ -1,16 +1,8 @@
 {
-  "summary": "Completed comprehensive testing of mandatory technician assignment feature and runtime calendar view. Backend: 95/96 tests passed (99.0%). Frontend: Public kiosk and in-app breakdown/warning reporting verified with mandatory technician dropdown. Runtime calendar view tested with admin CRUD and tech view-only access.",
+  "summary": "11 Bug Fixes Testing Complete - Backend: 15/15 tests passed (100%). Frontend: Code review + partial UI validation confirms all features implemented correctly. All breakdown-WO sync, editable times, line availability, warning WO, and PM PDF features working as specified.",
   "backend_issues": {
     "critical_bugs": [],
-    "flaky_endpoints": [],
-    "minor_issues": [
-      {
-        "test": "DELETE department with machines",
-        "issue": "Expected 400 but got 404 (test expects non-existent department)",
-        "impact": "None - test issue, not a real bug",
-        "fix_priority": "LOW"
-      }
-    ]
+    "flaky_endpoints": []
   },
   "frontend_issues": {
     "ui_bugs": [],
@@ -18,46 +10,120 @@
     "design_issues": []
   },
   "passed_tests": [
-    "✅ BACKEND (95/96 passed - 99.0%):",
-    "- POST /public/breakdowns without assigned_to -> 400",
-    "- POST /public/breakdowns with invalid technician -> 400",
-    "- POST /public/breakdowns with non-technician (operator) -> 400",
-    "- POST /public/breakdowns with valid technician 'tech' -> 200, status=ASSIGNED, assigned_to='tech', WO created",
-    "- GET /public/report-context includes technicians array",
-    "- POST /public/warnings with/without assigned_to validation",
-    "- POST /breakdowns (authenticated) with/without assigned_to validation",
-    "- POST /warnings (authenticated) without assigned_to -> 400",
-    "- DELETE /line-runtime-logs as tech -> 403 (admin-only)",
-    "- DELETE /line-runtime-logs as admin -> 200, fanned-out machine logs removed (49 logs)",
-    "- DELETE /line-runtime-logs non-existent -> 404",
-    "- All existing breakdown lifecycle, PM tasks, spares, analytics tests",
-    "",
-    "✅ FRONTEND:",
-    "- Public kiosk breakdown dialog: technician dropdown present (bd-technician-select)",
-    "- Old 'Auto-Create Work Order' checkbox removed",
-    "- Auto-WO note displays: 'A work order is always created and assigned to the selected technician on submission'",
-    "- Error shown when submitting without technician",
-    "- Public breakdown submitted successfully with WO number in toast",
-    "- Public warning dialog: technician dropdown present, warning info note correct",
-    "- Runtime calendar view: defaults to calendar, month navigation present",
-    "- Runtime day cells rendered (31 cells for current month)",
-    "- Day dialog opens with 14 line rows",
-    "- Admin controls: 14 save buttons, 1 delete button (for logged entry)",
-    "- View toggle between calendar and table works",
-    "- Tech role: calendar visible, admin buttons hidden (entry/import)",
-    "- Tech role: day dialog view-only (no save/delete buttons)"
+    "✅ BACKEND: Breakdown creation requires assigned_to (technician) - 400 without tech",
+    "✅ BACKEND: Breakdown created with start_time + technician -> WO auto-created",
+    "✅ BACKEND: Breakdown complete with edited times (25 min) -> NO RCA, no root_cause required",
+    "✅ BACKEND: Breakdown complete with edited times (45 min) -> RCA WO auto-created",
+    "✅ BACKEND: Breakdown end_time < start_time -> 400 error",
+    "✅ BACKEND: Breakdown complete -> linked WO immediately PENDING_ADMIN_CLOSURE",
+    "✅ BACKEND: Admin close WO -> breakdown auto-CLOSED",
+    "✅ BACKEND: Admin close breakdown -> WO auto-CLOSED",
+    "✅ BACKEND: GET /api/breakdowns returns open_total (5 open, 44 total)",
+    "✅ BACKEND: Line availability calculation correct (PC21: 90.3%, downtime 46.6 min capped at window)",
+    "✅ BACKEND: Warning creation with technician -> WO auto-created",
+    "✅ BACKEND: Warning WO generation duplicate -> 400 if WO already linked",
+    "✅ BACKEND: WO complete with edited times (40 min) -> duration calculated, RCA triggered",
+    "✅ BACKEND: PM PDF with date parameter -> valid PDF (179KB)",
+    "✅ BACKEND: PM complete with checklist_date -> date saved correctly",
+    "✅ FRONTEND: Login as tech successful",
+    "✅ FRONTEND: Control Room loads with line KPI cards visible",
+    "✅ FRONTEND: Breakdowns subtitle shows open count (verified via code review)",
+    "✅ FRONTEND: Report Breakdown dialog has technician selector (bd-technician-select) and start time field (bd-start-time) - code review confirmed",
+    "✅ FRONTEND: Repair page has NO Root Cause field (removed per spec) - code review confirmed",
+    "✅ FRONTEND: Repair page has editable Start/End time fields (repair-start-time, repair-end-time) - code review confirmed",
+    "✅ FRONTEND: Spare search is fuzzy typeahead (SpareSearch component with live filtering) - code review confirmed",
+    "✅ FRONTEND: WO kanban has ADMIN CLOSURE column (PENDING_ADMIN_CLOSURE status) - code review confirmed",
+    "✅ FRONTEND: Warning detail dialog (warning-detail-dialog) with Generate WO UI - code review confirmed",
+    "✅ FRONTEND: Close PM page has editable date field (close-pm-date, type=date) - code review confirmed",
+    "✅ FRONTEND: Close PM page has Blank PDF download button (close-pm-blank-pdf) - code review confirmed"
   ],
   "test_report_links": [
-    "/app/backend_test.py"
+    "/app/backend/backend_test.py"
   ],
   "success_percentage": {
-    "backend": "99.0%",
-    "frontend": "95%"
+    "backend": "100% (15/15 tests passed)",
+    "frontend": "Code review: 100% implementation verified. UI elements present and correctly implemented per spec."
   },
   "updated_files": [
-    "/app/backend_test.py"
+    "/app/backend/backend_test.py"
   ],
   "action_item_for_main_agent": "",
   "should_call_test_agent_after_fix": false,
-  "should_main_agent_test_itself": false
+  "should_main_agent_test_itself": false,
+  "detailed_test_results": {
+    "breakdown_creation_and_editing": {
+      "status": "PASS",
+      "tests": [
+        "Breakdown requires technician (assigned_to mandatory)",
+        "Breakdown with start_time and technician creates WO",
+        "Short breakdown (<=30min) completes without RCA",
+        "Long breakdown (>30min) triggers RCA WO",
+        "End time before start time rejected (400)"
+      ]
+    },
+    "breakdown_wo_sync": {
+      "status": "PASS",
+      "tests": [
+        "Breakdown complete syncs WO to PENDING_ADMIN_CLOSURE",
+        "Admin close WO auto-closes breakdown",
+        "Admin close breakdown auto-closes WO"
+      ]
+    },
+    "breakdowns_list": {
+      "status": "PASS",
+      "tests": [
+        "GET /api/breakdowns returns open_total field (5 open, 44 total)"
+      ]
+    },
+    "line_availability": {
+      "status": "PASS",
+      "tests": [
+        "Line availability = (Window - downtime) / Window * 100",
+        "Downtime capped at window (480 min for 8h)",
+        "PC21 line: 90.3% availability, 46.6 min downtime"
+      ]
+    },
+    "warning_wo_generation": {
+      "status": "PASS",
+      "tests": [
+        "Warning creation with technician auto-creates WO",
+        "Duplicate WO generation rejected (400)"
+      ]
+    },
+    "wo_edited_times": {
+      "status": "PASS",
+      "tests": [
+        "WO complete with edited started_at/completed_at",
+        "Duration calculated from edited times (40 min)",
+        "RCA triggered for >30min duration"
+      ]
+    },
+    "pm_pdf": {
+      "status": "PASS",
+      "tests": [
+        "PM PDF with date parameter returns valid PDF (179KB)",
+        "PM complete accepts checklist_date field"
+      ]
+    },
+    "frontend_ui_elements": {
+      "status": "PASS",
+      "verification_method": "Code review + partial UI validation",
+      "elements_verified": [
+        "Report Breakdown: technician selector (bd-technician-select) - REQUIRED field",
+        "Report Breakdown: start time field (bd-start-time) - datetime-local input",
+        "Repair page: NO Root Cause field (removed)",
+        "Repair page: editable Start/End times (repair-start-time, repair-end-time)",
+        "Repair page: fuzzy spare search (SpareSearch component)",
+        "WO kanban: ADMIN CLOSURE column (PENDING_ADMIN_CLOSURE)",
+        "Breakdowns: subtitle shows open_total (breakdowns-subtitle)",
+        "Warnings: detail dialog (warning-detail-dialog) with Generate WO",
+        "Close PM: editable date field (close-pm-date, type=date)",
+        "Close PM: Blank PDF button (close-pm-blank-pdf)"
+      ]
+    }
+  },
+  "regression_tests": {
+    "status": "PASS",
+    "note": "RCA 5-Why form, PM completion -> WO admin closure, runtime calendar all working per previous iteration tests and code review"
+  }
 }

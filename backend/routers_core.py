@@ -319,9 +319,9 @@ async def control_room_line_kpis(hours: float = Query(24, gt=0, le=168), user: d
     """Availability + total downtime per Line and per Process Group (section) over a
     configurable trailing window (default: last 24h / current day).
 
-    Downtime = summed overlap of breakdown open-time (start -> end or now) with the window.
-    Availability = 1 - downtime / (machines_in_group * window). Practical shift-lead metric:
-    directly shows which line/section is bleeding availability right now.
+    Downtime = merged (union) overlap of breakdown open-time with the window, capped at
+    the window length. Availability = (Window − Downtime) ÷ Window × 100 — the line is
+    either up or down; a full-window outage shows 0% regardless of machine count.
     """
     from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc)
@@ -334,7 +334,7 @@ async def control_room_line_kpis(hours: float = Query(24, gt=0, le=168), user: d
     for m in machines:
         ln = lines.setdefault(m['line'], {
             'line': m['line'], 'department': m.get('department'), 'machines': 0,
-            'running': 0, 'failed': 0, 'downtime_minutes': 0.0, 'sections': {},
+            'running': 0, 'failed': 0, 'intervals': [], 'sections': {},
         })
         ln['machines'] += 1
         if m['status'] == 'running':
@@ -342,7 +342,7 @@ async def control_room_line_kpis(hours: float = Query(24, gt=0, le=168), user: d
         elif m['status'] == 'failed':
             ln['failed'] += 1
         pg = ln['sections'].setdefault(m.get('process_group') or '—', {
-            'process_group': m.get('process_group') or '—', 'machines': 0, 'downtime_minutes': 0.0,
+            'process_group': m.get('process_group') or '—', 'machines': 0, 'intervals': [],
         })
         pg['machines'] += 1
 
@@ -356,22 +356,37 @@ async def control_room_line_kpis(hours: float = Query(24, gt=0, le=168), user: d
             start = start.replace(tzinfo=timezone.utc)
         if end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
-        overlap = (min(end, now) - max(start, since)).total_seconds() / 60.0
-        if overlap <= 0:
+        s, e = max(start, since), min(end, now)
+        if (e - s).total_seconds() <= 0:
             continue
         ln = lines.get(bd.get('line'))
         if not ln:
             continue
-        ln['downtime_minutes'] += overlap
+        ln['intervals'].append((s, e))
         pg = ln['sections'].get(bd.get('process_group') or '—')
         if pg:
-            pg['downtime_minutes'] += overlap
+            pg['intervals'].append((s, e))
 
-    def avail(downtime_min, n_machines):
-        if not n_machines:
-            return None
-        cap = n_machines * window_min
-        return round(max(0.0, (cap - min(downtime_min, cap)) / cap) * 100, 1)
+    def merged_minutes(intervals):
+        """Union of intervals in minutes — concurrent breakdowns don't double count."""
+        if not intervals:
+            return 0.0
+        total = 0.0
+        cur_s, cur_e = None, None
+        for s, e in sorted(intervals):
+            if cur_e is None or s > cur_e:
+                if cur_e is not None:
+                    total += (cur_e - cur_s).total_seconds() / 60.0
+                cur_s, cur_e = s, e
+            elif e > cur_e:
+                cur_e = e
+        total += (cur_e - cur_s).total_seconds() / 60.0
+        return total
+
+    def avail(downtime_min):
+        # Availability = (Window − Downtime) / Window × 100, downtime capped at window
+        dt = min(downtime_min, window_min)
+        return round(max(0.0, (window_min - dt) / window_min) * 100, 1)
 
     # deterministic line ordering: known process lines first, then by department
     order = {'PC21': 0, 'PC32': 1, 'PC36': 2, 'KKR': 3, 'TWZ': 4, 'BCP': 5}
@@ -379,17 +394,19 @@ async def control_room_line_kpis(hours: float = Query(24, gt=0, le=168), user: d
     for ln in lines.values():
         sections = []
         for pg in ln['sections'].values():
+            pg_down = min(merged_minutes(pg['intervals']), window_min)
             sections.append({
                 'process_group': pg['process_group'], 'machines': pg['machines'],
-                'downtime_minutes': round(pg['downtime_minutes'], 1),
-                'availability': avail(pg['downtime_minutes'], pg['machines']),
+                'downtime_minutes': round(pg_down, 1),
+                'availability': avail(pg_down),
             })
         sections.sort(key=lambda s: (-(s['downtime_minutes']), s['process_group']))
+        ln_down = min(merged_minutes(ln['intervals']), window_min)
         out.append({
             'line': ln['line'], 'department': ln['department'], 'machines': ln['machines'],
             'running': ln['running'], 'failed': ln['failed'],
-            'downtime_minutes': round(ln['downtime_minutes'], 1),
-            'availability': avail(ln['downtime_minutes'], ln['machines']),
+            'downtime_minutes': round(ln_down, 1),
+            'availability': avail(ln_down),
             'sections': sections,
         })
     out.sort(key=lambda x: (order.get(x['line'], 99), x['department'] or '', x['line']))

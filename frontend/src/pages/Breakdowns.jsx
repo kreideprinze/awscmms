@@ -9,12 +9,104 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { LifecycleBadge, TypeBadge, fmtDate } from '@/components/StatusBits';
 import { BreakdownActions } from '@/components/MachineDrawer';
 import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from 'sonner';
+import { errMsg } from '@/lib/api';
 
 const STATUSES = ['all', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CLOSED'];
 
+// Warning detail popout: linked WO jump, or generate a WO with explicit technician assignment
+function WarningDialog({ warning, open, setOpen, onDone }) {
+  const navigate = useNavigate();
+  const [technicians, setTechnicians] = useState([]);
+  const [tech, setTech] = useState('');
+  const [woType, setWoType] = useState('Inspection');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      api.get('/users/technicians').then((r) => setTechnicians((r.data || []).filter((t) => t.role === 'technician'))).catch(() => {});
+      setTech('');
+    }
+  }, [open]);
+
+  if (!warning) return null;
+  const hasOpenWo = !!warning.work_order_number && warning.status !== 'CLOSED';
+
+  const generate = async () => {
+    if (!tech) { toast.error('Select a technician to assign'); return; }
+    setBusy(true);
+    try {
+      const r = await api.post(`/warnings/${warning.id}/generate-wo`, { assigned_to: tech, wo_type: woType });
+      toast.success(`${r.data.wo_number} generated — assigned to ${tech}`);
+      setOpen(false); onDone();
+    } catch (e) { toast.error(errMsg(e)); }
+    setBusy(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent data-testid="warning-detail-dialog" className="border-[#f9f871]/30 bg-[hsl(var(--panel-1))]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-[#f9f871]" />
+            <span className="font-mono text-sm text-[#f9f871]">{warning.tag_number}</span>
+            <span className={`border px-1.5 py-0.5 font-mono text-[10px] uppercase ${warning.status === 'OPEN' ? 'border-[#f9f871]/50 text-[#f9f871]' : 'border-border text-muted-foreground'}`}>{warning.status}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3">
+            <div><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Machine</div><div className="text-sm font-medium">{warning.machine_name}</div></div>
+            <div><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Type</div><div className="mt-0.5"><TypeBadge type={warning.warning_type} /></div></div>
+            <div><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Raised</div><div className="font-mono text-xs">{fmtDate(warning.created_at)}</div></div>
+            <div><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Reporter</div><div className="text-sm">{warning.reporter}</div></div>
+          </div>
+          <p className="text-sm" data-testid="warning-dialog-description">{warning.description}</p>
+
+          {warning.work_order_number ? (
+            <div className="flex items-center justify-between border border-border bg-[hsl(var(--panel-2))] px-3 py-2">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Linked Work Order</div>
+                <div className="font-mono text-sm text-[hsl(var(--primary))]">{warning.work_order_number}</div>
+              </div>
+              <Button size="sm" variant="outline" data-testid="warning-open-wo" className="h-7 border-border bg-transparent text-xs"
+                onClick={() => navigate('/work-orders')}>View on Board</Button>
+            </div>
+          ) : null}
+
+          {!hasOpenWo && (
+            <div className="space-y-2 border border-[#f9f871]/30 bg-[#f9f871]/[0.03] p-3">
+              <Label className="text-[10px] uppercase tracking-widest text-[#f9f871]">Generate Work Order</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={tech} onValueChange={setTech}>
+                  <SelectTrigger data-testid="warning-wo-technician" className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Assign technician" /></SelectTrigger>
+                  <SelectContent>{technicians.map((t) => <SelectItem key={t.username} value={t.username}>{t.name} ({t.username})</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={woType} onValueChange={setWoType}>
+                  <SelectTrigger data-testid="warning-wo-type" className="bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="Inspection">Inspection</SelectItem><SelectItem value="Corrective">Corrective</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <Button onClick={generate} disabled={busy || !tech} data-testid="warning-generate-wo"
+                className="w-full border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40">
+                {busy ? 'Generating…' : 'Generate Work Order'}
+              </Button>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function WarningsView() {
   const [data, setData] = useState({ items: [], total: 0 });
-  useEffect(() => { api.get('/warnings').then((r) => setData(r.data)); }, []);
+  const [selected, setSelected] = useState(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const load = useCallback(() => { api.get('/warnings').then((r) => setData(r.data)); }, []);
+  useEffect(() => { load(); }, [load]);
   return (
     <div className="overflow-hidden border border-[#f9f871]/25" data-testid="warnings-table">
       <Table>
@@ -35,7 +127,8 @@ function WarningsView() {
             <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No warnings raised yet</TableCell></TableRow>
           )}
           {data.items.map((w) => (
-            <TableRow key={w.id} data-testid={`warning-row-${w.tag_number}`} className="border-border hover:bg-white/[0.03]">
+            <TableRow key={w.id} data-testid={`warning-row-${w.tag_number}`} onClick={() => { setSelected(w); setDialogOpen(true); }}
+              className="cursor-pointer border-border hover:bg-white/[0.03]">
               <TableCell className="font-mono text-xs text-[#f9f871]">
                 <AlertTriangle className="mr-1 inline h-3 w-3" />{w.tag_number}
                 {w.submitted_via === 'public_kiosk' && (
@@ -58,6 +151,7 @@ function WarningsView() {
           ))}
         </TableBody>
       </Table>
+      <WarningDialog warning={selected} open={dialogOpen} setOpen={setDialogOpen} onDone={load} />
     </div>
   );
 }
@@ -88,7 +182,7 @@ export default function Breakdowns() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Breakdowns</h1>
-          <p className="text-sm text-muted-foreground">{data.total} total · lifecycle OPEN → ASSIGNED → IN_PROGRESS → COMPLETED → CLOSED</p>
+          <p className="text-sm text-muted-foreground" data-testid="breakdowns-subtitle">{data.open_total ?? 0} open · lifecycle OPEN → ASSIGNED → IN_PROGRESS → COMPLETED → CLOSED</p>
         </div>
         <div className="flex gap-2">
           <Button data-testid="breakdowns-report-warning-button" onClick={() => setWarningOpen(true)} className="border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10">

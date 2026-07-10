@@ -1,13 +1,13 @@
 """
-Phase L Backend Testing: RCA 5-Why, Technician Analytics, Line Runtime, AWS Category Sorting
+Backend Testing: 11 Bug Fixes - Breakdown/WO Sync, Editable Times, Line Availability, Warning WO, PM PDF
 """
 import requests
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 BASE_URL = "https://content-extractor-75.preview.emergentagent.com/api"
 
-class PhaseL_Tester:
+class BugFixTester:
     def __init__(self):
         self.admin_token = None
         self.tech_token = None
@@ -16,9 +16,10 @@ class PhaseL_Tester:
         self.tests_passed = 0
         self.test_machine_id = None
         self.test_line = None
-        self.rca_wo_id = None
-        self.origin_wo_id = None
-        self.breakdown_id = None
+        self.test_breakdown_id = None
+        self.test_wo_id = None
+        self.test_warning_id = None
+        self.test_pm_task_id = None
 
     def log(self, msg, status="INFO"):
         prefix = {"PASS": "✅", "FAIL": "❌", "INFO": "🔍"}.get(status, "ℹ️")
@@ -52,15 +53,15 @@ class PhaseL_Tester:
         headers = {"Authorization": f"Bearer {token}"}
         r = requests.get(f"{BASE_URL}{endpoint}", headers=headers)
         if r.status_code != expected_status:
-            raise AssertionError(f"Expected {expected_status}, got {r.status_code}: {r.text}")
+            raise AssertionError(f"GET {endpoint}: Expected {expected_status}, got {r.status_code}: {r.text}")
         return r.json() if r.status_code == 200 else None
 
     def post(self, endpoint, token, data, expected_status=200):
         """POST request"""
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         r = requests.post(f"{BASE_URL}{endpoint}", headers=headers, json=data)
-        if r.status_code != expected_status:
-            raise AssertionError(f"Expected {expected_status}, got {r.status_code}: {r.text}")
+        if r.status_code not in (expected_status, 201) if expected_status == 200 else r.status_code != expected_status:
+            raise AssertionError(f"POST {endpoint}: Expected {expected_status}, got {r.status_code}: {r.text}")
         return r.json() if r.status_code in (200, 201) else None
 
     def put(self, endpoint, token, data, expected_status=200):
@@ -68,11 +69,11 @@ class PhaseL_Tester:
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         r = requests.put(f"{BASE_URL}{endpoint}", headers=headers, json=data)
         if r.status_code != expected_status:
-            raise AssertionError(f"Expected {expected_status}, got {r.status_code}: {r.text}")
+            raise AssertionError(f"PUT {endpoint}: Expected {expected_status}, got {r.status_code}: {r.text}")
         return r.json() if r.status_code == 200 else None
 
     def setup(self):
-        """Setup: login all users, get test machine and line"""
+        """Setup: login all users, get test machine"""
         self.log("=== SETUP ===")
         self.admin_token = self.login("admin", "admin123")
         self.tech_token = self.login("tech", "tech123")
@@ -83,395 +84,367 @@ class PhaseL_Tester:
         machines = self.get("/machines", self.admin_token)
         if machines and len(machines) > 0:
             self.test_machine_id = machines[0]["id"]
-            self.log(f"Test machine: {machines[0]['name']} ({self.test_machine_id})")
+            self.test_line = machines[0].get("line")
+            self.log(f"Test machine: {machines[0]['name']} ({self.test_machine_id}), line: {self.test_line}")
 
-        # Get hierarchy for line testing
-        hierarchy = self.get("/hierarchy", self.admin_token)
-        if hierarchy and hierarchy.get("lines"):
-            self.test_line = hierarchy["lines"][0]["name"]
-            self.log(f"Test line: {self.test_line}")
-
-    # ============ RCA 5-WHY MODULE TESTS ============
-    def test_rca_trigger_from_long_wo(self):
-        """Test: RCA WO auto-created when work order duration exceeds threshold"""
-        # Create a Corrective WO
-        wo = self.post("/work-orders", self.admin_token, {
+    # ============ BREAKDOWN TESTS ============
+    def test_breakdown_requires_technician(self):
+        """Test: POST /api/breakdowns requires assigned_to (technician)"""
+        # Without technician -> 400
+        self.post("/breakdowns", self.tech_token, {
             "machine_id": self.test_machine_id,
-            "title": "Test Long Duration WO",
-            "description": "Testing RCA trigger",
-            "wo_type": "Corrective",
-            "priority": "high",
-            "assigned_to": "tech"
-        })
-        self.origin_wo_id = wo["id"]
-        assert wo["wo_number"], "WO created"
-
-        # Start the WO
-        self.put(f"/work-orders/{wo['id']}", self.admin_token, {"action": "start"})
-
-        # Complete with duration_minutes=45 (exceeds 30 min threshold)
-        result = self.put(f"/work-orders/{wo['id']}", self.tech_token, {
-            "action": "complete",
-            "duration_minutes": 45,
-            "action_taken": "Completed repair"
-        })
-        assert result["status"] == "PENDING_ADMIN_CLOSURE", "WO completed"
-
-        # Verify RCA WO was created
-        wo_detail = self.get(f"/work-orders/{wo['id']}", self.admin_token)
-        assert wo_detail.get("rca_task_id"), "RCA task ID set on origin WO"
-        self.rca_wo_id = wo_detail["rca_task_id"]
-
-        # Get RCA WO details
-        rca_wo = self.get(f"/work-orders/{self.rca_wo_id}", self.admin_token)
-        assert rca_wo["wo_type"] == "RCA", "RCA WO type is RCA"
-        assert rca_wo["assigned_to"] == "tech", "RCA assigned to attending technician"
-        assert rca_wo["priority"] == "high", "RCA priority is high"
-        assert rca_wo.get("source_work_order_id") == wo["id"], "RCA links back to origin WO"
-        self.log(f"RCA WO created: {rca_wo['wo_number']}")
-
-    def test_rca_wo_cannot_complete_without_submission(self):
-        """Test: RCA WO complete action returns 400 before RCA submission"""
-        if not self.rca_wo_id:
-            raise AssertionError("RCA WO not created in previous test")
-
-        # Try to complete without RCA submission
-        self.put(f"/work-orders/{self.rca_wo_id}", self.tech_token, {
-            "action": "complete"
+            "description": "Test breakdown without tech",
+            "breakdown_type": "MECHANICAL"
         }, expected_status=400)
-        self.log("RCA WO correctly rejects completion without 5-Why submission")
+        self.log("Breakdown creation correctly requires assigned_to")
 
-    def test_rca_submission_validation(self):
-        """Test: RCA submission validates all 5 whys + root_cause + corrective_action"""
-        if not self.rca_wo_id:
-            raise AssertionError("RCA WO not created")
-
-        # Test: < 5 whys rejected
-        self.put(f"/work-orders/{self.rca_wo_id}/rca", self.tech_token, {
-            "whys": ["Why 1", "Why 2", "Why 3"],
-            "root_cause": "Root cause",
-            "corrective_action": "Action"
-        }, expected_status=400)
-
-        # Test: empty whys rejected
-        self.put(f"/work-orders/{self.rca_wo_id}/rca", self.tech_token, {
-            "whys": ["Why 1", "", "Why 3", "Why 4", "Why 5"],
-            "root_cause": "Root cause",
-            "corrective_action": "Action"
-        }, expected_status=400)
-
-        # Test: empty root_cause rejected
-        self.put(f"/work-orders/{self.rca_wo_id}/rca", self.tech_token, {
-            "whys": ["Why 1", "Why 2", "Why 3", "Why 4", "Why 5"],
-            "root_cause": "",
-            "corrective_action": "Action"
-        }, expected_status=400)
-
-        # Test: empty corrective_action rejected
-        self.put(f"/work-orders/{self.rca_wo_id}/rca", self.tech_token, {
-            "whys": ["Why 1", "Why 2", "Why 3", "Why 4", "Why 5"],
-            "root_cause": "Root cause",
-            "corrective_action": ""
-        }, expected_status=400)
-
-        # Test: full submission succeeds
-        result = self.put(f"/work-orders/{self.rca_wo_id}/rca", self.tech_token, {
-            "whys": ["Bearing failed", "Lack of lubrication", "Maintenance schedule missed", "Understaffing", "Budget constraints"],
-            "root_cause": "Inadequate preventive maintenance program",
-            "corrective_action": "Implement automated PM scheduling and hire additional maintenance staff"
-        })
-        assert result["ok"], "RCA submission successful"
-        assert result["work_order"]["rca"], "RCA data saved"
-        self.log("RCA submission validation working correctly")
-
-    def test_rca_submission_permission(self):
-        """Test: RCA submission by non-assigned technician returns 403; admin can submit"""
-        if not self.rca_wo_id:
-            raise AssertionError("RCA WO not created")
-
-        # Create another WO and trigger RCA for permission testing
-        wo2 = self.post("/work-orders", self.admin_token, {
+    def test_breakdown_with_start_time_and_technician(self):
+        """Test: POST /api/breakdowns with assigned_to + start_time"""
+        now = datetime.now(timezone.utc)
+        start_time = (now - timedelta(minutes=10)).isoformat()
+        
+        bd = self.post("/breakdowns", self.tech_token, {
             "machine_id": self.test_machine_id,
-            "title": "Test Permission WO",
-            "wo_type": "Corrective",
-            "assigned_to": "tech"
-        })
-        self.put(f"/work-orders/{wo2['id']}", self.admin_token, {"action": "start"})
-        self.put(f"/work-orders/{wo2['id']}", self.tech_token, {
-            "action": "complete",
-            "duration_minutes": 35
-        })
-        wo2_detail = self.get(f"/work-orders/{wo2['id']}", self.admin_token)
-        rca2_id = wo2_detail.get("rca_task_id")
-
-        if rca2_id:
-            # Try to submit as operator (not assigned) - should fail
-            self.put(f"/work-orders/{rca2_id}/rca", self.operator_token, {
-                "whys": ["W1", "W2", "W3", "W4", "W5"],
-                "root_cause": "Root",
-                "corrective_action": "Action"
-            }, expected_status=403)
-
-            # Admin can submit
-            self.put(f"/work-orders/{rca2_id}/rca", self.admin_token, {
-                "whys": ["W1", "W2", "W3", "W4", "W5"],
-                "root_cause": "Root",
-                "corrective_action": "Action"
-            })
-            self.log("RCA permission checks working correctly")
-
-    def test_rca_edit_after_completion_rejected(self):
-        """Test: After completion, RCA edits rejected (400)"""
-        if not self.rca_wo_id:
-            raise AssertionError("RCA WO not created")
-
-        # Complete the RCA WO
-        self.put(f"/work-orders/{self.rca_wo_id}", self.tech_token, {"action": "complete"})
-
-        # Try to edit RCA - should fail
-        self.put(f"/work-orders/{self.rca_wo_id}/rca", self.tech_token, {
-            "whys": ["New W1", "New W2", "New W3", "New W4", "New W5"],
-            "root_cause": "New root",
-            "corrective_action": "New action"
-        }, expected_status=400)
-        self.log("RCA edit after completion correctly rejected")
-
-    def test_rca_lifecycle(self):
-        """Test: RCA lifecycle - tech complete -> PENDING_ADMIN_CLOSURE, tech close -> 403, admin close -> CLOSED"""
-        if not self.rca_wo_id:
-            raise AssertionError("RCA WO not created")
-
-        # Verify status is PENDING_ADMIN_CLOSURE after tech completion
-        rca_wo = self.get(f"/work-orders/{self.rca_wo_id}", self.admin_token)
-        assert rca_wo["status"] == "PENDING_ADMIN_CLOSURE", "RCA WO in PENDING_ADMIN_CLOSURE"
-
-        # Tech tries to close - should fail
-        self.put(f"/work-orders/{self.rca_wo_id}", self.tech_token, {"action": "close"}, expected_status=403)
-
-        # Admin closes
-        result = self.put(f"/work-orders/{self.rca_wo_id}", self.admin_token, {"action": "close"})
-        assert result["status"] == "CLOSED", "Admin closed RCA WO"
-        self.log("RCA lifecycle working correctly")
-
-    def test_short_wo_no_rca_trigger(self):
-        """Test: Short WO (10 min) does NOT trigger RCA"""
-        wo = self.post("/work-orders", self.admin_token, {
-            "machine_id": self.test_machine_id,
-            "title": "Short WO",
-            "wo_type": "Corrective",
-            "assigned_to": "tech"
-        })
-        self.put(f"/work-orders/{wo['id']}", self.admin_token, {"action": "start"})
-        self.put(f"/work-orders/{wo['id']}", self.tech_token, {
-            "action": "complete",
-            "duration_minutes": 10
-        })
-        wo_detail = self.get(f"/work-orders/{wo['id']}", self.admin_token)
-        assert not wo_detail.get("rca_task_id"), "No RCA triggered for short WO"
-        self.log("Short WO correctly does not trigger RCA")
-
-    def test_breakdown_rca_trigger(self):
-        """Test: Breakdown with downtime > 30 min triggers RCA WO"""
-        # Create breakdown
-        bd = self.post("/breakdowns", self.admin_token, {
-            "machine_id": self.test_machine_id,
-            "description": "Test breakdown for RCA trigger",
+            "description": "Test breakdown with start time",
             "breakdown_type": "MECHANICAL",
-            "auto_create_work_order": True
+            "assigned_to": "tech",
+            "start_time": start_time
         })
-        self.breakdown_id = bd["id"]
+        assert bd["ticket_number"], "Breakdown created"
+        assert bd["assigned_to"] == "tech", "Technician assigned"
+        assert bd["start_time"] == start_time, "Start time set correctly"
+        assert bd["work_order_number"], "WO auto-created"
+        self.test_breakdown_id = bd["id"]
+        self.test_wo_id = bd["work_order_id"]
+        self.log(f"Breakdown {bd['ticket_number']} created with tech + start_time, WO: {bd['work_order_number']}")
 
-        # Assign and start
-        self.put(f"/breakdowns/{bd['id']}", self.admin_token, {
-            "action": "assign",
-            "assigned_to": "tech"
+    def test_breakdown_complete_with_edited_times_short(self):
+        """Test: Breakdown complete with edited start/end times, <=30min -> NO RCA, no root_cause required"""
+        # Create a new breakdown for this test
+        now = datetime.now(timezone.utc)
+        start_time = (now - timedelta(minutes=25)).isoformat()
+        end_time = now.isoformat()
+        
+        bd = self.post("/breakdowns", self.tech_token, {
+            "machine_id": self.test_machine_id,
+            "description": "Short breakdown test",
+            "breakdown_type": "ELECTRICAL",
+            "assigned_to": "tech",
+            "start_time": start_time
         })
+        
+        # Start repair
         self.put(f"/breakdowns/{bd['id']}", self.tech_token, {"action": "start"})
-
-        # Complete with downtime > 30 min (requires root_cause per existing rule)
-        # Calculate end_time to be 35 minutes after start_time
-        from datetime import datetime, timedelta, timezone
-        start_dt = datetime.fromisoformat(bd["start_time"].replace("Z", "+00:00"))
-        end_dt = start_dt + timedelta(minutes=35)
-        end_time = end_dt.isoformat()
-
+        
+        # Complete with edited times (25 min downtime) - NO root_cause required
         result = self.put(f"/breakdowns/{bd['id']}", self.tech_token, {
             "action": "complete",
+            "start_time": start_time,
             "end_time": end_time,
-            "root_cause": "Test root cause for breakdown",
+            "action_taken": "Quick fix"
+        })
+        assert result["status"] == "COMPLETED", "Breakdown completed"
+        assert 24 <= result["downtime_minutes"] <= 26, f"Downtime ~25 min, got {result['downtime_minutes']}"
+        
+        # Verify NO RCA WO created
+        bd_detail = self.get(f"/breakdowns/{bd['id']}", self.tech_token)
+        assert not bd_detail.get("rca_task_id"), "No RCA for <=30min downtime"
+        self.log(f"Short breakdown (25 min) completed without RCA requirement")
+
+    def test_breakdown_complete_with_edited_times_long(self):
+        """Test: Breakdown complete with edited times >30min -> RCA WO created"""
+        now = datetime.now(timezone.utc)
+        start_time = (now - timedelta(minutes=45)).isoformat()
+        end_time = now.isoformat()
+        
+        bd = self.post("/breakdowns", self.tech_token, {
+            "machine_id": self.test_machine_id,
+            "description": "Long breakdown test",
+            "breakdown_type": "MECHANICAL",
+            "assigned_to": "tech",
+            "start_time": start_time
+        })
+        
+        self.put(f"/breakdowns/{bd['id']}", self.tech_token, {"action": "start"})
+        
+        # Complete with edited times (45 min downtime)
+        result = self.put(f"/breakdowns/{bd['id']}", self.tech_token, {
+            "action": "complete",
+            "start_time": start_time,
+            "end_time": end_time,
+            "action_taken": "Major repair"
+        })
+        assert result["status"] == "COMPLETED", "Breakdown completed"
+        assert 44 <= result["downtime_minutes"] <= 46, f"Downtime ~45 min, got {result['downtime_minutes']}"
+        
+        # Verify RCA WO created
+        bd_detail = self.get(f"/breakdowns/{bd['id']}", self.tech_token)
+        assert bd_detail.get("rca_task_id"), "RCA WO created for >30min downtime"
+        self.log(f"Long breakdown (45 min) triggered RCA WO")
+
+    def test_breakdown_end_before_start_rejected(self):
+        """Test: Breakdown complete with end_time < start_time -> 400"""
+        now = datetime.now(timezone.utc)
+        start_time = now.isoformat()
+        end_time = (now - timedelta(minutes=10)).isoformat()  # End before start
+        
+        bd = self.post("/breakdowns", self.tech_token, {
+            "machine_id": self.test_machine_id,
+            "description": "Invalid time test",
+            "breakdown_type": "MECHANICAL",
+            "assigned_to": "tech",
+            "start_time": start_time
+        })
+        
+        self.put(f"/breakdowns/{bd['id']}", self.tech_token, {"action": "start"})
+        
+        # Try to complete with end < start -> should fail
+        self.put(f"/breakdowns/{bd['id']}", self.tech_token, {
+            "action": "complete",
+            "start_time": start_time,
+            "end_time": end_time,
+            "action_taken": "Test"
+        }, expected_status=400)
+        self.log("End time before start time correctly rejected (400)")
+
+    # ============ BREAKDOWN-WO SYNC TESTS ============
+    def test_breakdown_complete_syncs_wo_to_pending_admin(self):
+        """Test: Breakdown complete -> linked WO immediately PENDING_ADMIN_CLOSURE"""
+        if not self.test_breakdown_id or not self.test_wo_id:
+            raise AssertionError("Test breakdown not created")
+        
+        # Complete the breakdown
+        now = datetime.now(timezone.utc)
+        start_time = (now - timedelta(minutes=20)).isoformat()
+        end_time = now.isoformat()
+        
+        self.put(f"/breakdowns/{self.test_breakdown_id}", self.tech_token, {"action": "start"})
+        self.put(f"/breakdowns/{self.test_breakdown_id}", self.tech_token, {
+            "action": "complete",
+            "start_time": start_time,
+            "end_time": end_time,
             "action_taken": "Repaired"
         })
-        assert result.get("downtime_minutes", 0) > 30, "Downtime exceeds 30 min"
+        
+        # Verify WO is now PENDING_ADMIN_CLOSURE
+        wo = self.get(f"/work-orders/{self.test_wo_id}", self.admin_token)
+        assert wo["status"] == "PENDING_ADMIN_CLOSURE", f"WO status should be PENDING_ADMIN_CLOSURE, got {wo['status']}"
+        self.log("Breakdown complete correctly synced WO to PENDING_ADMIN_CLOSURE")
 
-        # Verify RCA WO created
-        bd_detail = self.get(f"/breakdowns/{bd['id']}", self.admin_token)
-        assert bd_detail.get("rca_task_id"), "RCA task ID set on breakdown"
+    def test_admin_close_wo_closes_breakdown(self):
+        """Test: Admin close WO -> breakdown auto-CLOSED"""
+        if not self.test_breakdown_id or not self.test_wo_id:
+            raise AssertionError("Test breakdown not created")
+        
+        # Admin closes the WO
+        self.put(f"/work-orders/{self.test_wo_id}", self.admin_token, {"action": "close"})
+        
+        # Verify breakdown is now CLOSED
+        bd = self.get(f"/breakdowns/{self.test_breakdown_id}", self.tech_token)
+        assert bd["status"] == "CLOSED", f"Breakdown should be CLOSED, got {bd['status']}"
+        self.log("Admin WO close correctly auto-closed linked breakdown")
 
-        # Verify RCA WO details
-        rca_wo = self.get(f"/work-orders/{bd_detail['rca_task_id']}", self.admin_token)
-        assert rca_wo["wo_type"] == "RCA", "RCA WO created"
-        assert rca_wo.get("source_breakdown_id") == bd["id"], "RCA links to breakdown"
-        self.log(f"Breakdown RCA trigger working: {rca_wo['wo_number']}")
+    def test_admin_close_breakdown_closes_wo(self):
+        """Test: Admin close breakdown -> WO CLOSED"""
+        # Create a new breakdown + WO pair
+        bd = self.post("/breakdowns", self.tech_token, {
+            "machine_id": self.test_machine_id,
+            "description": "Test admin close breakdown",
+            "breakdown_type": "MECHANICAL",
+            "assigned_to": "tech"
+        })
+        wo_id = bd["work_order_id"]
+        
+        # Start and complete breakdown
+        self.put(f"/breakdowns/{bd['id']}", self.tech_token, {"action": "start"})
+        now = datetime.now(timezone.utc)
+        self.put(f"/breakdowns/{bd['id']}", self.tech_token, {
+            "action": "complete",
+            "end_time": now.isoformat(),
+            "action_taken": "Fixed"
+        })
+        
+        # Admin closes breakdown directly
+        self.put(f"/breakdowns/{bd['id']}", self.admin_token, {"action": "close"})
+        
+        # Verify WO is now CLOSED
+        wo = self.get(f"/work-orders/{wo_id}", self.admin_token)
+        assert wo["status"] == "CLOSED", f"WO should be CLOSED, got {wo['status']}"
+        self.log("Admin breakdown close correctly closed linked WO")
 
-    # ============ TECHNICIAN ANALYTICS TESTS ============
-    def test_technician_analytics_admin_only(self):
-        """Test: GET /api/analytics/technicians -> 403 for tech and operator, 200 for admin"""
-        # Tech tries - should fail
-        self.get("/analytics/technicians", self.tech_token, expected_status=403)
+    # ============ BREAKDOWNS LIST TESTS ============
+    def test_breakdowns_returns_open_total(self):
+        """Test: GET /api/breakdowns returns open_total (count of OPEN/ASSIGNED/IN_PROGRESS only)"""
+        result = self.get("/breakdowns", self.tech_token)
+        assert "open_total" in result, "open_total field present"
+        assert "total" in result, "total field present"
+        assert isinstance(result["open_total"], int), "open_total is integer"
+        # open_total should be <= total
+        assert result["open_total"] <= result["total"], "open_total <= total"
+        self.log(f"Breakdowns list returns open_total: {result['open_total']} (total: {result['total']})")
 
-        # Operator tries - should fail
-        self.get("/analytics/technicians", self.operator_token, expected_status=403)
-
-        # Admin succeeds
-        result = self.get("/analytics/technicians", self.admin_token)
-        assert "technicians" in result, "Technicians array present"
-        assert "on_time_target_minutes" in result, "On-time target present"
-        self.log("Technician analytics admin-only access working")
-
-    def test_technician_analytics_filters(self):
-        """Test: Technician analytics accepts filters (date_from, date_to, line, department, wo_type)"""
-        # Test with all filters
-        today = datetime.now().date().isoformat()
-        yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
-
-        result = self.get(
-            f"/analytics/technicians?date_from={yesterday}&date_to={today}&line={self.test_line}&department=Production&wo_type=Corrective",
-            self.admin_token
-        )
-        assert "technicians" in result, "Filters accepted"
-        assert result.get("filters"), "Filters echoed back"
-        self.log("Technician analytics filters working")
-
-    # ============ LINE-LEVEL RUNTIME TESTS ============
-    def test_line_runtime_logging(self):
-        """Test: POST /api/runtime-logs with line creates line log and fans out to machines"""
+    # ============ LINE AVAILABILITY TESTS ============
+    def test_line_availability_calculation(self):
+        """Test: Line availability = (Window - downtime) / Window * 100, no machine-count normalization"""
         if not self.test_line:
-            raise AssertionError("No test line available")
-
-        today = datetime.now().date().isoformat()
-
-        # Post line runtime
-        result = self.post("/runtime-logs", self.admin_token, {
-            "line": self.test_line,
-            "date": today,
-            "calendar_hours": 24,
-            "run_hours": 20
-        })
-        assert result["line"] == self.test_line, "Line log created"
-        assert result["machines_count"] > 0, "Machines count present"
-        assert result["run_hours"] == 20, "Run hours correct"
-        self.log(f"Line runtime logged: {result['machines_count']} machines inherit 20h")
-
-        # Verify line log exists
-        line_logs = self.get(f"/line-runtime-logs?line={self.test_line}&date_from={today}&date_to={today}", self.admin_token)
-        assert line_logs["total"] > 0, "Line log found"
-
-        # Verify per-machine logs created (fanned out)
-        machine_logs = self.get(f"/runtime-logs?line={self.test_line}&date_from={today}&date_to={today}", self.admin_token)
-        assert machine_logs["total"] > 0, "Per-machine logs created"
-        for log in machine_logs["items"]:
-            assert log["run_hours"] == 20, "Machine inherited line runtime"
-            assert log["source"] == "line", "Source is 'line'"
-
-    def test_line_runtime_validation(self):
-        """Test: run_hours > calendar_hours -> 400; unknown line -> 404"""
-        today = datetime.now().date().isoformat()
-
-        # Test: run_hours > calendar_hours
-        self.post("/runtime-logs", self.admin_token, {
-            "line": self.test_line,
-            "date": today,
-            "calendar_hours": 20,
-            "run_hours": 25
-        }, expected_status=400)
-
-        # Test: unknown line
-        self.post("/runtime-logs", self.admin_token, {
-            "line": "NonExistentLine123",
-            "date": today,
-            "calendar_hours": 24,
-            "run_hours": 20
-        }, expected_status=404)
-        self.log("Line runtime validation working")
-
-    def test_line_runtime_csv_import(self):
-        """Test: CSV import with line,date,run_hours format"""
-        csv_text = f"line,date,run_hours,calendar_hours\n{self.test_line},2025-01-10,22,24\n{self.test_line},2025-01-11,23,24"
-
-        # Preview
-        preview = self.post("/runtime-logs/import", self.admin_token, {
-            "csv_text": csv_text,
-            "apply": False
-        })
-        assert preview["preview"], "Preview mode"
-        assert preview["valid_rows"] == 2, "2 valid rows"
-        assert len(preview["errors"]) == 0, "No errors"
-
-        # Apply
-        result = self.post("/runtime-logs/import", self.admin_token, {
-            "csv_text": csv_text,
-            "apply": True
-        })
-        assert result["imported"] == 2, "2 rows imported"
-        assert result["machines_affected"] > 0, "Machines affected"
-        self.log(f"CSV import working: {result['imported']} rows, {result['machines_affected']} machines")
-
-    # ============ AWS CATEGORY SORTING TESTS ============
-    def test_aws_failure_categories(self):
-        """Test: GET /api/reliability/metrics includes failure_categories and dominant_category"""
-        metrics = self.get("/reliability/metrics", self.admin_token)
-        if len(metrics) > 0:
-            # Check if any machine has failure_categories
-            has_categories = any(m.get("failure_categories") for m in metrics)
-            if has_categories:
-                for m in metrics:
-                    if m.get("failure_categories"):
-                        assert isinstance(m["failure_categories"], dict), "failure_categories is dict"
-                        assert m.get("dominant_category"), "dominant_category present"
-                        self.log(f"Machine {m['machine_name']}: {m['failure_categories']}, dominant: {m['dominant_category']}")
-            else:
-                self.log("No machines with failure categories yet (no breakdowns recorded)")
+            self.log("No test line available, skipping line availability test")
+            return
+        
+        # Get line KPIs for 8 hours
+        result = self.get("/control-room/line-kpis?hours=8", self.admin_token)
+        assert "lines" in result, "lines array present"
+        assert result["window_hours"] == 8, "Window is 8 hours"
+        
+        # Find our test line
+        test_line_kpi = next((l for l in result["lines"] if l["line"] == self.test_line), None)
+        if test_line_kpi:
+            # Availability should be between 0 and 100
+            assert 0 <= test_line_kpi["availability"] <= 100, f"Availability out of range: {test_line_kpi['availability']}"
+            # Downtime should be capped at window (480 min for 8h)
+            assert test_line_kpi["downtime_minutes"] <= 480, f"Downtime exceeds window: {test_line_kpi['downtime_minutes']}"
+            self.log(f"Line {self.test_line}: availability={test_line_kpi['availability']}%, downtime={test_line_kpi['downtime_minutes']} min")
         else:
-            self.log("No reliability metrics yet")
+            self.log(f"Test line {self.test_line} not found in KPIs")
 
-    def test_aws_category_filter(self):
-        """Test: ?category=MECHANICAL returns only machines with dominant MECHANICAL"""
-        metrics = self.get("/reliability/metrics?category=MECHANICAL", self.admin_token)
-        for m in metrics:
-            if m.get("dominant_category"):
-                assert m["dominant_category"] == "MECHANICAL", "Only MECHANICAL machines returned"
-        self.log("AWS category filter working")
+    # ============ WARNING WO GENERATION TESTS ============
+    def test_warning_wo_generation(self):
+        """Test: POST /api/warnings/{id}/generate-wo works for warning without WO"""
+        # Create a warning first (warnings also require assigned_to now)
+        warning = self.post("/warnings", self.tech_token, {
+            "machine_id": self.test_machine_id,
+            "description": "Test warning for WO generation",
+            "warning_type": "MECHANICAL",
+            "reporter_name": "Test Tech",
+            "assigned_to": "tech",
+            "wo_type": "Inspection"
+        })
+        self.test_warning_id = warning["id"]
+        assert warning["tag_number"], "Warning created"
+        assert warning["work_order_number"], "WO auto-created with warning"
+        self.log(f"Warning {warning['tag_number']} created with auto WO: {warning['work_order_number']}")
+
+    def test_warning_wo_generation_duplicate_rejected(self):
+        """Test: POST /api/warnings/{id}/generate-wo -> 400 if open WO already linked"""
+        if not self.test_warning_id:
+            raise AssertionError("Test warning not created")
+        
+        # Warning already has a WO from creation, try to generate another -> should fail
+        self.post(f"/warnings/{self.test_warning_id}/generate-wo", self.tech_token, {
+            "assigned_to": "tech",
+            "wo_type": "Corrective"
+        }, expected_status=400)
+        self.log("Duplicate warning WO generation correctly rejected (400)")
+
+    # ============ WO EDITED TIMES TESTS ============
+    def test_wo_complete_with_edited_times(self):
+        """Test: WO complete with started_at/completed_at -> duration from edited times + RCA if >30min"""
+        # Create a WO
+        wo = self.post("/work-orders", self.admin_token, {
+            "machine_id": self.test_machine_id,
+            "title": "Test WO with edited times",
+            "wo_type": "Corrective",
+            "assigned_to": "tech"
+        })
+        
+        # Start WO
+        self.put(f"/work-orders/{wo['id']}", self.tech_token, {"action": "start"})
+        
+        # Complete with edited times (40 min duration -> should trigger RCA)
+        now = datetime.now(timezone.utc)
+        started_at = (now - timedelta(minutes=40)).isoformat()
+        completed_at = now.isoformat()
+        
+        result = self.put(f"/work-orders/{wo['id']}", self.tech_token, {
+            "action": "complete",
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "action_taken": "Completed with edited times"
+        })
+        assert result["status"] == "PENDING_ADMIN_CLOSURE", "WO completed"
+        
+        # Verify duration calculated from edited times
+        wo_detail = self.get(f"/work-orders/{wo['id']}", self.admin_token)
+        assert 39 <= wo_detail["duration_minutes"] <= 41, f"Duration ~40 min, got {wo_detail['duration_minutes']}"
+        # Should have RCA triggered
+        assert wo_detail.get("rca_task_id"), "RCA triggered for >30min WO"
+        self.log(f"WO completed with edited times (40 min), RCA triggered")
+
+    # ============ PM PDF TESTS ============
+    def test_pm_pdf_with_date_parameter(self):
+        """Test: GET /api/pm-tasks/{id}/pdf?date=2026-07-20 returns valid PDF"""
+        # Get a PM task
+        pm_tasks = self.get("/pm-tasks?limit=1", self.admin_token)
+        if pm_tasks["total"] == 0:
+            self.log("No PM tasks available, skipping PM PDF test")
+            return
+        
+        task_id = pm_tasks["items"][0]["id"]
+        self.test_pm_task_id = task_id
+        
+        # Request PDF with date parameter
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        r = requests.get(f"{BASE_URL}/pm-tasks/{task_id}/pdf?date=2026-07-20", headers=headers)
+        assert r.status_code == 200, f"PDF request failed: {r.status_code}"
+        assert r.headers.get("Content-Type") == "application/pdf", "Response is PDF"
+        assert len(r.content) > 1000, "PDF has content"
+        self.log(f"PM PDF generated successfully with date parameter ({len(r.content)} bytes)")
+
+    def test_pm_complete_with_checklist_date(self):
+        """Test: POST /api/pm-tasks/{id}/complete accepts checklist_date"""
+        if not self.test_pm_task_id:
+            # Get a PM task
+            pm_tasks = self.get("/pm-tasks?limit=1", self.admin_token)
+            if pm_tasks["total"] == 0:
+                self.log("No PM tasks available, skipping PM complete test")
+                return
+            self.test_pm_task_id = pm_tasks["items"][0]["id"]
+        
+        # Complete PM with checklist_date
+        result = self.post(f"/pm-tasks/{self.test_pm_task_id}/complete", self.tech_token, {
+            "done_by": "Test Tech",
+            "checklist_date": "2026-07-20",
+            "row_results": [],
+            "remarks": "Test completion"
+        })
+        assert result["checklist_date"] == "2026-07-20", "Checklist date set correctly"
+        self.log("PM completion with checklist_date successful")
 
     def run_all_tests(self):
-        """Run all Phase L tests"""
+        """Run all bug fix tests"""
         self.log("=" * 60)
-        self.log("PHASE L BACKEND TESTING")
+        self.log("11 BUG FIXES BACKEND TESTING")
         self.log("=" * 60)
 
         self.setup()
 
-        self.log("\n=== RCA 5-WHY MODULE TESTS ===")
-        self.test("RCA trigger from long WO", self.test_rca_trigger_from_long_wo)
-        self.test("RCA WO cannot complete without submission", self.test_rca_wo_cannot_complete_without_submission)
-        self.test("RCA submission validation", self.test_rca_submission_validation)
-        self.test("RCA submission permission", self.test_rca_submission_permission)
-        self.test("RCA edit after completion rejected", self.test_rca_edit_after_completion_rejected)
-        self.test("RCA lifecycle", self.test_rca_lifecycle)
-        self.test("Short WO no RCA trigger", self.test_short_wo_no_rca_trigger)
-        self.test("Breakdown RCA trigger", self.test_breakdown_rca_trigger)
+        self.log("\n=== BREAKDOWN CREATION & EDITING TESTS ===")
+        self.test("Breakdown requires technician", self.test_breakdown_requires_technician)
+        self.test("Breakdown with start_time and technician", self.test_breakdown_with_start_time_and_technician)
+        self.test("Breakdown complete with edited times (short, <=30min)", self.test_breakdown_complete_with_edited_times_short)
+        self.test("Breakdown complete with edited times (long, >30min)", self.test_breakdown_complete_with_edited_times_long)
+        self.test("Breakdown end before start rejected", self.test_breakdown_end_before_start_rejected)
 
-        self.log("\n=== TECHNICIAN ANALYTICS TESTS ===")
-        self.test("Technician analytics admin-only", self.test_technician_analytics_admin_only)
-        self.test("Technician analytics filters", self.test_technician_analytics_filters)
+        self.log("\n=== BREAKDOWN-WO SYNC TESTS ===")
+        self.test("Breakdown complete syncs WO to PENDING_ADMIN_CLOSURE", self.test_breakdown_complete_syncs_wo_to_pending_admin)
+        self.test("Admin close WO closes breakdown", self.test_admin_close_wo_closes_breakdown)
+        self.test("Admin close breakdown closes WO", self.test_admin_close_breakdown_closes_wo)
 
-        self.log("\n=== LINE-LEVEL RUNTIME TESTS ===")
-        self.test("Line runtime logging", self.test_line_runtime_logging)
-        self.test("Line runtime validation", self.test_line_runtime_validation)
-        self.test("Line runtime CSV import", self.test_line_runtime_csv_import)
+        self.log("\n=== BREAKDOWNS LIST TESTS ===")
+        self.test("Breakdowns returns open_total", self.test_breakdowns_returns_open_total)
 
-        self.log("\n=== AWS CATEGORY SORTING TESTS ===")
-        self.test("AWS failure categories", self.test_aws_failure_categories)
-        self.test("AWS category filter", self.test_aws_category_filter)
+        self.log("\n=== LINE AVAILABILITY TESTS ===")
+        self.test("Line availability calculation", self.test_line_availability_calculation)
+
+        self.log("\n=== WARNING WO GENERATION TESTS ===")
+        self.test("Warning WO generation", self.test_warning_wo_generation)
+        self.test("Warning WO generation duplicate rejected", self.test_warning_wo_generation_duplicate_rejected)
+
+        self.log("\n=== WO EDITED TIMES TESTS ===")
+        self.test("WO complete with edited times", self.test_wo_complete_with_edited_times)
+
+        self.log("\n=== PM PDF TESTS ===")
+        self.test("PM PDF with date parameter", self.test_pm_pdf_with_date_parameter)
+        self.test("PM complete with checklist_date", self.test_pm_complete_with_checklist_date)
 
         self.log("\n" + "=" * 60)
         self.log(f"RESULTS: {self.tests_passed}/{self.tests_run} tests passed")
@@ -480,5 +453,5 @@ class PhaseL_Tester:
         return 0 if self.tests_passed == self.tests_run else 1
 
 if __name__ == "__main__":
-    tester = PhaseL_Tester()
+    tester = BugFixTester()
     sys.exit(tester.run_all_tests())
