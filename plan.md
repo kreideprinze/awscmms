@@ -29,7 +29,10 @@
 - **Differentiate downtime vs non-downtime events** clearly:
   - Add **Warning** observations that **do not affect** Availability/MTBF/MTTR but **do auto-dispatch** a WO and visually appear yellow across the HUD.
 - Ensure execution governance in CMMS:
-  - Work order completion requires **Admin closure** before final CLOSED.
+  - Work order completion requires **Admin closure** before final CLOSED — applies to **Corrective AND PM-generated Work Orders**.
+- Improve Kanban operational UX:
+  - Kanban cards open a **detail popout modal** for fast inspection and quick edits.
+  - Work Orders support **editable Start/End times** (admin + assigned technician) with validation and audit trail.
 - Maintain **UI excellence without logic risk**:
   - Allow iterative UI polish improvements **without changing backend/frontend business logic**.
 
@@ -133,84 +136,27 @@
 > This phase differentiates “machine down” vs “needs attention”, tightens CMMS governance (admin closure), improves Kanban as default execution surface, and standardizes dedicated-page patterns for execution (repair page).
 
 #### I1) Add “Warning” entry type (non-downtime, yellow-tagged) (P0)
-**Delivered**
-- Backend:
-  - `db.warnings` collection + `WRN-` counter
-  - `POST /api/warnings`, `GET /api/warnings`
-  - `POST /api/public/warnings` (no login), flagged `submitted_via=public_kiosk`
-  - Warning creates **no breakdown** and **does not affect** availability/MTBF/MTTR.
-  - Machine status set to **watch** (yellow) for visibility.
-  - Always auto-creates a WO (Inspection/Corrective) and auto-assigns to **least-loaded** technician.
-  - Admin closing warning-sourced WO closes warning and restores machine status from watch → running.
-- Frontend:
-  - Warning mode in the same dialog (same fields), visually yellow.
-  - Launch points: Login (public), Breakdowns page, Machine Drawer.
-  - Breakdowns page has **Breakdowns/Warn​ings** toggle and warnings table view.
-  - Control Room feed rails highlight warning-created events in yellow.
-
 **Status:** ✅ COMPLETE
 
 #### I2) Report Breakdown/Warning modal must not close on outside click/escape (P0)
-- Dialog now prevents `onInteractOutside`, `onPointerDownOutside`, and `onEscapeKeyDown`.
-- Only the explicit **×** closes.
-
 **Status:** ✅ COMPLETE
 
 #### I3) Change Breakdown icon from flame → cracked gear (P0)
-- Implemented `CrackedGear` SVG icon and replaced flame usage in:
-  - Sidebar / navigation
-  - Login public breakdown button
-  - Repair page header
-  - (and shared imports through `StatusBits`)
-
 **Status:** ✅ COMPLETE
 
 #### I4) Work Orders: machine name not clickable to machine stats (P0)
-- Removed `openMachine(...)` linking from:
-  - Work Orders Kanban cards
-  - Work Orders table view
-
 **Status:** ✅ COMPLETE
 
-#### I5) Work Order completion requires Admin closure (P0)
-- Lifecycle updated:
-  - `OPEN → ASSIGNED → IN_PROGRESS → (tech) PENDING_ADMIN_CLOSURE → (admin) CLOSED`
-- Backend:
-  - tech `complete` sets `PENDING_ADMIN_CLOSURE` and sends **admin-role notifications**.
-  - tech `close` returns **403**.
-  - admin `close` finalizes CLOSED.
-  - Migrated existing `COMPLETED` WOs → `PENDING_ADMIN_CLOSURE`.
-- Frontend:
-  - Kanban includes **ADMIN CLOSURE** column.
-  - Admin sees **Admin Close** action; non-admin sees “awaiting admin”.
-
+#### I5) Work Order completion requires Admin closure (Corrective lifecycle) (P0)
 **Status:** ✅ COMPLETE
 
 #### I6) Operator/public breakdown submissions always auto-dispatch WO + auto-assign tech (P0)
-- Backend:
-  - Forces `auto_create_work_order=True` for operator role.
-  - Uses least-loaded technician assignment.
-- Frontend:
-  - Auto-create checkbox hidden for operator/public flows (replaced by note).
-  - Admin/technician still have checkbox for authenticated breakdown creation.
-
 **Status:** ✅ COMPLETE
 
 #### I7) Work Orders defaults to Kanban + PM-from-Kanban navigation fix + density improvements (P0)
-- Default Work Orders view is Kanban.
-- Cards made denser (smaller padding/text) to show more per column.
-- PM-type WO “Complete” routes to current structured checklist page:
-  - `/preventive-maintenance/close/{pm_task_id}`
-
 **Status:** ✅ COMPLETE
 
 #### I8) Dedicated Repair page for breakdown execution (P0)
-- Added `/breakdowns/repair/:breakdownId` dedicated page:
-  - Live elapsed downtime display
-  - root cause + action taken + spares
-  - completion restores machine
-- “Start Repair” navigates to repair page (and triggers `start` if needed).
-
 **Status:** ✅ COMPLETE
 
 **Phase I Testing:** ✅ COMPLETE
@@ -220,8 +166,67 @@
 
 ---
 
+### Phase J — PM WO Admin Closure + Kanban Detail Popout Modal (P0)
+> This phase standardizes the WO lifecycle across **all** WO sources (Corrective + PM), and upgrades Kanban UX with a fast detail popout for inspection and time edits.
+
+#### J1) PM completion must park linked Work Order at `PENDING_ADMIN_CLOSURE` (P0)
+**Delivered**
+- Backend (`/app/backend/routers_maintenance.py`):
+  - `POST /api/pm-tasks/{task_id}/complete` now finds any linked Work Orders:
+    - match: `pm_task_id == task_id`
+    - status in: `OPEN | ASSIGNED | IN_PROGRESS`
+  - Updates WO to:
+    - `status = PENDING_ADMIN_CLOSURE`
+    - `completed_at = now`
+    - `duration_minutes` computed from `started_at` (fallback `created_at`)
+    - `pm_completion_id` stored for traceability
+  - Emits:
+    - timeline event (`wo_completed`) with “awaiting admin closure” language
+    - notification: **"Admin Review Required"** with `target_role='admin'`
+
+**Status:** ✅ COMPLETE
+
+#### J2) Work Order time edits via `action='update'` (P0)
+**Delivered**
+- Backend (`/app/backend/routers_maintenance.py`):
+  - `WOUpdate` model extended:
+    - `started_at` (ISO datetime)
+    - `completed_at` (ISO datetime)
+  - `PUT /api/work-orders/{wo_id}` with `action='update'` now:
+    - allows edits only for **admin** OR **assigned_to == current user** (403 otherwise)
+    - rejects `completed_at < started_at` (400)
+    - recomputes `duration_minutes` when both times are present
+    - creates a timeline event `wo_updated`
+    - returns `{ ok: true, work_order: <updated> }`
+
+**Status:** ✅ COMPLETE
+
+#### J3) Kanban card detail popout modal (P0)
+**Delivered**
+- Frontend (`/app/frontend/src/pages/WorkOrders.jsx`):
+  - Clicking any Kanban card opens `WODetailModal` (`data-testid='wo-detail-modal'`)
+  - Modal displays full WO details: number, badges, machine/type/assignee/created/duration/closed_by, description, root cause, action taken, spares.
+  - Includes **Execution Times** panel:
+    - `datetime-local` Start/End inputs
+    - Save Times button
+    - enabled only for **admin + assigned tech** (others see read-only)
+  - Maintains execution flows:
+    - Start / Complete / Admin Close buttons contextual by status
+    - Preventive completion routes to PM closeout page
+    - Repair/PM deep links provided (Open Repair Page / PM Closeout Page)
+  - Card action buttons (Start/Complete/Admin Close) use `stopPropagation` so they do not open the modal.
+
+**Status:** ✅ COMPLETE
+
+**Phase J Testing:** ✅ COMPLETE
+- `/app/test_reports/iteration_6.json`
+  - **backend 100% (29/29)**
+  - **frontend 100%**
+
+---
+
 ## 3) Next Actions
-> All phases through I are complete. Remaining work is optional backlog only.
+> All phases through J are complete. Remaining work is optional backlog only.
 
 ### Completed (Prior Iterations) ✅
 - Removed infinite zoom in Control Room; enabled vertical scroll.
@@ -239,7 +244,13 @@
 - Work Orders Kanban default + PM route fix.
 - Dedicated Breakdown Repair page.
 
+### Phase J — Completed Work ✅
+- PM completion now parks linked PM Work Orders at **PENDING_ADMIN_CLOSURE** + admin notifications.
+- Work Orders support time edits (Start/End) with admin/assignee permission checks + validation.
+- Kanban card click opens a full WO detail modal with editable Start/End times and deep links.
+
 ### Optional Next Enhancements (Future / Backlog)
+- Refactor: centralize admin-review notification logic for all WO sources (reduce duplication across endpoints).
 - Add an Admin “Warnings” management view (filters, close/reopen, trends) and/or link warnings to WO details.
 - Extend timeline filtering for warnings and add a “Warning” chip in machine tiles.
 - Harden public kiosk endpoints:
@@ -296,6 +307,14 @@
   - `PENDING_ADMIN_CLOSURE` implemented
   - admin notifications sent
   - only admin can final-close.
+- ✅ PM Work Orders follow the same governance:
+  - PM completion does **not** auto-close a WO
+  - linked PM WO transitions to `PENDING_ADMIN_CLOSURE`
+  - admin notification targeted to `admin` role
+- ✅ Kanban has fast inspection + quick edits:
+  - card click opens detail modal
+  - Start/End time edits available to admin + assignee
+  - validation enforced (no end before start)
 - ✅ Dedicated execution pages exist where required:
   - PM close-out page
   - Breakdown repair page.
@@ -305,3 +324,4 @@
   - Phase E: `/app/test_reports/iteration_3.json`
   - Phase F: `/app/test_reports/iteration_4.json`
   - Phase I: `/app/test_reports/iteration_5.json`
+  - Phase J: `/app/test_reports/iteration_6.json`
