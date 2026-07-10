@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Plus, CheckCircle2 } from 'lucide-react';
+import { Plus, CheckCircle2, FileDown } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -10,65 +11,22 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { CritBadge, fmtDate } from '@/components/StatusBits';
-import { MachineSelect, TechnicianSelect, SpareRows, KpiCard } from '@/components/Shared';
+import { CritBadge } from '@/components/StatusBits';
+import { MachineSelect, TechnicianSelect, KpiCard } from '@/components/Shared';
+import { ChecklistBuilder, downloadPmPdf } from '@/components/ChecklistBuilder';
 
 const FREQS = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'];
-
-function CompletePMDialog({ task, open, setOpen, onDone }) {
-  const [remarks, setRemarks] = useState('');
-  const [spares, setSpares] = useState([]);
-  const [checklist, setChecklist] = useState({});
-  useEffect(() => {
-    if (task?.checklist) setChecklist(Object.fromEntries(task.checklist.map((c) => [c, false])));
-    setRemarks(''); setSpares([]);
-  }, [task]);
-  if (!task) return null;
-  const submit = async () => {
-    try {
-      await api.post(`/pm-tasks/${task.id}/complete`, {
-        remarks: remarks || undefined,
-        checklist_results: Object.keys(checklist).length ? checklist : undefined,
-        spares_consumed: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
-      });
-      toast.success(`PM “${task.task_name}” completed`);
-      setOpen(false); onDone();
-    } catch (e) { toast.error(errMsg(e)); }
-  };
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto border-border bg-[hsl(var(--panel-1))]">
-        <DialogHeader><DialogTitle>Complete PM — {task.task_name}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          {task.checklist?.length > 0 && (
-            <div className="space-y-1.5 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Checklist</Label>
-              {task.checklist.map((c) => (
-                <label key={c} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={!!checklist[c]} onChange={(e) => setChecklist({ ...checklist, [c]: e.target.checked })} className="accent-[#2ea8ff]" data-testid={`pm-checklist-item`} />
-                  {c}
-                </label>
-              ))}
-            </div>
-          )}
-          <div><Label className="text-xs">Remarks / Action Taken</Label><Textarea data-testid="pm-complete-remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
-          <SpareRows rows={spares} setRows={setSpares} />
-          <Button onClick={submit} data-testid="pm-complete-confirm" className="w-full border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10">Complete PM Task</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+const EMPTY_FORM = { task_name: '', description: '', priority: 'medium', machine_id: '', assigned_to: '', frequency: 'monthly', location: '', reminder_offset_days: 1, next_due_date: '' };
 
 export default function PreventiveMaintenance() {
   const { openMachine, isAdmin } = useApp();
+  const navigate = useNavigate();
   const [data, setData] = useState({ items: [], total: 0 });
   const [filter, setFilter] = useState('all');
   const [createOpen, setCreateOpen] = useState(false);
-  const [completeTask, setCompleteTask] = useState(null);
-  const [completeOpen, setCompleteOpen] = useState(false);
   const [templates, setTemplates] = useState([]);
-  const [form, setForm] = useState({ task_name: '', description: '', priority: 'medium', machine_id: '', assigned_to: '', frequency: 'monthly', checklist: '', reminder_offset_days: 1, next_due_date: '' });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [groups, setGroups] = useState([]);
 
   const load = useCallback(() => {
     const q = filter === 'overdue' ? '?due=overdue' : '';
@@ -78,21 +36,31 @@ export default function PreventiveMaintenance() {
 
   const applyTemplate = (tid) => {
     const t = templates.find((x) => x.id === tid);
-    if (t) setForm((f) => ({ ...f, task_name: t.name, frequency: t.frequency, priority: t.priority, checklist: (t.checklist || []).join('\n') }));
+    if (!t) return;
+    setForm((f) => ({ ...f, task_name: t.name, frequency: t.frequency, priority: t.priority }));
+    if (t.checklist_groups?.length) setGroups(JSON.parse(JSON.stringify(t.checklist_groups)));
+    else setGroups((t.checklist || []).map((c) => ({ description: c, items: [{ checked_for: 'Condition', parameter: '' }] })));
   };
 
   const create = async () => {
     if (!form.machine_id || !form.task_name) { toast.error('Machine and task name are required'); return; }
+    const cleaned = groups
+      .map((g) => ({ description: g.description.trim(), items: g.items.filter((i) => i.checked_for.trim()) }))
+      .filter((g) => g.description && g.items.length);
+    if (!cleaned.length) { toast.error('Add at least one checklist component with a sub-item'); return; }
     try {
       await api.post('/pm-tasks', {
         ...form,
         assigned_to: form.assigned_to || undefined,
+        location: form.location || undefined,
         next_due_date: form.next_due_date || undefined,
         reminder_offset_days: parseInt(form.reminder_offset_days, 10) || 0,
-        checklist: form.checklist.split('\n').map((s) => s.trim()).filter(Boolean),
+        checklist_groups: cleaned,
       });
-      toast.success('PM task created');
+      toast.success('PM task created with structured checklist');
       setCreateOpen(false);
+      setForm(EMPTY_FORM);
+      setGroups([]);
       load();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -105,10 +73,10 @@ export default function PreventiveMaintenance() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Preventive Maintenance</h1>
-          <p className="text-sm text-muted-foreground">Background scheduler generates PM work orders automatically</p>
+          <p className="text-sm text-muted-foreground">Structured checklists · printable sheets · background scheduler generates PM work orders</p>
         </div>
         {isAdmin && (
-          <Button data-testid="pm-create-button" onClick={() => setCreateOpen(true)} className="bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">
+          <Button data-testid="pm-create-button" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1 h-4 w-4" /> New PM Task
           </Button>
         )}
@@ -145,34 +113,49 @@ export default function PreventiveMaintenance() {
           </TableHeader>
           <TableBody>
             {data.items.length === 0 && <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No PM tasks yet. Create one to start the schedule.</TableCell></TableRow>}
-            {data.items.map((t) => (
-              <TableRow key={t.id} data-testid={`pm-row-${t.id}`} className="border-border hover:bg-white/[0.03]">
-                <TableCell>
-                  <div className="text-sm font-medium">{t.task_name} {t.source === 'predictive' && <span className="ml-1 rounded bg-[#ff9e1c]/15 px-1 text-[9px] uppercase text-[#ff9e1c]">AWS</span>}</div>
-                  {t.checklist?.length > 0 && <div className="text-[10px] text-muted-foreground">{t.checklist.length} checklist items</div>}
-                </TableCell>
-                <TableCell><button className="text-sm hover:text-[hsl(var(--primary))]" onClick={() => openMachine(t.machine_id)}>{t.machine_name}</button></TableCell>
-                <TableCell className="text-xs capitalize">{t.frequency}</TableCell>
-                <TableCell><CritBadge level={t.priority} /></TableCell>
-                <TableCell className={`font-mono text-xs ${t.next_due_date < today && t.active ? 'text-[#ff2e63]' : ''}`}>{t.next_due_date}</TableCell>
-                <TableCell className="text-sm">{t.assigned_to || '—'}</TableCell>
-                <TableCell>
-                  {t.active !== false && (
-                    <Button size="sm" className="h-6 border border-[#05ffa1]/60 bg-transparent text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`pm-complete-${t.id}`}
-                      onClick={() => { setCompleteTask(t); setCompleteOpen(true); }}>
-                      <CheckCircle2 className="mr-1 h-3 w-3" /> Complete
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+            {data.items.map((t) => {
+              const rowCount = t.checklist_groups?.length ? t.checklist_groups.reduce((n, g) => n + g.items.length, 0) : (t.checklist?.length || 0);
+              return (
+                <TableRow key={t.id} data-testid={`pm-row-${t.id}`} className="border-border hover:bg-white/[0.03]">
+                  <TableCell>
+                    <div className="text-sm font-medium">{t.task_name} {t.source === 'predictive' && <span className="ml-1 border border-[#ff9e1c]/50 px-1 text-[9px] uppercase text-[#ff9e1c]">AWS</span>}</div>
+                    {rowCount > 0 && <div className="text-[10px] text-muted-foreground">{t.checklist_groups?.length ? `${t.checklist_groups.length} components · ` : ''}{rowCount} check rows</div>}
+                  </TableCell>
+                  <TableCell><button className="text-sm hover:text-[hsl(var(--primary))]" onClick={() => openMachine(t.machine_id)}>{t.machine_name}</button></TableCell>
+                  <TableCell className="text-xs capitalize">{t.frequency}</TableCell>
+                  <TableCell><CritBadge level={t.priority} /></TableCell>
+                  <TableCell className={`font-mono text-xs ${t.next_due_date < today && t.active ? 'text-[#ff2e63]' : ''}`}>{t.next_due_date}</TableCell>
+                  <TableCell className="text-sm">{t.assigned_to || '—'}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5">
+                      {t.active !== false && (
+                        <Button size="sm" className="h-6 border border-[#05ffa1]/60 bg-transparent text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`pm-complete-${t.id}`}
+                          onClick={() => navigate(`/preventive-maintenance/close/${t.id}`)}>
+                          <CheckCircle2 className="mr-1 h-3 w-3" /> Complete
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" className="h-6 px-1.5 text-[10px]" title="Download blank checklist PDF" data-testid={`pm-pdf-blank-${t.id}`}
+                        onClick={() => downloadPmPdf(t.id, null, `PM_${t.task_name}_blank.pdf`).catch(() => toast.error('PDF download failed'))}>
+                        <FileDown className="h-3 w-3" />
+                      </Button>
+                      {t.last_completed_at && (
+                        <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-muted-foreground" title="Download last completed sheet" data-testid={`pm-pdf-done-${t.id}`}
+                          onClick={() => downloadPmPdf(t.id, 'latest', `PM_${t.task_name}_completed.pdf`).catch(() => toast.error('No completion found'))}>
+                          <FileDown className="mr-0.5 h-3 w-3" /> last
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto border-border bg-[hsl(var(--panel-1))]">
-          <DialogHeader><DialogTitle>New PM Task</DialogTitle></DialogHeader>
+        <DialogContent className="max-h-[88vh] overflow-y-auto border-border bg-[hsl(var(--panel-1))] sm:max-w-3xl">
+          <DialogHeader><DialogTitle>New PM Task — Structured Checklist</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label className="text-xs">Start from template (optional)</Label>
@@ -181,10 +164,11 @@ export default function PreventiveMaintenance() {
                 <SelectContent>{templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name} ({t.frequency})</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div><Label className="text-xs">Machine</Label><MachineSelect value={form.machine_id} onChange={(id) => setForm({ ...form, machine_id: id })} testId="pm-create-machine-select" /></div>
-            <div><Label className="text-xs">Task Name</Label><Input data-testid="pm-create-name" value={form.task_name} onChange={(e) => setForm({ ...form, task_name: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
-            <div><Label className="text-xs">Description</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
             <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">Machine</Label><MachineSelect value={form.machine_id} onChange={(id) => setForm({ ...form, machine_id: id })} testId="pm-create-machine-select" /></div>
+              <div><Label className="text-xs">Task Name (PM title)</Label><Input data-testid="pm-create-name" value={form.task_name} onChange={(e) => setForm({ ...form, task_name: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs">Frequency</Label>
                 <Select value={form.frequency} onValueChange={(v) => setForm({ ...form, frequency: v })}>
@@ -199,19 +183,22 @@ export default function PreventiveMaintenance() {
                   <SelectContent>{['low', 'medium', 'high', 'critical'].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
+              <div><Label className="text-xs">Location / Area</Label><Input data-testid="pm-create-location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="e.g. Utility Area" className="bg-[hsl(var(--panel-2))]" /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">First Due Date</Label><Input type="date" data-testid="pm-create-due-date" value={form.next_due_date} onChange={(e) => setForm({ ...form, next_due_date: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
               <div><Label className="text-xs">Reminder Offset (days)</Label><Input type="number" min="0" value={form.reminder_offset_days} onChange={(e) => setForm({ ...form, reminder_offset_days: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
+              <div><Label className="text-xs">Assign Technician</Label><TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="pm-create-technician" /></div>
             </div>
-            <div><Label className="text-xs">Assign Technician</Label><TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="pm-create-technician" /></div>
-            <div><Label className="text-xs">Checklist (one item per line)</Label><Textarea data-testid="pm-create-checklist" value={form.checklist} onChange={(e) => setForm({ ...form, checklist: e.target.value })} rows={4} className="bg-[hsl(var(--panel-2))] font-mono text-xs" /></div>
-            <Button onClick={create} data-testid="pm-create-submit" className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">Create PM Task</Button>
+            <div><Label className="text-xs">Description (optional)</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} className="bg-[hsl(var(--panel-2))]" /></div>
+            <div>
+              <Label className="text-xs">Checklist — components with sub-items (reused every schedule)</Label>
+              <div className="mt-1.5"><ChecklistBuilder groups={groups} setGroups={setGroups} /></div>
+            </div>
+            <Button onClick={create} data-testid="pm-create-submit" className="w-full">Create PM Task</Button>
           </div>
         </DialogContent>
       </Dialog>
-
-      <CompletePMDialog task={completeTask} open={completeOpen} setOpen={setCompleteOpen} onDone={load} />
     </div>
   );
 }

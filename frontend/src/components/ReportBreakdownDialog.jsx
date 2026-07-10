@@ -43,7 +43,7 @@ function Segmented({ options, value, onChange, testPrefix }) {
   );
 }
 
-export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, onCreated }) {
+export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, onCreated, publicMode = false }) {
   const { user } = useApp();
   const [lines, setLines] = useState([]);
   const [machines, setMachines] = useState([]);
@@ -59,9 +59,16 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
 
   useEffect(() => {
     if (!open) return;
-    api.get('/hierarchy').then((r) => setLines(r.data.lines));
-    api.get('/machines?limit=10000').then((r) => setMachines(r.data));
-    setReporterName(user?.name || '');
+    if (publicMode) {
+      api.get('/public/report-context').then((r) => {
+        setLines(r.data.lines);
+        setMachines(r.data.machines);
+      });
+    } else {
+      api.get('/hierarchy').then((r) => setLines(r.data.lines));
+      api.get('/machines?limit=10000').then((r) => setMachines(r.data));
+    }
+    setReporterName(publicMode ? '' : user?.name || '');
     setBreakdownType('MECHANICAL');
     setRemarks('');
     setAutoWo(true);
@@ -99,7 +106,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
     }
     setSubmitting(true);
     try {
-      const res = await api.post('/breakdowns', {
+      const res = await api.post(publicMode ? '/public/breakdowns' : '/breakdowns', {
         machine_id: machineId,
         description: remarks,
         breakdown_type: breakdownType,

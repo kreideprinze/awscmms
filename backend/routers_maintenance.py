@@ -455,8 +455,32 @@ class PMTaskCreate(BaseModel):
     assigned_to: Optional[str] = None
     frequency: str = 'monthly'
     checklist: List[str] = Field(default_factory=list)
+    checklist_groups: Optional[List[dict]] = None  # [{description, items: [{checked_for, parameter}]}]
+    location: Optional[str] = None
     reminder_offset_days: int = 1
     next_due_date: Optional[str] = None
+
+
+def _normalize_groups(groups):
+    """Validate + normalize structured checklist groups (component -> sub-items)."""
+    out = []
+    for g in groups or []:
+        desc = str(g.get('description', '')).strip()
+        if not desc:
+            continue
+        items = []
+        for it in g.get('items', []) or []:
+            cf = str(it.get('checked_for', '')).strip()
+            if not cf:
+                continue
+            items.append({'checked_for': cf, 'parameter': str(it.get('parameter', '')).strip()})
+        if items:
+            out.append({'description': desc, 'items': items})
+    return out
+
+
+def _groups_to_flat(groups):
+    return [f"{g['description']} — {i['checked_for']}" for g in groups for i in g['items']]
 
 
 @router.post('/pm-tasks')
@@ -467,11 +491,14 @@ async def create_pm_task(req: PMTaskCreate, user: dict = Depends(require_admin))
     if req.frequency not in FREQ_DAYS:
         raise HTTPException(status_code=400, detail=f'Invalid frequency. Valid: {list(FREQ_DAYS)}')
     due = req.next_due_date or (datetime.now(timezone.utc) + timedelta(days=FREQ_DAYS.get(req.frequency, 30))).date().isoformat()
+    groups = _normalize_groups(req.checklist_groups)
+    flat = _groups_to_flat(groups) if groups else req.checklist
     task = {
         'id': str(uuid.uuid4()), 'task_name': req.task_name, 'description': req.description,
         'priority': req.priority, 'machine_id': machine['id'], 'machine_name': machine['name'],
         'department': machine['department'], 'line': machine['line'],
-        'assigned_to': req.assigned_to, 'frequency': req.frequency, 'checklist': req.checklist,
+        'assigned_to': req.assigned_to, 'frequency': req.frequency, 'checklist': flat,
+        'checklist_groups': groups, 'location': req.location or machine.get('process_group'),
         'reminder_offset_days': req.reminder_offset_days, 'next_due_date': due,
         'status': 'active', 'source': 'manual', 'auto_generated': False, 'active': True,
         'last_generated_date': None, 'last_completed_at': None, 'reminder_sent_for': None, 'overdue_sent_for': None,
@@ -511,15 +538,28 @@ class PMTaskUpdate(BaseModel):
     assigned_to: Optional[str] = None
     frequency: Optional[str] = None
     checklist: Optional[List[str]] = None
+    checklist_groups: Optional[List[dict]] = None
+    location: Optional[str] = None
     reminder_offset_days: Optional[int] = None
     next_due_date: Optional[str] = None
     active: Optional[bool] = None
     status: Optional[str] = None
 
 
+@router.get('/pm-tasks/{task_id}')
+async def get_pm_task(task_id: str, user: dict = Depends(get_current_user)):
+    task = await db.pm_tasks.find_one({'id': task_id}, {'_id': 0})
+    if not task:
+        raise HTTPException(status_code=404, detail='PM task not found')
+    return task
+
+
 @router.put('/pm-tasks/{task_id}')
 async def update_pm_task(task_id: str, req: PMTaskUpdate, user: dict = Depends(require_admin)):
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    if 'checklist_groups' in updates:
+        updates['checklist_groups'] = _normalize_groups(updates['checklist_groups'])
+        updates['checklist'] = _groups_to_flat(updates['checklist_groups'])
     if not updates:
         return {'ok': True}
     await db.pm_tasks.update_one({'id': task_id}, {'$set': updates})
@@ -535,6 +575,9 @@ async def delete_pm_task(task_id: str, user: dict = Depends(require_admin)):
 class PMComplete(BaseModel):
     remarks: Optional[str] = None
     checklist_results: Optional[dict] = None
+    row_results: Optional[List[dict]] = None  # [{sn, description, checked_for, parameter, status: OK|NOT_OK, remarks}]
+    done_by: Optional[str] = None
+    checked_by: Optional[str] = None
     spares_consumed: Optional[List[SpareUse]] = None
 
 
@@ -543,6 +586,16 @@ async def complete_pm_task(task_id: str, req: PMComplete, user: dict = Depends(r
     task = await db.pm_tasks.find_one({'id': task_id}, {'_id': 0})
     if not task:
         raise HTTPException(status_code=404, detail='PM task not found')
+    rows = []
+    for r in req.row_results or []:
+        status = str(r.get('status', '')).upper().replace(' ', '_')
+        if status not in ('OK', 'NOT_OK'):
+            raise HTTPException(status_code=400, detail=f"Invalid row status '{r.get('status')}' — must be OK or NOT_OK")
+        rows.append({
+            'sn': r.get('sn'), 'description': str(r.get('description', '')),
+            'checked_for': str(r.get('checked_for', '')), 'parameter': str(r.get('parameter', '')),
+            'status': status, 'remarks': str(r.get('remarks', '') or ''),
+        })
     spares = [s.model_dump() for s in (req.spares_consumed or [])]
     if spares:
         from routers_spares import consume_spares
@@ -551,8 +604,11 @@ async def complete_pm_task(task_id: str, req: PMComplete, user: dict = Depends(r
     completion = {
         'id': str(uuid.uuid4()), 'pm_task_id': task_id, 'task_name': task['task_name'],
         'machine_id': task['machine_id'], 'machine_name': task['machine_name'],
+        'line': task.get('line'), 'location': task.get('location'), 'frequency': task.get('frequency'),
         'completed_by': user['username'], 'remarks': req.remarks,
-        'checklist_results': req.checklist_results, 'spares_consumed': spares,
+        'checklist_results': req.checklist_results, 'row_results': rows,
+        'done_by': req.done_by or user.get('name') or user['username'],
+        'checked_by': req.checked_by, 'spares_consumed': spares,
         'due_date': task.get('next_due_date'), 'completed_at': now_iso(),
         'on_time': task.get('next_due_date', '9999') >= now_iso()[:10],
     }
@@ -585,3 +641,162 @@ async def list_pm_completions(machine_id: Optional[str] = None, limit: int = Que
 @router.get('/pm-templates')
 async def list_pm_templates(user: dict = Depends(get_current_user)):
     return await db.pm_templates.find({}, {'_id': 0}).to_list(1000)
+
+
+# ============ PM CHECKLIST PDF EXPORT ============
+def _task_rows(task, completion=None):
+    """Build printable rows: [sn, description(group), checked_for, parameter, status, remarks]."""
+    groups = task.get('checklist_groups') or []
+    if not groups and task.get('checklist'):
+        groups = [{'description': c, 'items': [{'checked_for': 'Condition', 'parameter': ''}]} for c in task['checklist']]
+    result_map = {}
+    if completion:
+        for r in completion.get('row_results') or []:
+            result_map[(r.get('description'), r.get('checked_for'))] = r
+    rows = []
+    for gi, g in enumerate(groups, start=1):
+        for ii, item in enumerate(g['items']):
+            res = result_map.get((g['description'], item['checked_for']))
+            status = ('OK' if res['status'] == 'OK' else 'NOT OK') if res else ''
+            remarks = res.get('remarks', '') if res else ''
+            rows.append({
+                'sn': str(gi) if ii == 0 else '', 'first_of_group': ii == 0, 'group_size': len(g['items']),
+                'description': g['description'] if ii == 0 else '',
+                'checked_for': item['checked_for'], 'parameter': item.get('parameter', ''),
+                'status': status, 'remarks': remarks,
+            })
+    return rows
+
+
+@router.get('/pm-tasks/{task_id}/pdf')
+async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Printable PM checklist sheet. Blank template by default; pass completion_id
+    (or 'latest') to render a completed instance with per-row status + remarks."""
+    from io import BytesIO
+    from fastapi.responses import Response
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    task = await db.pm_tasks.find_one({'id': task_id}, {'_id': 0})
+    if not task:
+        raise HTTPException(status_code=404, detail='PM task not found')
+    completion = None
+    if completion_id:
+        q = {'pm_task_id': task_id} if completion_id == 'latest' else {'id': completion_id, 'pm_task_id': task_id}
+        completion = await db.pm_completions.find_one(q, {'_id': 0}, sort=[('completed_at', -1)])
+        if not completion:
+            raise HTTPException(status_code=404, detail='PM completion not found')
+    branding = await db.branding.find_one({'id': 'branding'}, {'_id': 0}) or {}
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=12 * mm)
+    styles = getSampleStyleSheet()
+    cell = ParagraphStyle('cell', parent=styles['Normal'], fontSize=8, leading=10)
+    cell_b = ParagraphStyle('cellb', parent=cell, fontName='Helvetica-Bold')
+    title_style = ParagraphStyle('t', parent=styles['Title'], fontSize=14, spaceAfter=2)
+    story = []
+
+    story.append(Paragraph(branding.get('app_name') or 'Factory Operations', ParagraphStyle('org', parent=styles['Normal'], fontSize=9, textColor=colors.grey)))
+    story.append(Paragraph('PREVENTIVE MAINTENANCE CHECKLIST', title_style))
+    story.append(Paragraph(task['task_name'], ParagraphStyle('sub', parent=styles['Heading2'], fontSize=11, spaceAfter=6)))
+
+    date_val = (completion['completed_at'][:10] if completion else task.get('next_due_date', ''))
+    info = [[
+        Paragraph(f"<b>Machine:</b> {task['machine_name']}", cell),
+        Paragraph(f"<b>Line:</b> {task.get('line', '')}", cell),
+        Paragraph(f"<b>Location/Area:</b> {task.get('location') or ''}", cell),
+        Paragraph(f"<b>Frequency:</b> {(task.get('frequency') or '').title()}", cell),
+        Paragraph(f"<b>Date:</b> {date_val}", cell),
+    ]]
+    info_t = Table(info, colWidths=[42 * mm, 28 * mm, 42 * mm, 30 * mm, 44 * mm])
+    info_t.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.6, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(info_t)
+    story.append(Spacer(1, 4 * mm))
+
+    rows = _task_rows(task, completion)
+    header = [Paragraph(f'<b>{h}</b>', cell_b) for h in ['S.N.', 'Description', 'Checked For', 'Parameter / Process', 'Status', 'Remarks']]
+    data = [header]
+    span_cmds = []
+    for idx, r in enumerate(rows, start=1):
+        status_txt = r['status'] if completion else '\u2610 OK   \u2610 NOT OK'
+        data.append([
+            Paragraph(r['sn'], cell), Paragraph(r['description'], cell_b if r['first_of_group'] else cell),
+            Paragraph(r['checked_for'], cell), Paragraph(r['parameter'], cell),
+            Paragraph(status_txt, cell), Paragraph(r['remarks'], cell),
+        ])
+        if r['first_of_group'] and r['group_size'] > 1:
+            span_cmds.append(('SPAN', (0, idx), (0, idx + r['group_size'] - 1)))
+            span_cmds.append(('SPAN', (1, idx), (1, idx + r['group_size'] - 1)))
+    if len(data) == 1:
+        data.append([Paragraph('—', cell)] * 6)
+    tbl = Table(data, colWidths=[11 * mm, 34 * mm, 34 * mm, 46 * mm, 26 * mm, 35 * mm], repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.6, colors.black),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.88, 0.88, 0.88)),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ] + span_cmds))
+    story.append(tbl)
+    story.append(Spacer(1, 10 * mm))
+
+    done_by = completion.get('done_by', '') if completion else ''
+    checked_by = completion.get('checked_by', '') if completion else ''
+    sig = [[
+        Paragraph('<b>Done By</b>', cell_b), Paragraph('<b>Checked By</b>', cell_b),
+    ], [
+        Paragraph(f"Name: {done_by or '_' * 28}", cell), Paragraph(f"Name: {checked_by or '_' * 28}", cell),
+    ], [
+        Paragraph('Signature: ' + '_' * 28, cell), Paragraph('Signature: ' + '_' * 28, cell),
+    ]]
+    sig_t = Table(sig, colWidths=[93 * mm, 93 * mm])
+    sig_t.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.6, colors.black),
+        ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(sig_t)
+    doc.build(story)
+
+    suffix = 'completed' if completion else 'blank'
+    fname = f"PM_{task['task_name'].replace(' ', '_')[:40]}_{suffix}.pdf"
+    return Response(content=buf.getvalue(), media_type='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename="{fname}"'})
+
+
+# ============ PUBLIC (NO-LOGIN) BREAKDOWN REPORTING ============
+@router.get('/public/report-context')
+async def public_report_context():
+    """Minimal hierarchy + machine list for the public kiosk breakdown form. No auth."""
+    lines = await db.lines.find({}, {'_id': 0, 'name': 1, 'department': 1, 'order': 1}).sort('order', 1).to_list(1000)
+    machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'name': 1, 'code': 1, 'line': 1, 'department': 1, 'process_group': 1}).to_list(100000)
+    return {'lines': lines, 'machines': machines}
+
+
+class PublicBreakdownCreate(BaseModel):
+    machine_id: str
+    description: str
+    breakdown_type: str = 'MECHANICAL'
+    reporter_name: str
+    auto_create_work_order: bool = True
+
+
+@router.post('/public/breakdowns')
+async def public_create_breakdown(req: PublicBreakdownCreate):
+    """Public kiosk endpoint — operators without logins can report breakdowns.
+    Reporter name is mandatory for accountability; submissions are flagged public_kiosk."""
+    reporter = req.reporter_name.strip()
+    if not reporter:
+        raise HTTPException(status_code=400, detail='Reporter name is required')
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail='Description is required')
+    bd = await _create_breakdown_internal(req.machine_id, req.description.strip(), None, reporter,
+                                          None, req.breakdown_type, req.auto_create_work_order)
+    await db.breakdowns.update_one({'id': bd['id']}, {'$set': {'submitted_via': 'public_kiosk'}})
+    bd['submitted_via'] = 'public_kiosk'
+    return bd

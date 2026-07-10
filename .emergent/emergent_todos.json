@@ -1,42 +1,42 @@
 [
   {
-    "content": "Backend: GET /control-room/line-kpis (availability + downtime per line & per section, window param)",
-    "status": "completed"
-  },
-  {
-    "content": "Backend: GET/PUT /users/me/ui-prefs (sidebar order + icon colors)",
-    "status": "completed"
-  },
-  {
-    "content": "Backend: branding accent hex + logo upload (base64) endpoints",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: pure black theme + dynamic accent CSS vars in index.css",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: outlined button/pill styling (button.jsx + 30 sweep fixes)",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: AppContext applies brand accent + loads/saves ui-prefs",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Layout sidebar DnD reorder + per-icon colors + custom logo",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Control Room ribbon v2 (line/section availability + downtime, collapsible plant strip)",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Administration branding UI (logo upload + hex color)",
-    "status": "completed"
-  },
-  {
-    "content": "Test: testing agent full pass + fix issues",
+    "content": "Backend: install reportlab; PM models support checklist_groups (component -> sub-items), location field",
     "status": "in_progress"
+  },
+  {
+    "content": "Backend: GET /pm-tasks/{id}; complete endpoint accepts per-row results + done_by/checked_by",
+    "status": "pending"
+  },
+  {
+    "content": "Backend: GET /pm-tasks/{id}/pdf (blank + completed) matching reference sheet layout",
+    "status": "pending"
+  },
+  {
+    "content": "Backend: public endpoints - POST /public/breakdowns + GET /public/report-context, submitted_via flag",
+    "status": "pending"
+  },
+  {
+    "content": "Backend: migrate seeded PM templates to structured checklist_groups",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: ChecklistBuilder component (grouped rows) in PM create dialog",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: dedicated Close PM Task page with per-row OK/NOT-OK + remarks",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: PDF download buttons (blank + last completion)",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Login page public Report Breakdown + dialog publicMode + PUBLIC badge in Breakdowns",
+    "status": "pending"
+  },
+  {
+    "content": "Test: full backend + frontend testing agent pass",
+    "status": "pending"
   }
 ]

@@ -76,7 +76,12 @@ export default function Breakdowns() {
               <React.Fragment key={bd.id}>
                 <TableRow data-testid={`breakdowns-row-${bd.ticket_number}`} onClick={() => setExpanded(expanded === bd.id ? null : bd.id)}
                   className="cursor-pointer border-border hover:bg-white/[0.03]">
-                  <TableCell className="font-mono text-xs text-[hsl(var(--primary))]">{bd.ticket_number}</TableCell>
+                  <TableCell className="font-mono text-xs text-[hsl(var(--primary))]">
+                    {bd.ticket_number}
+                    {bd.submitted_via === 'public_kiosk' && (
+                      <span className="ml-1.5 border border-[#f9f871]/50 px-1 py-px text-[8px] uppercase tracking-wide text-[#f9f871]" title="Reported without login (public kiosk)" data-testid={`public-badge-${bd.ticket_number}`}>Public</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <button className="text-sm font-medium hover:text-[hsl(var(--primary))]" onClick={(e) => { e.stopPropagation(); openMachine(bd.machine_id); }}>
                       {bd.machine_name}

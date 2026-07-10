@@ -1,19 +1,21 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Factory, Loader2 } from 'lucide-react';
+import { Factory, Loader2, Flame } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { errMsg } from '@/lib/api';
+import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 export default function Login() {
-  const { login } = useApp();
+  const { login, branding } = useApp();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -38,10 +40,14 @@ export default function Login() {
       <div className="relative w-full max-w-md rounded-xl border border-border bg-[hsl(var(--panel-1))] p-8">
         <div className="mb-8 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/10">
-            <Factory className="h-6 w-6 text-[hsl(var(--primary))]" />
+            {branding?.logo_data ? (
+              <img src={branding.logo_data} alt="logo" className="h-8 w-8 object-contain" />
+            ) : (
+              <Factory className="h-6 w-6 text-[hsl(var(--primary))]" />
+            )}
           </div>
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">ForgeOps</h1>
+            <h1 className="text-xl font-semibold tracking-tight">{branding?.app_name || 'ForgeOps'}</h1>
             <p className="text-xs uppercase tracking-widest text-muted-foreground">Factory Operations Platform</p>
           </div>
         </div>
@@ -59,7 +65,21 @@ export default function Login() {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign in to Control Room'}
           </Button>
         </form>
-        <div className="mt-6 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3 text-xs text-muted-foreground">
+        {/* Public kiosk breakdown reporting — no login required */}
+        <div className="mt-4 border border-[#ff2e63]/30 p-3" data-testid="public-report-section">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold text-foreground">Machine down? No login needed.</div>
+              <div className="text-[11px] text-muted-foreground">Report a breakdown directly — just give your name.</div>
+            </div>
+            <Button type="button" data-testid="public-report-breakdown-button" onClick={() => setReportOpen(true)}
+              className="shrink-0 border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10">
+              <Flame className="mr-1 h-4 w-4" /> Report Breakdown
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3 text-xs text-muted-foreground">
           <div className="mb-1 font-semibold text-foreground">Default access</div>
           <div className="grid grid-cols-3 gap-2 font-mono text-[11px]">
             <span>admin / admin123</span>
@@ -68,6 +88,8 @@ export default function Login() {
           </div>
         </div>
       </div>
+
+      <ReportBreakdownDialog open={reportOpen} setOpen={setReportOpen} publicMode />
     </div>
   );
 }

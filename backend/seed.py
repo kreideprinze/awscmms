@@ -156,11 +156,88 @@ ERROR_CODES = [
 ]
 
 PM_TEMPLATES = [
-    {'name': 'Daily Operator Inspection', 'frequency': 'daily', 'priority': 'medium', 'checklist': ['Visual inspection for leaks', 'Check abnormal noise/vibration', 'Verify guards in place', 'Housekeeping around machine']},
-    {'name': 'Weekly Lubrication Round', 'frequency': 'weekly', 'priority': 'medium', 'checklist': ['Grease bearings per schedule', 'Check oil levels', 'Inspect lubrication lines', 'Top up gearbox oil if needed']},
-    {'name': 'Monthly Mechanical Check', 'frequency': 'monthly', 'priority': 'high', 'checklist': ['Check belt tension & wear', 'Check chain tension & wear', 'Inspect couplings', 'Verify alignment', 'Check mounting bolts torque']},
-    {'name': 'Quarterly Electrical Inspection', 'frequency': 'quarterly', 'priority': 'high', 'checklist': ['Thermal scan of panel', 'Check motor current draw', 'Inspect cable glands', 'Test emergency stops', 'Clean control panel filters']},
-    {'name': 'Yearly Major Overhaul Review', 'frequency': 'yearly', 'priority': 'critical', 'checklist': ['Full teardown inspection', 'Replace wear parts', 'Bearing replacement assessment', 'Gearbox oil change', 'Calibration of instruments']},
+    {'name': 'Daily Operator Inspection', 'frequency': 'daily', 'priority': 'medium',
+     'checklist': ['Machine Body — Leaks', 'Machine Body — Noise / Vibration', 'Safety — Guards', 'Area — Housekeeping'],
+     'checklist_groups': [
+         {'description': 'Machine Body', 'items': [
+             {'checked_for': 'Leaks', 'parameter': 'Oil, water, air leakage'},
+             {'checked_for': 'Noise / Vibration', 'parameter': 'Abnormal sound, vibration'},
+         ]},
+         {'description': 'Safety', 'items': [
+             {'checked_for': 'Guards', 'parameter': 'All guards in place & secure'},
+         ]},
+         {'description': 'Area', 'items': [
+             {'checked_for': 'Housekeeping', 'parameter': 'Clean, no obstructions'},
+         ]},
+     ]},
+    {'name': 'Weekly Lubrication Round', 'frequency': 'weekly', 'priority': 'medium',
+     'checklist': ['Bearings — Greasing', 'Gearbox — Oil level', 'Lubrication Lines — Condition'],
+     'checklist_groups': [
+         {'description': 'Bearings', 'items': [
+             {'checked_for': 'Greasing', 'parameter': 'Grease per schedule'},
+         ]},
+         {'description': 'Gearbox', 'items': [
+             {'checked_for': 'Oil level', 'parameter': 'Level in sight glass, top up if low'},
+         ]},
+         {'description': 'Lubrication Lines', 'items': [
+             {'checked_for': 'Condition', 'parameter': 'No blockage / damage'},
+         ]},
+     ]},
+    {'name': 'Monthly Mechanical Check', 'frequency': 'monthly', 'priority': 'high',
+     'checklist': ['Motor — Bearing', 'Motor — Over load', 'Motor — Condition', 'Drive — Belt tension & wear', 'Drive — Chain tension & wear', 'Coupling — Alignment', 'Mounting — Bolts torque'],
+     'checklist_groups': [
+         {'description': 'Motor', 'items': [
+             {'checked_for': 'Bearing', 'parameter': 'Vibration, Sound'},
+             {'checked_for': 'Over load', 'parameter': 'Current draw vs rated'},
+             {'checked_for': 'Condition', 'parameter': 'Temperature, mounting'},
+         ]},
+         {'description': 'Drive', 'items': [
+             {'checked_for': 'Belt tension & wear', 'parameter': 'Deflection, cracks'},
+             {'checked_for': 'Chain tension & wear', 'parameter': 'Slack, elongation'},
+         ]},
+         {'description': 'Coupling', 'items': [
+             {'checked_for': 'Alignment', 'parameter': 'Runout, wear'},
+         ]},
+         {'description': 'Mounting', 'items': [
+             {'checked_for': 'Bolts torque', 'parameter': 'Per torque spec'},
+         ]},
+     ]},
+    {'name': 'Quarterly Electrical Inspection', 'frequency': 'quarterly', 'priority': 'high',
+     'checklist': ['Panel — Thermal scan', 'Motor — Current draw', 'Cabling — Glands', 'Safety — Emergency stops', 'Panel — Filters'],
+     'checklist_groups': [
+         {'description': 'Panel', 'items': [
+             {'checked_for': 'Thermal scan', 'parameter': 'Hot spots, terminals'},
+             {'checked_for': 'Filters', 'parameter': 'Clean / replace'},
+         ]},
+         {'description': 'Motor', 'items': [
+             {'checked_for': 'Current draw', 'parameter': 'Compare vs rated FLA'},
+         ]},
+         {'description': 'Cabling', 'items': [
+             {'checked_for': 'Glands', 'parameter': 'Tightness, sealing'},
+         ]},
+         {'description': 'Safety', 'items': [
+             {'checked_for': 'Emergency stops', 'parameter': 'Function test'},
+         ]},
+     ]},
+    {'name': 'Yearly Major Overhaul Review', 'frequency': 'yearly', 'priority': 'critical',
+     'checklist': ['Machine — Teardown inspection', 'Wear Parts — Replacement', 'Bearings — Assessment', 'Gearbox — Oil change', 'Instruments — Calibration'],
+     'checklist_groups': [
+         {'description': 'Machine', 'items': [
+             {'checked_for': 'Teardown inspection', 'parameter': 'Full internal condition'},
+         ]},
+         {'description': 'Wear Parts', 'items': [
+             {'checked_for': 'Replacement', 'parameter': 'Per wear limits'},
+         ]},
+         {'description': 'Bearings', 'items': [
+             {'checked_for': 'Assessment', 'parameter': 'Clearance, noise, replace if due'},
+         ]},
+         {'description': 'Gearbox', 'items': [
+             {'checked_for': 'Oil change', 'parameter': 'Drain, flush, refill'},
+         ]},
+         {'description': 'Instruments', 'items': [
+             {'checked_for': 'Calibration', 'parameter': 'Sensors, gauges'},
+         ]},
+     ]},
 ]
 
 RUNTIME_TEMPLATES = [
@@ -336,6 +413,12 @@ async def seed_all():
     await ensure('failure_modes', [{'id': nid(), 'name': fm, 'active': True, 'created_at': ts} for fm in FAILURE_MODES], 'name')
     await ensure('error_codes', [{'id': nid(), **ec, 'active': True, 'created_at': ts} for ec in ERROR_CODES], 'code')
     await ensure('pm_templates', [{'id': nid(), **t, 'created_at': ts} for t in PM_TEMPLATES], 'name')
+    # migrate existing templates: attach structured checklist_groups where missing
+    for t in PM_TEMPLATES:
+        if t.get('checklist_groups'):
+            await db.pm_templates.update_one(
+                {'name': t['name'], 'checklist_groups': {'$exists': False}},
+                {'$set': {'checklist_groups': t['checklist_groups'], 'checklist': t['checklist']}})
     await ensure('runtime_templates', [{'id': nid(), **t, 'created_at': ts} for t in RUNTIME_TEMPLATES], 'name')
     await ensure('notification_templates', [{'id': nid(), **t, 'created_at': ts} for t in NOTIFICATION_TEMPLATES], 'notif_type')
     await ensure('spare_locations', [{'id': nid(), 'name': loc, 'active': True, 'created_at': ts} for loc in SPARE_LOCATIONS], 'name')

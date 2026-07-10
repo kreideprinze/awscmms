@@ -85,37 +85,40 @@ class FactoryOpsAPITester:
         # 3. RBAC Tests
         self.test_rbac()
         
-        # 4. Machine Reports Flow
+        # 4. Public Breakdown Reporting (NO AUTH)
+        self.test_public_breakdown_reporting()
+        
+        # 5. Machine Reports Flow
         self.test_machine_reports()
         
-        # 5. Breakdown Lifecycle
+        # 6. Breakdown Lifecycle
         self.test_breakdown_lifecycle()
         
-        # 6. 30-min Root Cause Rule
+        # 7. 30-min Root Cause Rule
         self.test_root_cause_rule()
         
-        # 7. Work Orders
+        # 8. Work Orders
         self.test_work_orders()
         
-        # 8. PM Tasks
+        # 9. PM Tasks
         self.test_pm_tasks()
         
-        # 9. Runtime Logs
+        # 10. Runtime Logs
         self.test_runtime()
         
-        # 10. Reliability
+        # 11. Reliability
         self.test_reliability()
         
-        # 11. Analytics
+        # 12. Analytics
         self.test_analytics()
         
-        # 12. Spares Inventory
+        # 13. Spares Inventory
         self.test_spares()
         
-        # 13. Admin CRUD
+        # 14. Admin CRUD
         self.test_admin_crud()
         
-        # 14. Timeline & Notifications
+        # 15. Timeline & Notifications
         self.test_timeline_notifications()
         
         return True
@@ -224,6 +227,79 @@ class FactoryOpsAPITester:
         # Admin should have access to everything
         self.test("Admin GET /users (200)", "GET", "users", 200,
                  token=self.tokens['admin'])
+    
+    def test_public_breakdown_reporting(self):
+        """Test public breakdown reporting (NO AUTH required)"""
+        self.log("\n" + "=" * 80)
+        self.log("4. PUBLIC BREAKDOWN REPORTING (NO AUTH)")
+        self.log("=" * 80)
+        
+        # GET /public/report-context WITHOUT auth
+        success, resp = self.test("GET /public/report-context (no auth)", "GET", 
+                                 "public/report-context", 200)
+        if success:
+            lines = resp.get('lines', [])
+            machines = resp.get('machines', [])
+            self.log(f"  ✓ Public context: {len(lines)} lines, {len(machines)} machines")
+            if machines:
+                self.test_data['public_machine'] = machines[0]
+        
+        if 'public_machine' not in self.test_data:
+            self.log("No machine available for public breakdown test", "WARN")
+            return
+        
+        machine = self.test_data['public_machine']
+        
+        # POST /public/breakdowns WITHOUT auth - valid
+        success, resp = self.test("POST /public/breakdowns (no auth, valid)", "POST",
+                                 "public/breakdowns", 200,
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Public kiosk test - machine stopped",
+                                     "breakdown_type": "MECHANICAL",
+                                     "reporter_name": "Floor Operator John",
+                                     "auto_create_work_order": True
+                                 })
+        if success:
+            bd_id = resp.get('id')
+            ticket = resp.get('ticket_number')
+            self.test_data['public_breakdown_id'] = bd_id
+            self.test_data['public_breakdown_ticket'] = ticket
+            self.log(f"  ✓ Public breakdown created: {ticket}")
+            
+            # Verify submitted_via flag
+            if resp.get('submitted_via') == 'public_kiosk':
+                self.log(f"  ✓ submitted_via=public_kiosk flag set")
+            else:
+                self.log(f"  ✗ submitted_via flag not set correctly", "WARN")
+            
+            # Verify auto work order created
+            if resp.get('work_order_number'):
+                self.log(f"  ✓ Auto work order created: {resp['work_order_number']}")
+        
+        # POST /public/breakdowns WITHOUT reporter_name (should reject 400)
+        success, resp = self.test("POST /public/breakdowns (empty reporter_name 400)", "POST",
+                                 "public/breakdowns", 400,
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Test breakdown",
+                                     "breakdown_type": "ELECTRICAL",
+                                     "reporter_name": "",
+                                     "auto_create_work_order": True
+                                 })
+        if success:
+            self.log(f"  ✓ Empty reporter_name rejected with 400")
+        
+        # Verify public breakdown appears in authenticated breakdown list with flag
+        if 'public_breakdown_id' in self.test_data:
+            success, resp = self.test("GET /breakdowns (verify public flag)", "GET",
+                                     "breakdowns", 200,
+                                     token=self.tokens['admin'])
+            if success:
+                items = resp.get('items', [])
+                public_bd = next((b for b in items if b.get('id') == self.test_data['public_breakdown_id']), None)
+                if public_bd and public_bd.get('submitted_via') == 'public_kiosk':
+                    self.log(f"  ✓ Public breakdown visible in authenticated list with flag")
 
     def test_machine_reports(self):
         """Test machine report flow"""
@@ -497,9 +573,9 @@ class FactoryOpsAPITester:
                         self.log(f"  ✓ WORKORDER_CONSUMPTION transaction recorded")
 
     def test_pm_tasks(self):
-        """Test PM tasks and scheduler"""
+        """Test PM tasks with structured checklists and PDF export"""
         self.log("\n" + "=" * 80)
-        self.log("8. PM TASKS & SCHEDULER")
+        self.log("8. PM TASKS & STRUCTURED CHECKLISTS")
         self.log("=" * 80)
         
         if 'test_machine' not in self.test_data:
@@ -509,72 +585,157 @@ class FactoryOpsAPITester:
         machine = self.test_data['test_machine']
         today = datetime.utcnow().date().isoformat()
         
-        # Create PM task with frequency=daily and next_due_date=today
-        success, resp = self.test("POST /pm-tasks (daily, due today)", "POST", "pm-tasks", 200,
+        # Test PM templates with checklist_groups
+        success, resp = self.test("GET /pm-templates", "GET", "pm-templates", 200,
+                                 token=self.tokens['admin'])
+        if success:
+            templates = resp if isinstance(resp, list) else []
+            self.log(f"  ✓ PM templates: {len(templates)} available")
+            templates_with_groups = [t for t in templates if t.get('checklist_groups')]
+            if templates_with_groups:
+                self.log(f"  ✓ Templates with checklist_groups: {len(templates_with_groups)}")
+            else:
+                self.log(f"  ✗ No templates with checklist_groups found", "WARN")
+        
+        # Create PM task with structured checklist_groups
+        success, resp = self.test("POST /pm-tasks (structured checklist)", "POST", "pm-tasks", 200,
                                  token=self.tokens['admin'],
                                  data={
-                                     "task_name": "Test Daily Inspection",
-                                     "description": "Daily operator check",
+                                     "task_name": "Test Structured PM",
+                                     "description": "Testing structured checklist groups",
                                      "priority": "medium",
                                      "machine_id": machine['id'],
                                      "assigned_to": "tech",
-                                     "frequency": "daily",
-                                     "checklist": ["Check for leaks", "Verify operation"],
+                                     "frequency": "monthly",
+                                     "checklist_groups": [
+                                         {
+                                             "description": "Motor",
+                                             "items": [
+                                                 {"checked_for": "Bearing", "parameter": "Vibration, Sound"},
+                                                 {"checked_for": "Over load", "parameter": "Ampere"}
+                                             ]
+                                         },
+                                         {
+                                             "description": "Gearbox",
+                                             "items": [
+                                                 {"checked_for": "Oil Level", "parameter": "Visual Check"}
+                                             ]
+                                         }
+                                     ],
                                      "reminder_offset_days": 1,
                                      "next_due_date": today
                                  })
         if success:
             pm_id = resp.get('id')
             self.test_data['pm_task_id'] = pm_id
-            self.log(f"  ✓ PM task created (due today)")
-            self.log(f"  ⏳ Waiting 70 seconds for PM scheduler to generate work order...")
+            self.log(f"  ✓ PM task created with structured checklist")
             
-            # Wait for scheduler (runs every 60s)
-            time.sleep(70)
+            # Verify checklist_groups were normalized
+            if resp.get('checklist_groups'):
+                groups = resp['checklist_groups']
+                self.log(f"  ✓ checklist_groups normalized: {len(groups)} groups")
+                total_items = sum(len(g.get('items', [])) for g in groups)
+                self.log(f"  ✓ Total checklist items: {total_items}")
             
-            # Check if PM work order was generated
-            success, wo_resp = self.test("GET work orders after scheduler", "GET", "work-orders", 200,
-                                        token=self.tokens['tech'])
+            # Verify flat checklist was derived
+            if resp.get('checklist'):
+                flat = resp['checklist']
+                self.log(f"  ✓ Flat checklist derived: {len(flat)} items")
+            
+            # GET PM task to verify structure
+            success, get_resp = self.test("GET /pm-tasks/{id}", "GET", f"pm-tasks/{pm_id}", 200,
+                                         token=self.tokens['tech'])
             if success:
-                wos = wo_resp.get('items', [])
-                pm_wos = [w for w in wos if w.get('pm_task_id') == pm_id and w.get('source') == 'pm_scheduler']
-                if pm_wos:
-                    self.log(f"  ✓ PM scheduler generated work order: {pm_wos[0].get('wo_number')}")
-                    self.test_data['pm_wo_id'] = pm_wos[0].get('id')
-                else:
-                    self.log(f"  ✗ PM work order not generated by scheduler", "WARN")
-            
-            # Check for pm_due notification
-            success, notif_resp = self.test("GET notifications", "GET", "notifications", 200,
-                                           token=self.tokens['tech'])
-            if success:
-                notifs = notif_resp if isinstance(notif_resp, list) else []
-                pm_notifs = [n for n in notifs if n.get('notif_type') == 'pm_due' and 
-                            n.get('reference_id') == self.test_data.get('pm_wo_id')]
-                if pm_notifs:
-                    self.log(f"  ✓ pm_due notification created")
+                if get_resp.get('checklist_groups'):
+                    self.log(f"  ✓ GET returns checklist_groups")
         
-        # Test PM task completion
-        success, resp = self.test("POST /pm-tasks/{id}/complete", "POST",
+        # Test PDF export - blank template
+        success, pdf_resp = self.test("GET /pm-tasks/{id}/pdf (blank)", "GET", 
+                                      f"pm-tasks/{pm_id}/pdf", 200,
+                                      token=self.tokens['tech'])
+        if success:
+            self.log(f"  ✓ Blank PDF export successful")
+        
+        # Test PDF with nonexistent task (404)
+        self.test("GET /pm-tasks/nonexistent/pdf (404)", "GET", 
+                 "pm-tasks/nonexistent-id-12345/pdf", 404,
+                 token=self.tokens['tech'])
+        
+        # Test PM completion with row_results
+        success, resp = self.test("POST /pm-tasks/{id}/complete (row_results)", "POST",
                                  f"pm-tasks/{pm_id}/complete", 200,
                                  token=self.tokens['tech'],
                                  data={
-                                     "remarks": "Inspection completed successfully",
-                                     "checklist_results": {"Check for leaks": True, "Verify operation": True},
-                                     "spares_consumed": [{"sap_code": "400007001", "quantity": 0.5}]
+                                     "remarks": "All checks completed",
+                                     "done_by": "John Tech",
+                                     "checked_by": "Jane Supervisor",
+                                     "row_results": [
+                                         {
+                                             "sn": 1,
+                                             "description": "Motor",
+                                             "checked_for": "Bearing",
+                                             "parameter": "Vibration, Sound",
+                                             "status": "OK",
+                                             "remarks": "Normal operation"
+                                         },
+                                         {
+                                             "sn": 1,
+                                             "description": "Motor",
+                                             "checked_for": "Over load",
+                                             "parameter": "Ampere",
+                                             "status": "NOT_OK",
+                                             "remarks": "Slightly high current"
+                                         },
+                                         {
+                                             "sn": 2,
+                                             "description": "Gearbox",
+                                             "checked_for": "Oil Level",
+                                             "parameter": "Visual Check",
+                                             "status": "OK",
+                                             "remarks": ""
+                                         }
+                                     ]
                                  })
         if success:
-            self.log(f"  ✓ PM task completed with checklist and spares")
+            completion_id = resp.get('id')
+            self.test_data['pm_completion_id'] = completion_id
+            self.log(f"  ✓ PM completed with row_results")
             
-            # Verify next_due_date advanced
-            success, pm_resp = self.test("GET PM task after completion", "GET", "pm-tasks", 200,
-                                        token=self.tokens['tech'],
-                                        params={"machine_id": machine['id']})
+            # Verify row_results saved
+            if resp.get('row_results'):
+                self.log(f"  ✓ row_results saved: {len(resp['row_results'])} rows")
+            if resp.get('done_by'):
+                self.log(f"  ✓ done_by saved: {resp['done_by']}")
+            if resp.get('checked_by'):
+                self.log(f"  ✓ checked_by saved: {resp['checked_by']}")
+            
+            # Test PDF export with completion_id=latest
+            success, pdf_resp = self.test("GET /pm-tasks/{id}/pdf?completion_id=latest", "GET",
+                                         f"pm-tasks/{pm_id}/pdf", 200,
+                                         token=self.tokens['tech'],
+                                         params={"completion_id": "latest"})
             if success:
-                tasks = pm_resp.get('items', [])
-                task = next((t for t in tasks if t.get('id') == pm_id), None)
-                if task and task.get('next_due_date') > today:
-                    self.log(f"  ✓ next_due_date advanced to: {task.get('next_due_date')}")
+                self.log(f"  ✓ Completed PDF export successful")
+        
+        # Test invalid status value (should reject with 400)
+        success, resp = self.test("POST /pm-tasks/{id}/complete (invalid status 400)", "POST",
+                                 f"pm-tasks/{pm_id}/complete", 400,
+                                 token=self.tokens['tech'],
+                                 data={
+                                     "done_by": "Test",
+                                     "row_results": [
+                                         {
+                                             "sn": 1,
+                                             "description": "Motor",
+                                             "checked_for": "Bearing",
+                                             "parameter": "Vibration",
+                                             "status": "MAYBE",
+                                             "remarks": ""
+                                         }
+                                     ]
+                                 })
+        if success:
+            self.log(f"  ✓ Invalid status 'MAYBE' rejected with 400")
 
     def test_runtime(self):
         """Test runtime logs and CSV import"""

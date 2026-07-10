@@ -9,6 +9,7 @@ import ControlRoom from '@/pages/ControlRoom';
 import Breakdowns from '@/pages/Breakdowns';
 import WorkOrders from '@/pages/WorkOrders';
 import PreventiveMaintenance from '@/pages/PreventiveMaintenance';
+import ClosePMTask from '@/pages/ClosePMTask';
 import Analytics from '@/pages/Analytics';
 import Runtime from '@/pages/Runtime';
 import Inventory from '@/pages/Inventory';
@@ -30,6 +31,7 @@ function AppRoutes() {
       <Route path="/breakdowns" element={<Protected><Breakdowns /></Protected>} />
       <Route path="/work-orders" element={<Protected roles={['admin', 'technician']}><WorkOrders /></Protected>} />
       <Route path="/preventive-maintenance" element={<Protected roles={['admin', 'technician']}><PreventiveMaintenance /></Protected>} />
+      <Route path="/preventive-maintenance/close/:taskId" element={<Protected roles={['admin', 'technician']}><ClosePMTask /></Protected>} />
       <Route path="/analytics" element={<Protected><Analytics /></Protected>} />
       <Route path="/runtime" element={<Protected><Runtime /></Protected>} />
       <Route path="/inventory" element={<Protected roles={['admin', 'technician']}><Inventory /></Protected>} />
