@@ -1,58 +1,58 @@
 [
   {
-    "content": "B1: Breakdown complete/close syncs linked WO (PENDING_ADMIN_CLOSURE/CLOSED) + WO admin close auto-closes breakdown",
-    "status": "in_progress"
+    "content": "B1: Breakdown↔WO bidirectional status sync",
+    "status": "completed"
   },
   {
-    "content": "B2: Editable start/end times on breakdown complete + WO complete (backend), RCA uses edited downtime, remove mandatory root_cause",
-    "status": "pending"
+    "content": "B2: Editable start/end times drive downtime/duration + RCA trigger, root_cause no longer mandatory",
+    "status": "completed"
   },
   {
-    "content": "B3: list_breakdowns open_total + warnings generate-wo endpoint + public start_time",
-    "status": "pending"
+    "content": "B3: open_total + warnings generate-wo + public start_time",
+    "status": "completed"
   },
   {
-    "content": "B4: Line availability formula fix (union intervals, window-based) in routers_core",
-    "status": "pending"
+    "content": "B4: Line availability formula fix (union intervals, window-based)",
+    "status": "completed"
   },
   {
-    "content": "B5: PM PDF fixes - embedded logo, outlined checkboxes, date param",
-    "status": "pending"
+    "content": "B5: PM PDF - embedded logo, outlined checkboxes, editable date",
+    "status": "completed"
   },
   {
-    "content": "F1: SpareRows fuzzy combobox (Shared.jsx)",
-    "status": "pending"
+    "content": "F1: Fuzzy SAP spare search",
+    "status": "completed"
   },
   {
-    "content": "F2: RepairBreakdown - remove root cause, add start/end time pickers",
-    "status": "pending"
+    "content": "F2: Repair page - no root cause, time pickers",
+    "status": "completed"
   },
   {
-    "content": "F3: WO CompleteDialog + WODetailModal time pickers with showPicker",
-    "status": "pending"
+    "content": "F3: WO complete/detail time pickers with calendar",
+    "status": "completed"
   },
   {
-    "content": "F4: Remove FINAL CLOSE from MachineDrawer",
-    "status": "pending"
+    "content": "F4: FINAL CLOSE removed from MachineDrawer",
+    "status": "completed"
   },
   {
-    "content": "F5: Breakdowns subtitle open count + warning click dialog with WO link/generate",
-    "status": "pending"
+    "content": "F5: Breakdowns open-count subtitle + warning click dialog",
+    "status": "completed"
   },
   {
-    "content": "F6: Line KPI card click filters Digital Twin (sync state)",
-    "status": "pending"
+    "content": "F6: Line KPI card click filters Digital Twin",
+    "status": "completed"
   },
   {
-    "content": "F7: Report form editable Start Time picker",
-    "status": "pending"
+    "content": "F7: Report form Start Time picker",
+    "status": "completed"
   },
   {
-    "content": "F8: ClosePMTask editable Date + PDF date param",
-    "status": "pending"
+    "content": "F8: ClosePMTask editable Date",
+    "status": "completed"
   },
   {
     "content": "Build + smoke tests + testing agent",
-    "status": "pending"
+    "status": "completed"
   }
 ]

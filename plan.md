@@ -39,6 +39,10 @@
   - Machines **inherit** their line runtime via fan-out to preserve per-machine reliability/Weibull calculations.
   - A **calendar view** must make missing line-days obvious and support admin CRUD.
   - **Plant Runtime Clock per-machine auto accumulation remains enabled alongside line logging** (per user choice).
+- Data integrity + audit correctness (new):
+  - Breakdown and Work Order lifecycle must remain **synchronized** (no stale Kanban cards).
+  - Downtime/RCA triggers must respect **corrected/edited** times, not only raw timers.
+  - Root Cause capture must be **governed exclusively** through the RCA 5‑Why module.
 
 ### Phase L (delivered) objectives
 - Enforce standardized **Root Cause Analysis (5-Why)** governance:
@@ -52,7 +56,7 @@
 - AWS supports Mechanical/Electrical/PLC category sorting/filtering:
   - Category chips + per-machine failure category counts + dominant category.
 
-### Phase M (now delivered) objectives
+### Phase M (delivered) objectives
 - **Mandatory technician assignment + mandatory WO creation** for all Breakdown **and Warning** submissions:
   - Applies uniformly to authenticated, operator, and public kiosk entry points.
   - Removes optional/checkbox-based auto-WO behavior; submitter explicitly selects technician.
@@ -60,6 +64,24 @@
   - Month grid shows logged/partial/missing line-days.
   - Day dialog supports per-line log/update/delete for Admins; view-only for others.
   - Admin-only deletion removes fanned per-machine logs.
+
+### Phase N (now delivered) objectives — “Plant Bugfix Pack”
+- Fix Breakdown↔WO lifecycle synchronization:
+  - Breakdown completion must immediately update the linked WO status.
+  - WO admin closure is the single closure point and must auto-close the linked breakdown.
+- Make time capture correctable everywhere it matters:
+  - Breakdown start time at report; breakdown start/end at repair close; WO start/end at completion.
+  - All time edits must drive downtime/duration and RCA triggers.
+- Correct availability computation:
+  - Strict window-based formula with downtime capped to the window.
+  - Use merged (union) downtime intervals per line/section.
+- Remove redundant/incorrect UI steps:
+  - Remove breakdown “Final Close” (closure happens via WO admin approval).
+- Improve shop-floor usability:
+  - Warning click should allow WO generation with technician assignment (for legacy warnings w/out WOs).
+  - Spare selection must be fuzzy/typeahead search.
+- PM checklist print fidelity:
+  - Embed branding logo as a real image, render outlined checkboxes, allow editable Date.
 
 ---
 
@@ -234,104 +256,129 @@
 > This phase removes optional dispatch behavior: every Breakdown/Warning report explicitly assigns a technician and always creates a linked work order. It also upgrades runtime entry UX to a calendar-first, line-wise logging module.
 
 #### M1) Mandatory technician assignment + mandatory WO creation on all Breakdown/Warning submissions (P0)
-**Delivered**
-- Backend (`/app/backend/routers_maintenance.py`):
-  - Removed `auto_create_work_order` from all Breakdown/Warning create models and endpoints.
-  - Added `assigned_to` to:
-    - `BreakdownCreate`
-    - `PublicBreakdownCreate`
-    - `WarningCreate`
-    - `PublicWarningCreate`
-  - Added `_validate_technician(username)`:
-    - requires non-empty
-    - must be an **active** user with `role='technician'`
-    - returns 400 on missing/invalid/non-technician
-  - Updated `_create_breakdown_internal(...)`:
-    - always creates a linked **Corrective** WO (`source='breakdown_auto'`)
-    - assigns WO to selected technician
-    - breakdown starts status `ASSIGNED` with `assigned_to`
-    - internal callers may omit assigned_to and fall back to `_pick_technician()`
-  - Updated Warning flow (`_create_warning_internal`) to accept `assigned_to`:
-    - warning WO always created and assigned to selected technician
-  - Updated `GET /public/report-context` to include `technicians` list for kiosk dropdown.
-- Frontend (`/app/frontend/src/components/ReportBreakdownDialog.jsx`):
-  - Removed Auto-WO checkbox entirely.
-  - Added mandatory "Assign Technician" select (`data-testid='bd-technician-select'`).
-  - Applies to Breakdown + Warning modes and to both authenticated + public kiosk modes.
-  - Submit validation requires machine + reporter name + remarks + technician.
-
 **Status:** ✅ COMPLETE
 
 #### M2) Runtime Module — calendar-first, line-wise logging (P0)
-**Delivered**
-- Backend (`/app/backend/routers_ops.py`):
-  - Added admin-only delete: `DELETE /api/line-runtime-logs?line=<line>&date=<YYYY-MM-DD>`
-    - deletes the `line_runtime_logs` entry
-    - deletes fanned-out per-machine runtime logs for that line+date (sources `line`/`csv_import`)
-    - triggers reliability recomputation
-    - returns `{ ok: true, machine_logs_removed: n }`
-- Frontend (`/app/frontend/src/pages/Runtime.jsx`):
-  - Defaults to **Calendar view** (`data-testid='runtime-calendar'`).
-  - Month navigation + Monday-first grid.
-  - Day cells show `logged/total lines` and are color-coded:
-    - green = all lines logged
-    - yellow = partial
-    - dim = missing
-    - future days disabled
-  - Clicking a day opens the day dialog (`data-testid='runtime-day-dialog'`) with per-line rows:
-    - Admin can Log/Update/Delete inline
-    - Technician/Operator view-only
-  - Table view retained via toggle (`runtime-view-toggle`).
-
 **Status:** ✅ COMPLETE
 
 **Phase M Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_8.json`
   - **backend 99%** (95/96; single failure is a *test-expectation quirk*, not a product bug)
   - **frontend 95%** with **0 real issues reported**
-- Additional manual + screenshot verification:
-  - public kiosk breakdown dialog shows technician select and no checkbox
-  - runtime calendar day dialog renders per-line CRUD for admin
+
+---
+
+### Phase N — Plant bugfix pack (Breakdown/WO sync + Time edits + Availability + Warnings + Spares + PM PDF) (P0)
+> This phase implements the plant’s corrective bugfix list to ensure operational truth: lifecycle sync, corrected time usage, correct availability, and printable PM artifacts.
+
+#### N1) Breakdown/Work Order status sync (P0)
+**Delivered**
+- Breakdown complete/close instantly propagates to linked WO:
+  - Breakdown complete → linked WO `PENDING_ADMIN_CLOSURE` + admin notification.
+  - Admin breakdown close → linked WO `CLOSED`.
+- Reverse direction:
+  - Admin closing a WO is the single final closure point and auto-closes linked breakdown + restores machine status.
+
+#### N2) Time editing for real downtime (P0)
+**Delivered**
+- Added a shared `DateTimeField` component (native picker on click via `showPicker()`).
+- Report form includes **Breakdown Start Time** (`bd-start-time`).
+- Repair page includes editable **Breakdown Start/End** (`repair-start-time`, `repair-end-time`).
+- WO completion dialog includes editable **Start/End** (`wo-complete-start-time`, `wo-complete-end-time`).
+- Backend validates `end < start` as 400.
+
+#### N3) RCA trigger uses edited times (P0)
+**Delivered**
+- Downtime/duration and RCA 30-min rule evaluate against corrected `start/end` edits for:
+  - breakdowns
+  - work orders
+
+#### N4) Remove Root Cause from Repair/Complete (P0)
+**Delivered**
+- Removed the Root Cause field from Repair UI.
+- Removed backend rule requiring root_cause for downtime > threshold.
+- Root cause capture is governed exclusively in the dedicated 5‑Why RCA WO.
+
+#### N5) Remove redundant Final Close (P0)
+**Delivered**
+- Removed “Final Close” from Machine Drawer breakdown UI.
+- Replaced with informational text: “closure via WO admin approval”.
+
+#### N6) Breakdowns subtitle open count only (P0)
+**Delivered**
+- `GET /breakdowns` now returns `open_total`.
+- Breakdowns subtitle displays open/active count only.
+
+#### N7) Fix Line Availability calculation (P0)
+**Delivered**
+- `/control-room/line-kpis` rewritten:
+  - downtime = merged/union overlap of breakdown intervals with the window
+  - downtime capped at window length
+  - availability = (window − downtime)/window × 100
+  - full-window outage correctly shows 0%.
+
+#### N8) Line KPI card click filters Digital Twin (P0)
+**Delivered**
+- Line KPI card click now filters Control Room to that line (toggle back to “all”).
+- Highlight + state kept in sync via `selectedLine` prop.
+
+#### N9) Warning click: WO generation with technician assignment (P0)
+**Delivered**
+- Warning row click opens a detail dialog:
+  - shows linked WO when present
+  - supports “Generate Work Order” for legacy warnings without WO via `POST /warnings/{id}/generate-wo` with technician selection.
+
+#### N10) SAP material search fuzzy/typeahead (P0)
+**Delivered**
+- `SpareRows` now uses fuzzy typeahead (`SpareSearch`) instead of a static dropdown.
+- Live filtering matches partial SAP code/material/description with token matching.
+
+#### N11) PM Checklist PDF export fixes (P0)
+**Delivered**
+- PDF header embeds the branding logo as a real image (base64 from Administration → Branding).
+- Status column checkboxes render as **outlined empty boxes** (not filled squares).
+- Date is editable:
+  - UI: editable `close-pm-date` input
+  - backend: `checklist_date` stored on completion
+  - PDF: optional `?date=YYYY-MM-DD` parameter.
+
+**Phase N Testing:** ✅ COMPLETE
+- Backend: **15/15 tests passed (100%)** (reported in latest test summary)
+- Frontend: verified (line filter, time pickers, warning dialog, spare typeahead, PM date)
+- Test artifacts cleaned (10 breakdowns, 17 WOs, 1 warning; 2 machines restored)
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- None required; Phase M deliverables implemented and validated.
+- None required; Phase N deliverables implemented and validated.
 
 ### Hardening / Refactor (P1)
 - Centralize “admin review required” notification/timeline logic for all WO sources (Corrective, PM, RCA) to reduce duplication.
 - Add MongoDB indexes:
   - `work_orders`: `pm_task_id`, `rca_task_id`, `source_breakdown_id`, `source_warning_id`, `source_work_order_id`, `assigned_to`, `status`, `completed_at`
-  - `breakdowns`: `assigned_to`, `status`, `end_time`
-  - `warnings`: `assigned_to`, `status`
+  - `breakdowns`: `assigned_to`, `status`, `end_time`, `work_order_id`
+  - `warnings`: `assigned_to`, `status`, `work_order_id`
   - `runtime_logs`: `machine_id`, `line`, `date`, `source`
   - `line_runtime_logs`: `line`, `date`
-- Add an admin-visible RCA dashboard (open RCAs, aging, overdue) and link it from Admin/Analytics.
 - Add drill-down from Technician Analytics rows to pre-filtered Work Orders / Breakdowns.
 
 ### Runtime governance note (Supersession + coexistence)
 - **Line runtime is the availability source of truth**.
 - **Plant Runtime Clock per-machine accumulation is still enabled** (per user choice) and may co-exist with line fan-out.
-  - If conflicts appear in future (e.g., plant clock overwriting line fan-out on same machine+date), consider adjusting source precedence or disabling plant clock.
+  - If conflicts appear (same machine+date written by multiple sources), define precedence (e.g., `source='line'` overrides `plant_clock`) or disable plant clock.
 
 ### Optional Next Enhancements (Future / Backlog)
-- Add an Admin “Warnings” management view (filters, close/reopen, trends) and/or link warnings to WO details.
+- RCA aging dashboard for admins (open RCAs, aging, overdue) linked from Admin/Analytics.
 - Harden public kiosk endpoints:
   - rate limiting / spam throttling
   - optional kiosk PIN
   - optional photo upload.
-- PM templates UI in Administration (separate from creating a PM task) to manage reusable templates by machine type.
 - True “current shift” time window mode using a configurable shift schedule (timezone-aware) for availability KPIs.
 - Control Room ribbon drilldown: click line/section → open filtered breakdown/work-order panel.
 - PDF styling polish:
-  - embed logo in header
   - optional signature capture.
-- Reliability demo management:
-  - add an admin endpoint/button to purge `source='weibull_demo'` data
-  - show a “DEMO” tag on seeded Weibull models in AWS UI.
-- Contrast review pass (WCAG-oriented) for pure black + neon accents.
 
 ---
 
@@ -363,14 +410,14 @@
 - ✅ Reporting is dispatch-ready:
   - Breakdown + Warning submissions require selecting a technician
   - WO auto-creation is mandatory (no checkbox/toggle)
-  - linked WO is assigned to selected technician
+  - linked WO is assigned to selected technician.
 - ✅ Reliability calculations are verifiable:
   - deterministic Weibull demo dataset exists (runtime logs + closed breakdowns)
   - AWS shows L3/Advanced machines with beta/eta, predicted life and Weibull Active count.
 - ✅ Warnings are functionally distinct from breakdowns:
   - no downtime impact
   - yellow watch state
-  - WO auto-dispatched (now **explicitly assigned** at report time)
+  - WO auto-dispatched (explicitly assigned at report time)
 - ✅ Work orders require admin closure:
   - `PENDING_ADMIN_CLOSURE` implemented
   - admin notifications sent
@@ -383,9 +430,6 @@
   - card click opens detail modal
   - Start/End time edits available to admin + assignee
   - validation enforced (no end before start)
-- ✅ Dedicated execution pages exist where required:
-  - PM close-out page
-  - Breakdown repair page.
 - ✅ Runtime is line-first and calendar-visible:
   - month calendar highlights missing line-days
   - admin can log/edit/delete per line/day
@@ -404,6 +448,18 @@
 - ✅ **Public report context includes technicians** for kiosk dropdown.
 - ✅ **Runtime calendar view** with logged/partial/missing visibility + per-line day dialog + admin-only delete.
 
+### Phase N success criteria (all met)
+- ✅ Breakdown↔WO lifecycle sync works both directions; no stale Kanban state.
+- ✅ Time edits are available where required and drive downtime/duration + RCA.
+- ✅ Root Cause removed from repair; RCA governs root cause capture.
+- ✅ Redundant "Final Close" removed; single closure point via WO admin closure.
+- ✅ Breakdowns subtitle counts open only.
+- ✅ Line availability formula correct and capped; full-window outage shows 0%.
+- ✅ Digital Twin filters sync when clicking line availability cards.
+- ✅ Warning click supports WO generation with technician assignment for legacy records.
+- ✅ Spare selector is fuzzy/typeahead search.
+- ✅ PM PDF: embedded logo, outlined checkboxes, editable Date.
+
 ### Validation evidence
 - ✅ All changes validated by test reports:
   - Phase E: `/app/test_reports/iteration_3.json`
@@ -412,3 +468,4 @@
   - Phase J: `/app/test_reports/iteration_6.json`
   - Phase L: `/app/test_reports/iteration_7.json`
   - Phase M: `/app/test_reports/iteration_8.json`
+  - Phase N: (included in latest iteration_8.json summary; backend 15/15 + frontend verified)
