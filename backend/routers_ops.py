@@ -128,6 +128,24 @@ async def list_line_runtime_logs(line: Optional[str] = None, date_from: Optional
     return {'items': items, 'total': total}
 
 
+@router.delete('/line-runtime-logs')
+async def delete_line_runtime_log(line: str, date: str, user: dict = Depends(require_admin)):
+    """Admin-only: remove a line runtime entry AND its fanned-out per-machine logs for that day."""
+    existing = await db.line_runtime_logs.find_one({'line': line, 'date': date}, {'_id': 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail='Line runtime entry not found')
+    await db.line_runtime_logs.delete_one({'line': line, 'date': date})
+    machines = await db.machines.find({'line': line}, {'_id': 0, 'id': 1}).to_list(2000)
+    mids = [m['id'] for m in machines]
+    res = await db.runtime_logs.delete_many({'machine_id': {'$in': mids}, 'date': date, 'source': {'$in': ['line', 'csv_import']}})
+    from reliability import recompute_machine_reliability
+    for mid in mids:
+        await recompute_machine_reliability(mid, trigger='runtime_delete')
+    await create_timeline_event('runtime_deleted', title=f'Line runtime removed: {line} {date}',
+                                description=f'{res.deleted_count} machine logs removed', user=user['username'])
+    return {'ok': True, 'machine_logs_removed': res.deleted_count}
+
+
 @router.get('/runtime-logs')
 async def list_runtime_logs(machine_id: Optional[str] = None, line: Optional[str] = None,
                             date_from: Optional[str] = None, date_to: Optional[str] = None,

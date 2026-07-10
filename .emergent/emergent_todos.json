@@ -1,42 +1,26 @@
 [
   {
-    "content": "L1 Backend: RCA helper + wo_type='RCA' + WO-duration trigger + RCA submission endpoint + completion enforcement + GET single WO",
-    "status": "completed"
+    "content": "Backend: mandatory assigned_to on breakdowns/warnings (all 4 endpoints), WO always created, remove auto_create_work_order, technicians in public report-context",
+    "status": "in_progress"
   },
   {
-    "content": "L2 Backend: GET /api/analytics/technicians (admin-only) with filters",
-    "status": "completed"
+    "content": "Backend: DELETE /line-runtime-logs (admin) with machine fan-out cleanup",
+    "status": "pending"
   },
   {
-    "content": "L3 Backend: line-level runtime logging + fan-out + line CSV import + GET /line-runtime-logs",
-    "status": "completed"
+    "content": "Frontend: ReportBreakdownDialog — required Technician dropdown, remove Auto-WO checkbox (all entry points)",
+    "status": "pending"
   },
   {
-    "content": "L4 Backend: failure_categories + dominant_category + category filter in /reliability/metrics",
-    "status": "completed"
-  },
-  {
-    "content": "L1 Frontend: RcaForm page + route + WorkOrders RCA integration + Breakdowns RCA link",
-    "status": "completed"
-  },
-  {
-    "content": "L2 Frontend: Technician Analytics admin section in Analytics.jsx",
-    "status": "completed"
-  },
-  {
-    "content": "L3 Frontend: Runtime.jsx line-based entry + CSV format",
-    "status": "completed"
-  },
-  {
-    "content": "L4 Frontend: AWS category chips + counts column",
-    "status": "completed"
+    "content": "Frontend: Runtime calendar view — month grid with logged/partial/missing coloring + per-line day dialog (admin CRUD, others view-only)",
+    "status": "pending"
   },
   {
     "content": "Build check + backend smoke tests",
-    "status": "completed"
+    "status": "pending"
   },
   {
     "content": "Comprehensive testing via testing agent",
-    "status": "completed"
+    "status": "pending"
   }
 ]

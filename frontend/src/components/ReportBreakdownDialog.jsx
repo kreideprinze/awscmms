@@ -60,6 +60,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
   const isWarning = mode === 'warning';
   const [lines, setLines] = useState([]);
   const [machines, setMachines] = useState([]);
+  const [technicians, setTechnicians] = useState([]);
   const [dept, setDept] = useState('PROCESS');
   const [area, setArea] = useState('');
   const [machineId, setMachineId] = useState('');
@@ -67,12 +68,9 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
   const [breakdownType, setBreakdownType] = useState('MECHANICAL');
   const [woType, setWoType] = useState('Inspection');
   const [remarks, setRemarks] = useState('');
-  const [autoWo, setAutoWo] = useState(true);
+  const [technician, setTechnician] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
-
-  // Operators & public kiosk cannot opt out — WO is always auto-created & auto-assigned
-  const canToggleAutoWo = !isWarning && !publicMode && ['admin', 'technician'].includes(user?.role);
 
   useEffect(() => {
     if (!open) return;
@@ -80,16 +78,18 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
       api.get('/public/report-context').then((r) => {
         setLines(r.data.lines);
         setMachines(r.data.machines);
+        setTechnicians(r.data.technicians || []);
       });
     } else {
       api.get('/hierarchy').then((r) => setLines(r.data.lines));
       api.get('/machines?limit=10000').then((r) => setMachines(r.data));
+      api.get('/users/technicians').then((r) => setTechnicians((r.data || []).filter((t) => t.role === 'technician').map((t) => ({ username: t.username, name: t.name })))).catch(() => {});
     }
     setReporterName(publicMode ? '' : user?.name || '');
     setBreakdownType('MECHANICAL');
     setWoType('Inspection');
     setRemarks('');
-    setAutoWo(true);
+    setTechnician('');
     setErrors({});
     if (prefillMachine) {
       setDept(prefillMachine.department || 'PROCESS');
@@ -117,9 +117,10 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
     if (!machineId) errs.machine = true;
     if (!reporterName.trim()) errs.reporter = true;
     if (!remarks.trim()) errs.remarks = true;
+    if (!technician) errs.technician = true;
     setErrors(errs);
     if (Object.keys(errs).length) {
-      toast.error('Machine, reporter name and remarks are required');
+      toast.error('Machine, reporter name, remarks and assigned technician are required');
       return;
     }
     setSubmitting(true);
@@ -132,17 +133,18 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
           warning_type: breakdownType,
           reporter_name: reporterName,
           wo_type: woType,
+          assigned_to: technician,
         });
-        toast.warning(`Warning ${res.data.tag_number} raised — ${res.data.work_order_number} dispatched (no downtime recorded)`);
+        toast.warning(`Warning ${res.data.tag_number} raised — ${res.data.work_order_number} assigned to ${technician} (no downtime recorded)`);
       } else {
         res = await api.post(publicMode ? '/public/breakdowns' : '/breakdowns', {
           machine_id: machineId,
           description: remarks,
           breakdown_type: breakdownType,
           reporter_name: reporterName,
-          auto_create_work_order: canToggleAutoWo ? autoWo : true,
+          assigned_to: technician,
         });
-        toast.success(`Breakdown ${res.data.ticket_number} created${res.data.work_order_number ? ` — ${res.data.work_order_number} dispatched to maintenance` : ''}`);
+        toast.success(`Breakdown ${res.data.ticket_number} created — ${res.data.work_order_number} assigned to ${technician}`);
       }
       setOpen(false);
       onCreated && onCreated(res.data);
@@ -258,26 +260,24 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
             />
           </div>
 
-          {/* Auto-create WO — admins/technicians filing breakdowns only; everyone else always auto */}
-          {!isWarning && (canToggleAutoWo ? (
-            <label className="flex cursor-pointer items-start gap-2.5" data-testid="bd-auto-wo-toggle">
-              <input
-                type="checkbox"
-                checked={autoWo}
-                onChange={(e) => setAutoWo(e.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-[#00fff5]"
-                data-testid="bd-auto-wo-checkbox"
-              />
-              <span>
-                <span className="block text-xs font-semibold uppercase tracking-widest">Auto-create Work Order</span>
-                <span className="block text-[11px] text-muted-foreground">dispatches to maintenance immediately</span>
-              </span>
-            </label>
-          ) : (
-            <div className="border border-border/60 px-3 py-2 text-[11px] text-muted-foreground" data-testid="bd-auto-wo-note">
-              A work order is automatically created and assigned to a technician.
-            </div>
-          ))}
+          {/* Mandatory technician assignment — a WO is ALWAYS created for the selected technician */}
+          <div>
+            <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Assign Technician *</Label>
+            <Select value={technician} onValueChange={setTechnician}>
+              <SelectTrigger data-testid="bd-technician-select" className={`bg-[hsl(var(--panel-2))] ${errors.technician ? 'input-error' : ''}`}>
+                <SelectValue placeholder="Select technician to attend" />
+              </SelectTrigger>
+              <SelectContent>
+                {technicians.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No active technicians available</div>}
+                {technicians.map((t) => (
+                  <SelectItem key={t.username} value={t.username}>{t.name} ({t.username})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-1.5 text-[11px] text-muted-foreground" data-testid="bd-auto-wo-note">
+              A work order is always created and assigned to the selected technician on submission.
+            </p>
+          </div>
 
           <Button
             onClick={submit}

@@ -31,8 +31,18 @@ class BreakdownCreate(BaseModel):
     failure_mode: Optional[str] = None
     breakdown_type: str = 'MECHANICAL'
     reporter_name: Optional[str] = None
-    auto_create_work_order: bool = True
+    assigned_to: Optional[str] = None  # REQUIRED (validated in endpoint) — technician who will attend
     start_time: Optional[str] = None
+
+
+async def _validate_technician(username):
+    """Mandatory technician assignment: must be an existing, active technician."""
+    if not username or not str(username).strip():
+        raise HTTPException(status_code=400, detail='Assigned technician is required — select a technician for this report')
+    tech = await db.users.find_one({'username': username, 'role': 'technician', 'active': True}, {'_id': 0, 'username': 1})
+    if not tech:
+        raise HTTPException(status_code=400, detail=f'Invalid technician "{username}" — must be an active technician')
+    return username
 
 
 async def _pick_technician():
@@ -82,12 +92,16 @@ async def _create_rca_wo(machine_id, machine_name, department, line, tech, origi
 
 async def _create_breakdown_internal(machine_id: str, description: str, failure_mode: str, reporter: str,
                                      start_time: str = None, breakdown_type: str = 'MECHANICAL',
-                                     auto_create_work_order: bool = True):
+                                     assigned_to: str = None):
+    """A linked Corrective Work Order is ALWAYS created (no opt-out). The submitter selects the
+    technician; internal callers (e.g. report conversion) fall back to least-loaded auto-pick."""
     machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
     if breakdown_type not in BREAKDOWN_TYPES:
         raise HTTPException(status_code=400, detail=f'Invalid breakdown_type. Valid: {BREAKDOWN_TYPES}')
+    if not assigned_to:
+        assigned_to = await _pick_technician()
     ticket = await next_counter('breakdowns', 'BD')
     bd = {
         'id': str(uuid.uuid4()), 'ticket_number': ticket,
@@ -96,7 +110,7 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
         'failure_mode': failure_mode or breakdown_type.replace('_', ' ').title(),
         'breakdown_type': breakdown_type,
         'description': description, 'reporter': reporter,
-        'status': 'OPEN', 'assigned_to': None,
+        'status': 'ASSIGNED' if assigned_to else 'OPEN', 'assigned_to': assigned_to,
         'start_time': start_time or now_iso(), 'end_time': None,
         'downtime_minutes': None, 'repair_duration_minutes': None,
         'root_cause': None, 'action_taken': None, 'consumed_spares': [],
@@ -117,34 +131,33 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
                               machine_id=machine['id'], machine_name=machine['name'],
                               reference_id=bd['id'], reference_type='breakdown')
 
-    # Auto-dispatch a Corrective Work Order to maintenance immediately
-    if auto_create_work_order:
-        assigned = await _pick_technician()
-        wo_num = await next_counter('work_orders', 'WO')
-        wo = {
-            'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Corrective',
-            'title': f"Corrective \u2014 {machine['name']} ({ticket})",
-            'description': f"Auto-dispatched from breakdown {ticket} [{breakdown_type}]: {description}",
-            'machine_id': machine['id'], 'machine_name': machine['name'],
-            'department': machine['department'], 'line': machine['line'],
-            'assigned_to': assigned, 'priority': 'critical' if machine.get('criticality') == 'critical' else 'high',
-            'status': 'ASSIGNED' if assigned else 'OPEN',
-            'root_cause': None, 'action_taken': None, 'spare_parts': [],
-            'duration_minutes': None, 'source': 'breakdown_auto', 'source_breakdown_id': bd['id'],
-            'auto_generated': True, 'created_at': now_iso(),
-        }
-        await db.work_orders.insert_one(dict(wo))
-        await db.breakdowns.update_one({'id': bd['id']}, {'$set': {'work_order_id': wo['id'], 'work_order_number': wo_num}})
-        bd['work_order_id'] = wo['id']
-        bd['work_order_number'] = wo_num
-        await create_notification('work_order', f"Maintenance Dispatched: {machine['name']}",
-                                  f"{wo_num} auto-created from {ticket}" + (f" \u2014 assigned to {assigned}" if assigned else ''),
-                                  severity='warning', machine_id=machine['id'], machine_name=machine['name'],
-                                  reference_id=wo['id'], reference_type='work_order')
-        await create_timeline_event('wo_created', machine_id=machine['id'], machine_name=machine['name'],
-                                    title=f"WO {wo_num} auto-dispatched to maintenance", user='system',
-                                    reference_id=wo['id'], reference_type='work_order',
-                                    department=machine['department'], line=machine['line'])
+    # Mandatory: auto-dispatch a Corrective Work Order to the selected technician (no opt-out)
+    assigned = assigned_to
+    wo_num = await next_counter('work_orders', 'WO')
+    wo = {
+        'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Corrective',
+        'title': f"Corrective \u2014 {machine['name']} ({ticket})",
+        'description': f"Auto-dispatched from breakdown {ticket} [{breakdown_type}]: {description}",
+        'machine_id': machine['id'], 'machine_name': machine['name'],
+        'department': machine['department'], 'line': machine['line'],
+        'assigned_to': assigned, 'priority': 'critical' if machine.get('criticality') == 'critical' else 'high',
+        'status': 'ASSIGNED' if assigned else 'OPEN',
+        'root_cause': None, 'action_taken': None, 'spare_parts': [],
+        'duration_minutes': None, 'source': 'breakdown_auto', 'source_breakdown_id': bd['id'],
+        'auto_generated': True, 'created_at': now_iso(),
+    }
+    await db.work_orders.insert_one(dict(wo))
+    await db.breakdowns.update_one({'id': bd['id']}, {'$set': {'work_order_id': wo['id'], 'work_order_number': wo_num}})
+    bd['work_order_id'] = wo['id']
+    bd['work_order_number'] = wo_num
+    await create_notification('work_order', f"Maintenance Dispatched: {machine['name']}",
+                              f"{wo_num} auto-created from {ticket}" + (f" \u2014 assigned to {assigned}" if assigned else ''),
+                              severity='warning', machine_id=machine['id'], machine_name=machine['name'],
+                              reference_id=wo['id'], reference_type='work_order')
+    await create_timeline_event('wo_created', machine_id=machine['id'], machine_name=machine['name'],
+                                title=f"WO {wo_num} dispatched to {assigned or 'maintenance'}", user='system',
+                                reference_id=wo['id'], reference_type='work_order',
+                                department=machine['department'], line=machine['line'])
     bd.pop('_id', None)
     return bd
 
@@ -152,10 +165,10 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
 @router.post('/breakdowns')
 async def create_breakdown(req: BreakdownCreate, user: dict = Depends(get_current_user)):
     reporter = req.reporter_name or user['username']
-    # Operators cannot opt out: a work order is always auto-generated and auto-assigned
-    auto_wo = True if user.get('role') == 'operator' else req.auto_create_work_order
+    # Mandatory technician assignment — a WO is always created for the selected technician
+    assigned_to = await _validate_technician(req.assigned_to)
     return await _create_breakdown_internal(req.machine_id, req.description, req.failure_mode, reporter,
-                                            req.start_time, req.breakdown_type, auto_wo)
+                                            req.start_time, req.breakdown_type, assigned_to)
 
 
 @router.get('/breakdowns')
@@ -960,10 +973,11 @@ async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, user: d
 # ============ PUBLIC (NO-LOGIN) BREAKDOWN REPORTING ============
 @router.get('/public/report-context')
 async def public_report_context():
-    """Minimal hierarchy + machine list for the public kiosk breakdown form. No auth."""
+    """Minimal hierarchy + machine list + technicians for the public kiosk report form. No auth."""
     lines = await db.lines.find({}, {'_id': 0, 'name': 1, 'department': 1, 'order': 1}).sort('order', 1).to_list(1000)
     machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'name': 1, 'code': 1, 'line': 1, 'department': 1, 'process_group': 1}).to_list(100000)
-    return {'lines': lines, 'machines': machines}
+    technicians = await db.users.find({'role': 'technician', 'active': True}, {'_id': 0, 'username': 1, 'name': 1}).to_list(1000)
+    return {'lines': lines, 'machines': machines, 'technicians': technicians}
 
 
 class PublicBreakdownCreate(BaseModel):
@@ -971,20 +985,21 @@ class PublicBreakdownCreate(BaseModel):
     description: str
     breakdown_type: str = 'MECHANICAL'
     reporter_name: str
-    auto_create_work_order: bool = True
+    assigned_to: Optional[str] = None  # REQUIRED (validated) — technician who will attend
 
 
 @router.post('/public/breakdowns')
 async def public_create_breakdown(req: PublicBreakdownCreate):
     """Public kiosk endpoint — operators without logins can report breakdowns.
-    Reporter name is mandatory for accountability; submissions are flagged public_kiosk."""
+    Reporter name AND technician assignment are mandatory; a WO is always created."""
     reporter = req.reporter_name.strip()
     if not reporter:
         raise HTTPException(status_code=400, detail='Reporter name is required')
     if not req.description.strip():
         raise HTTPException(status_code=400, detail='Description is required')
+    assigned_to = await _validate_technician(req.assigned_to)
     bd = await _create_breakdown_internal(req.machine_id, req.description.strip(), None, reporter,
-                                          None, req.breakdown_type, True)  # public: WO always auto-created
+                                          None, req.breakdown_type, assigned_to)
     await db.breakdowns.update_one({'id': bd['id']}, {'$set': {'submitted_via': 'public_kiosk'}})
     bd['submitted_via'] = 'public_kiosk'
     return bd
@@ -992,11 +1007,12 @@ async def public_create_breakdown(req: PublicBreakdownCreate):
 
 # ============ WARNINGS (non-downtime observations, yellow-tagged) ============
 async def _create_warning_internal(machine_id: str, description: str, warning_type: str, reporter: str,
-                                   wo_type: str = 'Inspection', submitted_via: str = 'authenticated'):
+                                   wo_type: str = 'Inspection', submitted_via: str = 'authenticated',
+                                   assigned_to: str = None):
     """A Warning flags a machine concern WITHOUT declaring downtime:
     - no breakdown record, no effect on availability / MTBF / MTTR
     - machine goes to yellow 'watch' status in the Control Room
-    - an Inspection/Corrective work order is ALWAYS auto-created and auto-assigned"""
+    - an Inspection/Corrective work order is ALWAYS created for the selected technician"""
     machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
@@ -1030,8 +1046,8 @@ async def _create_warning_internal(machine_id: str, description: str, warning_ty
                               machine_id=machine['id'], machine_name=machine['name'],
                               reference_id=warning['id'], reference_type='warning')
 
-    # ALWAYS auto-create + auto-assign the work order so it gets actioned
-    assigned = await _pick_technician()
+    # ALWAYS create the work order — assigned to the submitter-selected technician (fallback: least-loaded)
+    assigned = assigned_to or await _pick_technician()
     wo_num = await next_counter('work_orders', 'WO')
     wo = {
         'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': wo_type,
@@ -1063,6 +1079,7 @@ class WarningCreate(BaseModel):
     warning_type: str = 'MECHANICAL'
     reporter_name: Optional[str] = None
     wo_type: str = 'Inspection'  # Inspection | Corrective
+    assigned_to: Optional[str] = None  # REQUIRED (validated) — technician who will attend
 
 
 @router.post('/warnings')
@@ -1070,7 +1087,9 @@ async def create_warning(req: WarningCreate, user: dict = Depends(get_current_us
     reporter = req.reporter_name or user['username']
     if not req.description.strip():
         raise HTTPException(status_code=400, detail='Description is required')
-    return await _create_warning_internal(req.machine_id, req.description.strip(), req.warning_type, reporter, req.wo_type)
+    assigned_to = await _validate_technician(req.assigned_to)
+    return await _create_warning_internal(req.machine_id, req.description.strip(), req.warning_type, reporter,
+                                          req.wo_type, assigned_to=assigned_to)
 
 
 @router.get('/warnings')
@@ -1095,6 +1114,7 @@ class PublicWarningCreate(BaseModel):
     warning_type: str = 'MECHANICAL'
     reporter_name: str
     wo_type: str = 'Inspection'
+    assigned_to: Optional[str] = None  # REQUIRED (validated) — technician who will attend
 
 
 @router.post('/public/warnings')
@@ -1105,5 +1125,6 @@ async def public_create_warning(req: PublicWarningCreate):
         raise HTTPException(status_code=400, detail='Reporter name is required')
     if not req.description.strip():
         raise HTTPException(status_code=400, detail='Description is required')
+    assigned_to = await _validate_technician(req.assigned_to)
     return await _create_warning_internal(req.machine_id, req.description.strip(), req.warning_type, reporter,
-                                          req.wo_type, submitted_via='public_kiosk')
+                                          req.wo_type, submitted_via='public_kiosk', assigned_to=assigned_to)

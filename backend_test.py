@@ -229,20 +229,25 @@ class FactoryOpsAPITester:
                  token=self.tokens['admin'])
     
     def test_public_breakdown_reporting(self):
-        """Test public breakdown reporting (NO AUTH required)"""
+        """Test public breakdown reporting (NO AUTH required) with MANDATORY technician assignment"""
         self.log("\n" + "=" * 80)
-        self.log("4. PUBLIC BREAKDOWN REPORTING (NO AUTH)")
+        self.log("4. PUBLIC BREAKDOWN REPORTING (NO AUTH) + MANDATORY TECHNICIAN")
         self.log("=" * 80)
         
-        # GET /public/report-context WITHOUT auth
+        # GET /public/report-context WITHOUT auth - should include technicians
         success, resp = self.test("GET /public/report-context (no auth)", "GET", 
                                  "public/report-context", 200)
         if success:
             lines = resp.get('lines', [])
             machines = resp.get('machines', [])
-            self.log(f"  ✓ Public context: {len(lines)} lines, {len(machines)} machines")
+            technicians = resp.get('technicians', [])
+            self.log(f"  ✓ Public context: {len(lines)} lines, {len(machines)} machines, {len(technicians)} technicians")
             if machines:
                 self.test_data['public_machine'] = machines[0]
+            if not technicians:
+                self.log(f"  ✗ No technicians in public context", "WARN")
+            else:
+                self.log(f"  ✓ Technicians list available for assignment")
         
         if 'public_machine' not in self.test_data:
             self.log("No machine available for public breakdown test", "WARN")
@@ -250,15 +255,53 @@ class FactoryOpsAPITester:
         
         machine = self.test_data['public_machine']
         
-        # POST /public/breakdowns WITHOUT auth - valid
-        success, resp = self.test("POST /public/breakdowns (no auth, valid)", "POST",
+        # POST /public/breakdowns WITHOUT assigned_to (should reject 400)
+        success, resp = self.test("POST /public/breakdowns (missing assigned_to 400)", "POST",
+                                 "public/breakdowns", 400,
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Test breakdown without technician",
+                                     "breakdown_type": "MECHANICAL",
+                                     "reporter_name": "Floor Operator John"
+                                 })
+        if success:
+            self.log(f"  ✓ Missing assigned_to rejected with 400")
+        
+        # POST /public/breakdowns with invalid technician (should reject 400)
+        success, resp = self.test("POST /public/breakdowns (invalid technician 400)", "POST",
+                                 "public/breakdowns", 400,
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Test breakdown with invalid tech",
+                                     "breakdown_type": "MECHANICAL",
+                                     "reporter_name": "Floor Operator John",
+                                     "assigned_to": "nonexistent_user"
+                                 })
+        if success:
+            self.log(f"  ✓ Invalid technician rejected with 400")
+        
+        # POST /public/breakdowns with non-technician role (should reject 400)
+        success, resp = self.test("POST /public/breakdowns (operator role 400)", "POST",
+                                 "public/breakdowns", 400,
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Test breakdown with operator",
+                                     "breakdown_type": "MECHANICAL",
+                                     "reporter_name": "Floor Operator John",
+                                     "assigned_to": "operator"
+                                 })
+        if success:
+            self.log(f"  ✓ Non-technician role (operator) rejected with 400")
+        
+        # POST /public/breakdowns with valid technician (should succeed)
+        success, resp = self.test("POST /public/breakdowns (valid technician)", "POST",
                                  "public/breakdowns", 200,
                                  data={
                                      "machine_id": machine['id'],
                                      "description": "Public kiosk test - machine stopped",
                                      "breakdown_type": "MECHANICAL",
                                      "reporter_name": "Floor Operator John",
-                                     "auto_create_work_order": True
+                                     "assigned_to": "tech"
                                  })
         if success:
             bd_id = resp.get('id')
@@ -267,15 +310,29 @@ class FactoryOpsAPITester:
             self.test_data['public_breakdown_ticket'] = ticket
             self.log(f"  ✓ Public breakdown created: {ticket}")
             
+            # Verify status is ASSIGNED
+            if resp.get('status') == 'ASSIGNED':
+                self.log(f"  ✓ Breakdown status is ASSIGNED")
+            else:
+                self.log(f"  ✗ Breakdown status is {resp.get('status')}, expected ASSIGNED", "WARN")
+            
+            # Verify assigned_to is set
+            if resp.get('assigned_to') == 'tech':
+                self.log(f"  ✓ assigned_to='tech' set correctly")
+            else:
+                self.log(f"  ✗ assigned_to not set correctly", "WARN")
+            
             # Verify submitted_via flag
             if resp.get('submitted_via') == 'public_kiosk':
                 self.log(f"  ✓ submitted_via=public_kiosk flag set")
             else:
                 self.log(f"  ✗ submitted_via flag not set correctly", "WARN")
             
-            # Verify auto work order created
+            # Verify auto work order created and assigned
             if resp.get('work_order_number'):
                 self.log(f"  ✓ Auto work order created: {resp['work_order_number']}")
+            else:
+                self.log(f"  ✗ Work order not created", "WARN")
         
         # POST /public/breakdowns WITHOUT reporter_name (should reject 400)
         success, resp = self.test("POST /public/breakdowns (empty reporter_name 400)", "POST",
@@ -285,10 +342,39 @@ class FactoryOpsAPITester:
                                      "description": "Test breakdown",
                                      "breakdown_type": "ELECTRICAL",
                                      "reporter_name": "",
-                                     "auto_create_work_order": True
+                                     "assigned_to": "tech"
                                  })
         if success:
             self.log(f"  ✓ Empty reporter_name rejected with 400")
+        
+        # Test public WARNING reporting with mandatory technician
+        success, resp = self.test("POST /public/warnings (valid technician)", "POST",
+                                 "public/warnings", 200,
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Public warning test - abnormal noise",
+                                     "warning_type": "MECHANICAL",
+                                     "reporter_name": "Floor Operator Jane",
+                                     "wo_type": "Inspection",
+                                     "assigned_to": "tech"
+                                 })
+        if success:
+            self.log(f"  ✓ Public warning created: {resp.get('tag_number')}")
+            if resp.get('work_order_number'):
+                self.log(f"  ✓ Warning WO created: {resp['work_order_number']}")
+        
+        # POST /public/warnings WITHOUT assigned_to (should reject 400)
+        success, resp = self.test("POST /public/warnings (missing assigned_to 400)", "POST",
+                                 "public/warnings", 400,
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Warning without tech",
+                                     "warning_type": "MECHANICAL",
+                                     "reporter_name": "Floor Operator Jane",
+                                     "wo_type": "Inspection"
+                                 })
+        if success:
+            self.log(f"  ✓ Warning without assigned_to rejected with 400")
         
         # Verify public breakdown appears in authenticated breakdown list with flag
         if 'public_breakdown_id' in self.test_data:
@@ -349,9 +435,9 @@ class FactoryOpsAPITester:
                     self.test_data['converted_breakdown'] = resp['breakdown']
 
     def test_breakdown_lifecycle(self):
-        """Test breakdown lifecycle with spare consumption"""
+        """Test breakdown lifecycle with spare consumption and MANDATORY technician assignment"""
         self.log("\n" + "=" * 80)
-        self.log("5. BREAKDOWN LIFECYCLE")
+        self.log("5. BREAKDOWN LIFECYCLE + MANDATORY TECHNICIAN")
         self.log("=" * 80)
         
         if 'test_machine' not in self.test_data:
@@ -360,18 +446,84 @@ class FactoryOpsAPITester:
         
         machine = self.test_data['test_machine']
         
-        # Create breakdown
-        success, resp = self.test("POST /breakdowns", "POST", "breakdowns", 200,
+        # Test authenticated breakdown WITHOUT assigned_to (should reject 400)
+        success, resp = self.test("POST /breakdowns (missing assigned_to 400)", "POST", "breakdowns", 400,
+                                 token=self.tokens['operator'],
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Test breakdown without tech",
+                                     "failure_mode": "Motor Failure"
+                                 })
+        if success:
+            self.log(f"  ✓ Authenticated breakdown without assigned_to rejected with 400")
+        
+        # Test authenticated breakdown with invalid technician (should reject 400)
+        success, resp = self.test("POST /breakdowns (invalid technician 400)", "POST", "breakdowns", 400,
+                                 token=self.tokens['operator'],
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Test breakdown with invalid tech",
+                                     "failure_mode": "Motor Failure",
+                                     "assigned_to": "invalid_user_xyz"
+                                 })
+        if success:
+            self.log(f"  ✓ Invalid technician rejected with 400")
+        
+        # Test authenticated breakdown with non-technician role (should reject 400)
+        success, resp = self.test("POST /breakdowns (admin role 400)", "POST", "breakdowns", 400,
+                                 token=self.tokens['operator'],
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Test breakdown with admin",
+                                     "failure_mode": "Motor Failure",
+                                     "assigned_to": "admin"
+                                 })
+        if success:
+            self.log(f"  ✓ Non-technician role (admin) rejected with 400")
+        
+        # Test authenticated WARNING without assigned_to (should reject 400)
+        success, resp = self.test("POST /warnings (missing assigned_to 400)", "POST", "warnings", 400,
+                                 token=self.tokens['operator'],
+                                 data={
+                                     "machine_id": machine['id'],
+                                     "description": "Warning without tech",
+                                     "warning_type": "MECHANICAL",
+                                     "wo_type": "Inspection"
+                                 })
+        if success:
+            self.log(f"  ✓ Warning without assigned_to rejected with 400")
+        
+        # Create breakdown with valid technician
+        success, resp = self.test("POST /breakdowns (valid technician)", "POST", "breakdowns", 200,
                                  token=self.tokens['operator'],
                                  data={
                                      "machine_id": machine['id'],
                                      "description": "Test breakdown - motor failure",
-                                     "failure_mode": "Motor Failure"
+                                     "failure_mode": "Motor Failure",
+                                     "assigned_to": "tech"
                                  })
         if success:
             bd_id = resp.get('id')
             self.test_data['breakdown_id'] = bd_id
             self.log(f"  ✓ Breakdown created: {resp.get('ticket_number')}")
+            
+            # Verify status is ASSIGNED
+            if resp.get('status') == 'ASSIGNED':
+                self.log(f"  ✓ Breakdown status is ASSIGNED")
+            else:
+                self.log(f"  ✗ Breakdown status is {resp.get('status')}, expected ASSIGNED", "WARN")
+            
+            # Verify assigned_to is set
+            if resp.get('assigned_to') == 'tech':
+                self.log(f"  ✓ assigned_to='tech' set correctly")
+            else:
+                self.log(f"  ✗ assigned_to not set correctly", "WARN")
+            
+            # Verify work order created
+            if resp.get('work_order_number'):
+                self.log(f"  ✓ Work order created: {resp['work_order_number']}")
+            else:
+                self.log(f"  ✗ Work order not created", "WARN")
             
             # Check machine status changed to failed
             success, m_resp = self.test("GET machine after breakdown", "GET", 
@@ -379,13 +531,6 @@ class FactoryOpsAPITester:
                                        token=self.tokens['tech'])
             if success and m_resp.get('machine', {}).get('status') == 'failed':
                 self.log(f"  ✓ Machine status changed to 'failed'")
-            
-            # Assign to tech
-            success, resp = self.test("Assign breakdown", "PUT", f"breakdowns/{bd_id}", 200,
-                                     token=self.tokens['tech'],
-                                     data={"action": "assign", "assigned_to": "tech"})
-            if success:
-                self.log(f"  ✓ Breakdown assigned")
             
             # Start repair
             success, resp = self.test("Start breakdown repair", "PUT", f"breakdowns/{bd_id}", 200,
@@ -472,7 +617,8 @@ class FactoryOpsAPITester:
                                      "machine_id": machine['id'],
                                      "description": "Test 30-min rule",
                                      "failure_mode": "Electrical Fault",
-                                     "start_time": start_time
+                                     "start_time": start_time,
+                                     "assigned_to": "tech"
                                  })
         if success:
             bd_id = resp.get('id')
@@ -738,9 +884,9 @@ class FactoryOpsAPITester:
             self.log(f"  ✓ Invalid status 'MAYBE' rejected with 400")
 
     def test_runtime(self):
-        """Test runtime logs and CSV import"""
+        """Test runtime logs, CSV import, and line-level DELETE (admin-only)"""
         self.log("\n" + "=" * 80)
-        self.log("9. RUNTIME LOGS")
+        self.log("9. RUNTIME LOGS + LINE-LEVEL DELETE")
         self.log("=" * 80)
         
         if 'test_machine' not in self.test_data:
@@ -748,7 +894,55 @@ class FactoryOpsAPITester:
             return
         
         machine = self.test_data['test_machine']
+        line = machine.get('line')
         today = datetime.utcnow().date().isoformat()
+        test_date = (datetime.utcnow().date() - timedelta(days=5)).isoformat()
+        
+        # Create line runtime log for testing DELETE
+        success, resp = self.test("POST /runtime-logs (line-level for DELETE test)", "POST", "runtime-logs", 200,
+                                 token=self.tokens['admin'],
+                                 data={
+                                     "line": line,
+                                     "date": test_date,
+                                     "calendar_hours": 24.0,
+                                     "run_hours": 18.0
+                                 })
+        if success:
+            self.log(f"  ✓ Line runtime log created for {line} on {test_date}")
+        
+        # Test DELETE as technician (should reject 403)
+        success, resp = self.test("DELETE /line-runtime-logs (tech 403)", "DELETE", 
+                                 f"line-runtime-logs?line={line}&date={test_date}", 403,
+                                 token=self.tokens['tech'])
+        if success:
+            self.log(f"  ✓ Technician DELETE rejected with 403 (admin-only)")
+        
+        # Test DELETE as admin (should succeed 200)
+        success, resp = self.test("DELETE /line-runtime-logs (admin 200)", "DELETE",
+                                 f"line-runtime-logs?line={line}&date={test_date}", 200,
+                                 token=self.tokens['admin'])
+        if success:
+            self.log(f"  ✓ Admin DELETE succeeded")
+            if resp.get('machine_logs_removed'):
+                self.log(f"  ✓ Fanned-out machine logs removed: {resp['machine_logs_removed']}")
+        
+        # Verify line log is deleted
+        success, resp = self.test("GET /line-runtime-logs (verify deleted)", "GET",
+                                 f"line-runtime-logs?line={line}&date_from={test_date}&date_to={test_date}", 200,
+                                 token=self.tokens['admin'])
+        if success:
+            items = resp.get('items', [])
+            if len(items) == 0:
+                self.log(f"  ✓ Line runtime log deleted successfully")
+            else:
+                self.log(f"  ✗ Line runtime log still exists after DELETE", "WARN")
+        
+        # Test DELETE non-existent (should reject 404)
+        success, resp = self.test("DELETE /line-runtime-logs (non-existent 404)", "DELETE",
+                                 f"line-runtime-logs?line={line}&date=2020-01-01", 404,
+                                 token=self.tokens['admin'])
+        if success:
+            self.log(f"  ✓ DELETE non-existent entry rejected with 404")
         
         # Manual log entry
         success, resp = self.test("POST /runtime-logs", "POST", "runtime-logs", 200,
@@ -775,7 +969,7 @@ class FactoryOpsAPITester:
             self.log(f"  ✓ Validation rejected run_hours > calendar_hours")
         
         # CSV import preview
-        csv_data = f"machine_code,date,run_hours,calendar_hours\n{machine['code']},{today},18,24\nINVALID_CODE,{today},10,24"
+        csv_data = f"line,date,run_hours,calendar_hours\n{line},{today},18,24\nINVALID_LINE,{today},10,24"
         success, resp = self.test("POST /runtime-logs/import (preview)", "POST", "runtime-logs/import", 200,
                                  token=self.tokens['admin'],
                                  data={"csv_text": csv_data, "apply": False})
@@ -785,7 +979,7 @@ class FactoryOpsAPITester:
                 self.log(f"    Errors detected: {resp['errors'][0]}")
         
         # CSV import apply
-        csv_data_valid = f"machine_code,date,run_hours,calendar_hours\n{machine['code']},{today},19,24"
+        csv_data_valid = f"line,date,run_hours,calendar_hours\n{line},{today},19,24"
         success, resp = self.test("POST /runtime-logs/import (apply)", "POST", "runtime-logs/import", 200,
                                  token=self.tokens['admin'],
                                  data={"csv_text": csv_data_valid, "apply": True})
@@ -812,7 +1006,8 @@ class FactoryOpsAPITester:
                                      data={
                                          "machine_id": machine['id'],
                                          "description": f"Reliability test breakdown {i+1}",
-                                         "failure_mode": "Bearing Failure"
+                                         "failure_mode": "Bearing Failure",
+                                         "assigned_to": "tech"
                                      })
             if success:
                 bd_id = resp.get('id')
