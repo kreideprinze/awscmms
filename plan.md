@@ -33,6 +33,16 @@
 - Improve Kanban operational UX:
   - Kanban cards open a **detail popout modal** for fast inspection and quick edits.
   - Work Orders support **editable Start/End times** (admin + assigned technician) with validation and audit trail.
+- **NEW (Phase L)**: Enforce standardized **Root Cause Analysis (5-Why)** governance:
+  - Auto-trigger RCA when downtime/duration exceeds threshold (default 30 min; admin-configurable).
+  - RCA requires structured 5-Why submission and cannot complete/close without it.
+  - RCA records link bidirectionally to originating Breakdown/Work Order and appear in timeline.
+- **NEW (Phase L)**: Provide **Admin-only Technician Analytics** in Plant Analytics:
+  - Enforced by backend role permissions (403 for non-admin), not just UI hiding.
+- **NEW (Phase L)**: Runtime is logged **per line** (not per machine) to compute availability correctly:
+  - Line-level runtime entry; machines inherit line runtime for reliability computations.
+- **NEW (Phase L)**: AWS supports Mechanical/Electrical/PLC category sorting/filtering:
+  - Category chips + per-machine failure category counts + dominant category.
 - Maintain **UI excellence without logic risk**:
   - Allow iterative UI polish improvements **without changing backend/frontend business logic**.
 
@@ -225,29 +235,163 @@
 
 ---
 
+### Phase L — RCA 5-Why Module + Technician Analytics + Line Runtime + AWS Category Sorting (P0)
+> This phase upgrades governance and analytics: enforce structured RCA, add admin-only technician analytics, correct runtime logging to line-level while maintaining machine reliability computations, and add failure-category sorting in AWS.
+
+#### L1) Root Cause Analysis (RCA) Module — Structured 5-Why + Auto-triggered RCA Work Order (P0)
+**Scope**
+- Replace the current “RCA follow-up” rule with a dedicated RCA module.
+- **Trigger conditions** (threshold from `reliability_settings.root_cause_downtime_minutes`, default 30):
+  - Breakdown downtime > threshold (existing trigger)
+  - **NEW:** Work Order duration > threshold on technician completion
+- **Auto-generated RCA Work Order**:
+  - `wo_type = 'RCA'` (new type)
+  - assigned to the **attending technician** (Breakdown.assigned_to or WO.assigned_to)
+  - lifecycle matches global governance: completion → `PENDING_ADMIN_CLOSURE` → admin close → `CLOSED`
+- **Mandatory RCA submission**:
+  - 5 sequential “Why did this happen?” fields
+  - final `root_cause` and `corrective_action`
+  - RCA WO cannot be completed unless all required fields are present (400).
+- **Linking & visibility**:
+  - RCA record linked back to origin (Breakdown and/or Work Order)
+  - appears in originating record’s detail view and timeline.
+
+**Backend Deliverables**
+- Work Order schema additions for RCA records:
+  - `wo_type: 'RCA'`
+  - `rca`: `{ why_1..why_5, final_root_cause, corrective_action, submitted_at, submitted_by }`
+  - linkage fields: `source_breakdown_id`, `source_work_order_id` (and reciprocal `rca_task_id` on origin)
+- New/updated endpoints:
+  - `PUT /api/work-orders/{wo_id}/rca` — submit/update RCA (admin or assigned tech only)
+  - `GET /api/work-orders/{wo_id}` — return WO + linked RCA summary (or linked origin summary when WO is RCA)
+  - Add RCA trigger logic:
+    - Breakdown close handler (already has downtime trigger): generate RCA WO of type RCA and set breakdown.rca_task_id
+    - Work Order completion handler: if duration > threshold and no existing RCA link, generate RCA WO and set work_order.rca_task_id
+- Timeline + notifications:
+  - create timeline events for RCA creation, submission, completion
+  - notify assigned technician when RCA is created
+  - notify admins when RCA is completed (parks at `PENDING_ADMIN_CLOSURE`).
+
+**Frontend Deliverables**
+- Add `RCA` into WO type filters (WorkOrders page).
+- New RCA form page:
+  - route: `/work-orders/rca/:woId`
+  - five Why fields with progressive unlock
+  - final Root Cause + Corrective Action
+  - submit button, validation, and cyberpunk styling.
+- Detail modal additions:
+  - show RCA summary/links for origin WOs
+  - if WO is RCA, show “Open RCA Form” action.
+- Breakdown details:
+  - show link to RCA WO when present.
+
+**Status:** 🔶 IN PROGRESS
+
+#### L2) Technician Analytics — Admin-only (P0)
+**Scope**
+- Add a new **Technician Analytics** section inside Analytics.
+- Must be **backend-enforced admin-only** (403 for non-admin).
+- Filters:
+  - `date_from`, `date_to`
+  - `line`, `department`
+  - `wo_type`
+
+**Backend Deliverables**
+- `GET /api/analytics/technicians` (Depends: `require_admin`)
+- Metrics per technician (from breakdowns, work_orders, pm_completions):
+  - total and average time per breakdown/WO/PM
+  - breakdown resolved count leaderboard
+  - average resolution/repair time
+  - WO completion count and on-time completion rate
+  - PM completion count and compliance rate.
+
+**Frontend Deliverables**
+- In `Analytics.jsx`, when `isAdmin`:
+  - render “Technician Analytics” panel/tab
+  - leaderboard table + KPI cards
+  - filter controls for date range + line/department + WO type.
+
+**Status:** 🔶 IN PROGRESS
+
+#### L3) Runtime logging per Line (not per Machine) + machine inheritance for Weibull/availability (P0)
+**Scope**
+- Runtime input becomes **line-level** (one entry per line/day).
+- Availability computed per line based on line run hours vs calendar hours.
+- Machines **inherit** their line runtime for reliability calculations (Weibull) without requiring machine-level entry.
+
+**Backend Deliverables**
+- New collection + endpoints:
+  - `line_runtime_logs`: `{ line, department, date, calendar_hours, run_hours, dark_hours, availability, entered_by, source, created_at }`
+  - `POST /api/runtime-logs` updated to accept `{ line, date, run_hours, calendar_hours }` (line-level)
+  - `GET /api/line-runtime-logs` for line entries
+  - CSV import updated to: `line, date, run_hours[, calendar_hours]`
+- Fan-out strategy to preserve existing metrics/Weibull compatibility:
+  - on write/import of a line log, generate/upsert per-machine `runtime_logs` rows for all machines in that line with `source='line'`
+  - Weibull and analytics continue to read from `runtime_logs` as before.
+
+**Frontend Deliverables**
+- Update `Runtime.jsx`:
+  - replace MachineSelect with a Line select
+  - show line runtime table and summary
+  - keep cyberpunk outlined controls.
+
+**Status:** 🔶 IN PROGRESS
+
+#### L4) AWS category sorting — Mechanical / Electrical / PLC (P0)
+**Scope**
+- Add category filter chips to AWS page.
+- Show per-machine failure-category distribution and dominant category.
+
+**Backend Deliverables**
+- Extend `GET /api/reliability/metrics` to attach:
+  - `failure_categories`: counts for `MECHANICAL`, `ELECTRICAL`, `CONTROL_PLC`
+  - `dominant_category`: max-count category (ties deterministic)
+- Optional query param support: `?category=MECHANICAL|ELECTRICAL|CONTROL_PLC`.
+
+**Frontend Deliverables**
+- Update `AWSPage.jsx`:
+  - add category filter chips
+  - add table column for dominant category + counts
+  - preserve existing health filter chips and admin settings panel.
+
+**Status:** 🔶 IN PROGRESS
+
+**Phase L Testing (planned)**
+- New backend test report `iteration_7.json`:
+  - RCA generation for breakdowns + long WOs
+  - RCA submission validation (mandatory 5-why)
+  - RCA lifecycle (complete → pending admin → admin close)
+  - technician analytics endpoint permissions and calculations
+  - runtime line log fan-out correctness + analytics availability consistency
+  - AWS category filters.
+- New frontend checks:
+  - RCA form progressive unlock + required fields
+  - admin-only technician analytics visible/enforced
+  - line runtime UI flows
+  - AWS category chips.
+
+---
+
 ## 3) Next Actions
-> All phases through J are complete. Remaining work is optional backlog only.
 
-### Completed (Prior Iterations) ✅
-- Removed infinite zoom in Control Room; enabled vertical scroll.
-- Replaced plant runtime clock display with wall-clock time.
-- Applied Cyberpunk HUD styling across all modules.
-- Verified Breakdown → auto-create WO end-to-end.
+### Immediate (P0)
+1) Implement **Phase L1** RCA module:
+- Add `RCA` WO type + data schema
+- Auto-trigger logic for breakdown close and long WO completion
+- RCA submission endpoint + UI form page
+- Bidirectional linking + timeline visibility
 
-### Phase I — Completed Work ✅
-- Warning records + yellow watch status + always-dispatched WO.
-- Report dialogs: no outside click/escape dismiss.
-- Cracked gear breakdown icon across app.
-- WO machine names are plain text (stats only via Control Room).
-- WO admin-closure governance implemented.
-- Operator/public breakdowns always auto-dispatch and auto-assign.
-- Work Orders Kanban default + PM route fix.
-- Dedicated Breakdown Repair page.
+2) Implement **Phase L2** Technician Analytics (admin-only):
+- Backend endpoint with filters + aggregations
+- Frontend admin-only panel
 
-### Phase J — Completed Work ✅
-- PM completion now parks linked PM Work Orders at **PENDING_ADMIN_CLOSURE** + admin notifications.
-- Work Orders support time edits (Start/End) with admin/assignee permission checks + validation.
-- Kanban card click opens a full WO detail modal with editable Start/End times and deep links.
+3) Implement **Phase L3** Line runtime:
+- Backend new line runtime collection + fan-out to machine runtime
+- Update runtime UI + CSV import format
+
+4) Implement **Phase L4** AWS category sorting:
+- Add category counts/dominant category to reliability metrics
+- Add AWS filter chips + table column
 
 ### Optional Next Enhancements (Future / Backlog)
 - Refactor: centralize admin-review notification logic for all WO sources (reduce duplication across endpoints).
@@ -310,7 +454,7 @@
 - ✅ PM Work Orders follow the same governance:
   - PM completion does **not** auto-close a WO
   - linked PM WO transitions to `PENDING_ADMIN_CLOSURE`
-  - admin notification targeted to `admin` role
+  - admin notification targeted to `admin` role.
 - ✅ Kanban has fast inspection + quick edits:
   - card click opens detail modal
   - Start/End time edits available to admin + assignee
@@ -318,10 +462,25 @@
 - ✅ Dedicated execution pages exist where required:
   - PM close-out page
   - Breakdown repair page.
+- ✅ **RCA module enforces structured 5-Why**:
+  - auto-generated RCA WO when downtime/duration exceeds threshold
+  - 5-Why + final root cause/corrective action required prior to completion
+  - RCA parks at `PENDING_ADMIN_CLOSURE` and requires admin closure
+  - RCA linked and visible from originating Breakdown/WO + timeline.
+- ✅ **Technician Analytics is admin-only**:
+  - backend endpoint returns 403 to non-admins
+  - metrics match definitions and are filterable.
+- ✅ **Runtime logged per line**:
+  - line availability computed from line logs
+  - machines inherit line runtime for Weibull/analytics without per-machine entry.
+- ✅ **AWS category sorting exists**:
+  - filter chips for Mechanical/Electrical/PLC
+  - per-machine category counts + dominant category visible.
 - ✅ UI polish improvements do not introduce logic regressions:
-  - reduced-motion users respected
+  - reduced-motion users respected.
 - ✅ All changes validated by test reports:
   - Phase E: `/app/test_reports/iteration_3.json`
   - Phase F: `/app/test_reports/iteration_4.json`
   - Phase I: `/app/test_reports/iteration_5.json`
   - Phase J: `/app/test_reports/iteration_6.json`
+  - Phase L (planned): `/app/test_reports/iteration_7.json`

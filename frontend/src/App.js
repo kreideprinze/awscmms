@@ -11,6 +11,7 @@ import RepairBreakdown from '@/pages/RepairBreakdown';
 import WorkOrders from '@/pages/WorkOrders';
 import PreventiveMaintenance from '@/pages/PreventiveMaintenance';
 import ClosePMTask from '@/pages/ClosePMTask';
+import RcaForm from '@/pages/RcaForm';
 import Analytics from '@/pages/Analytics';
 import Runtime from '@/pages/Runtime';
 import Inventory from '@/pages/Inventory';
@@ -32,6 +33,7 @@ function AppRoutes() {
       <Route path="/breakdowns" element={<Protected><Breakdowns /></Protected>} />
       <Route path="/breakdowns/repair/:breakdownId" element={<Protected roles={['admin', 'technician']}><RepairBreakdown /></Protected>} />
       <Route path="/work-orders" element={<Protected roles={['admin', 'technician']}><WorkOrders /></Protected>} />
+      <Route path="/work-orders/rca/:woId" element={<Protected roles={['admin', 'technician']}><RcaForm /></Protected>} />
       <Route path="/preventive-maintenance" element={<Protected roles={['admin', 'technician']}><PreventiveMaintenance /></Protected>} />
       <Route path="/preventive-maintenance/close/:taskId" element={<Protected roles={['admin', 'technician']}><ClosePMTask /></Protected>} />
       <Route path="/analytics" element={<Protected><Analytics /></Protected>} />

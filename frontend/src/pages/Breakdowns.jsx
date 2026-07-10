@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Search, AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, AlertTriangle, GitBranch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -62,7 +63,8 @@ function WarningsView() {
 }
 
 export default function Breakdowns() {
-  const { openMachine, liveFeed } = useApp();
+  const { openMachine, liveFeed, isTech } = useApp();
+  const navigate = useNavigate();
   const [data, setData] = useState({ items: [], total: 0 });
   const [status, setStatus] = useState('all');
   const [search, setSearch] = useState('');
@@ -172,6 +174,13 @@ export default function Breakdowns() {
                       <div className="mt-1 text-[11px] text-muted-foreground">Reported by {bd.reporter}{bd.work_order_number ? ` · auto WO: ${bd.work_order_number}` : ''}</div>
                       {bd.root_cause && <div className="mt-1 text-xs"><span className="text-muted-foreground">Root cause:</span> {bd.root_cause}</div>}
                       {bd.action_taken && <div className="mt-1 text-xs"><span className="text-muted-foreground">Action taken:</span> {bd.action_taken}</div>}
+                      {bd.rca_task_id && isTech && (
+                        <button data-testid={`breakdown-rca-link-${bd.ticket_number}`}
+                          onClick={(e) => { e.stopPropagation(); navigate(`/work-orders/rca/${bd.rca_task_id}`); }}
+                          className="mt-1.5 flex items-center gap-1 border border-[#ff2e63]/50 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-[#ff2e63] transition-colors hover:bg-[#ff2e63]/10">
+                          <GitBranch className="h-3 w-3" /> 5-Why RCA Linked — Open
+                        </button>
+                      )}
                       {bd.consumed_spares?.length > 0 && (
                         <div className="mt-1 text-xs"><span className="text-muted-foreground">Spares:</span> {bd.consumed_spares.map((s) => `${s.material_name || s.sap_code} ×${s.quantity}`).join(', ')}</div>
                       )}

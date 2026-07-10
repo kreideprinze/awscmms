@@ -1,22 +1,42 @@
 [
   {
-    "content": "Backend: PM completion transitions linked WO to PENDING_ADMIN_CLOSURE + admin notification",
+    "content": "L1 Backend: RCA helper + wo_type='RCA' + WO-duration trigger + RCA submission endpoint + completion enforcement + GET single WO",
     "status": "completed"
   },
   {
-    "content": "Backend: extend WO update action to support editing started_at/completed_at (admin or assigned tech)",
+    "content": "L2 Backend: GET /api/analytics/technicians (admin-only) with filters",
     "status": "completed"
   },
   {
-    "content": "Frontend: Kanban card detail popout modal with editable Start/End times",
+    "content": "L3 Backend: line-level runtime logging + fan-out + line CSV import + GET /line-runtime-logs",
     "status": "completed"
   },
   {
-    "content": "Build check + backend curl verification",
+    "content": "L4 Backend: failure_categories + dominant_category + category filter in /reliability/metrics",
+    "status": "completed"
+  },
+  {
+    "content": "L1 Frontend: RcaForm page + route + WorkOrders RCA integration + Breakdowns RCA link",
+    "status": "completed"
+  },
+  {
+    "content": "L2 Frontend: Technician Analytics admin section in Analytics.jsx",
+    "status": "completed"
+  },
+  {
+    "content": "L3 Frontend: Runtime.jsx line-based entry + CSV format",
+    "status": "completed"
+  },
+  {
+    "content": "L4 Frontend: AWS category chips + counts column",
+    "status": "completed"
+  },
+  {
+    "content": "Build check + backend smoke tests",
     "status": "completed"
   },
   {
     "content": "Comprehensive testing via testing agent",
-    "status": "completed"
+    "status": "in_progress"
   }
 ]

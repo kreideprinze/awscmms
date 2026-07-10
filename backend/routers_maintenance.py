@@ -50,6 +50,36 @@ async def _pick_technician():
     return min(counts, key=counts.get)
 
 
+async def _create_rca_wo(machine_id, machine_name, department, line, tech, origin_label, origin_desc,
+                         source_breakdown_id=None, source_work_order_id=None):
+    """Create an auto-triggered 5-Why RCA work order assigned to the attending technician.
+    RCA WOs follow the standard lifecycle but cannot be completed without a full 5-Why submission."""
+    wo_num = await next_counter('work_orders', 'WO')
+    rca_wo = {
+        'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'RCA',
+        'title': f"5-Why RCA \u2014 {machine_name} ({origin_label})",
+        'description': origin_desc,
+        'machine_id': machine_id, 'machine_name': machine_name,
+        'department': department, 'line': line,
+        'assigned_to': tech, 'priority': 'high', 'status': 'ASSIGNED' if tech else 'OPEN',
+        'root_cause': None, 'action_taken': None, 'spare_parts': [],
+        'duration_minutes': None, 'source': 'rca_auto', 'rca': None,
+        'source_breakdown_id': source_breakdown_id, 'source_work_order_id': source_work_order_id,
+        'auto_generated': True, 'created_at': now_iso(),
+    }
+    await db.work_orders.insert_one(dict(rca_wo))
+    await create_notification('work_order', f"RCA Required: {machine_name}",
+                              f"{wo_num} \u2014 5-Why root cause analysis assigned to {tech or 'unassigned'} ({origin_label})",
+                              severity='warning', machine_id=machine_id, machine_name=machine_name,
+                              reference_id=rca_wo['id'], reference_type='work_order')
+    await create_timeline_event('rca_triggered', machine_id=machine_id, machine_name=machine_name,
+                                title=f"RCA {wo_num} auto-assigned to {tech or 'unassigned'}",
+                                description=origin_desc, user='system',
+                                reference_id=rca_wo['id'], reference_type='work_order', department=department, line=line)
+    rca_wo.pop('_id', None)
+    return rca_wo
+
+
 async def _create_breakdown_internal(machine_id: str, description: str, failure_mode: str, reporter: str,
                                      start_time: str = None, breakdown_type: str = 'MECHANICAL',
                                      auto_create_work_order: bool = True):
@@ -255,31 +285,16 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         if consumed:
             updates['consumed_spares'] = (bd.get('consumed_spares') or []) + consumed
 
-        # 30-min rule: auto follow-up RCA task for attending technician
+        # RCA rule: downtime above threshold auto-triggers a 5-Why RCA WO for the attending technician
         rca_task_id = bd.get('rca_task_id')
         if downtime > rc_threshold and not rca_task_id:
             tech = bd.get('assigned_to') or user['username']
-            wo_num = await next_counter('work_orders', 'WO')
-            rca_wo = {
-                'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Inspection',
-                'title': f"Root Cause Analysis \u2014 {bd['machine_name']} ({bd['ticket_number']})",
-                'description': f"Auto-generated follow-up: breakdown {bd['ticket_number']} downtime {downtime:.0f} min exceeded {rc_threshold} min. Submit detailed root-cause analysis for this machine.",
-                'machine_id': bd['machine_id'], 'machine_name': bd['machine_name'],
-                'department': bd['department'], 'line': bd['line'],
-                'assigned_to': tech, 'priority': 'high', 'status': 'ASSIGNED',
-                'root_cause': None, 'action_taken': None, 'spare_parts': [],
-                'duration_minutes': None, 'source': 'rca_followup', 'source_breakdown_id': bd_id,
-                'auto_generated': True, 'created_at': now_iso(),
-            }
-            await db.work_orders.insert_one(dict(rca_wo))
+            rca_wo = await _create_rca_wo(
+                bd['machine_id'], bd['machine_name'], bd['department'], bd['line'], tech,
+                origin_label=bd['ticket_number'],
+                origin_desc=f"Auto-triggered RCA: breakdown {bd['ticket_number']} downtime {downtime:.0f} min exceeded {rc_threshold:.0f} min threshold. Complete the structured 5-Why analysis.",
+                source_breakdown_id=bd_id)
             updates['rca_task_id'] = rca_wo['id']
-            await create_notification('work_order', f"RCA Task Assigned: {bd['machine_name']}",
-                                      f"{wo_num} \u2014 Detailed root-cause submission required for {bd['ticket_number']} (downtime {downtime:.0f} min)",
-                                      severity='warning', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
-                                      reference_id=rca_wo['id'], reference_type='work_order')
-            await create_timeline_event('wo_assigned', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
-                                        title=f"RCA follow-up {wo_num} auto-assigned to {tech}", user='system',
-                                        reference_id=rca_wo['id'], reference_type='work_order', department=bd['department'], line=bd['line'])
 
         await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
         # repair event record
@@ -410,6 +425,12 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
     if req.action in ('complete', 'close'):
         if req.action == 'close' and user.get('role') != 'admin':
             raise HTTPException(status_code=403, detail='Only an Admin can close a work order (final closure requires admin review)')
+        # RCA governance: an RCA work order cannot be completed/closed without a full 5-Why submission
+        if wo.get('wo_type') == 'RCA':
+            rca = wo.get('rca') or {}
+            whys = [w for w in (rca.get('whys') or []) if str(w or '').strip()]
+            if len(whys) < 5 or not str(rca.get('root_cause') or '').strip() or not str(rca.get('corrective_action') or '').strip():
+                raise HTTPException(status_code=400, detail='RCA work order cannot be completed: submit all 5 Whys, the final Root Cause and Corrective Action first')
         spares = [s.model_dump() for s in (req.spare_parts or [])]
         if spares:
             from routers_spares import consume_spares
@@ -454,6 +475,27 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                 await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'running'}})
                 machine['status'] = 'running'
                 await broadcast_machine_update(machine)
+
+        # RCA rule: WO duration above threshold auto-triggers a 5-Why RCA WO for the attending technician
+        # (skipped for RCA WOs themselves, and when the originating breakdown already triggered one)
+        if req.action == 'complete' and wo.get('wo_type') != 'RCA' and not wo.get('rca_task_id'):
+            settings = await db.settings.find_one({'id': 'reliability_settings'}, {'_id': 0}) or {}
+            rc_threshold = settings.get('root_cause_downtime_minutes', 30)
+            if (duration or 0) > rc_threshold:
+                already = False
+                if wo.get('source_breakdown_id'):
+                    origin_bd = await db.breakdowns.find_one({'id': wo['source_breakdown_id']}, {'_id': 0, 'rca_task_id': 1})
+                    already = bool(origin_bd and origin_bd.get('rca_task_id'))
+                if not already:
+                    tech = wo.get('assigned_to') or user['username']
+                    rca_wo = await _create_rca_wo(
+                        wo['machine_id'], wo['machine_name'], wo.get('department'), wo.get('line'), tech,
+                        origin_label=wo['wo_number'],
+                        origin_desc=f"Auto-triggered RCA: work order {wo['wo_number']} duration {duration:.0f} min exceeded {rc_threshold:.0f} min threshold. Complete the structured 5-Why analysis.",
+                        source_work_order_id=wo_id, source_breakdown_id=wo.get('source_breakdown_id'))
+                    await db.work_orders.update_one({'id': wo_id}, {'$set': {'rca_task_id': rca_wo['id']}})
+                    if wo.get('source_breakdown_id'):
+                        await db.breakdowns.update_one({'id': wo['source_breakdown_id']}, {'$set': {'rca_task_id': rca_wo['id']}})
 
         await create_timeline_event('wo_completed', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
                                     title=f"WO {wo['wo_number']} {'completed — awaiting admin closure' if req.action == 'complete' else 'closed'}",
@@ -501,6 +543,64 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
         return {'ok': True, 'work_order': updated}
 
     raise HTTPException(status_code=400, detail='Invalid action')
+
+
+# ============ ROOT CAUSE ANALYSIS (5-WHY) ============
+class RCASubmit(BaseModel):
+    whys: List[str]  # exactly 5 sequential "Why did this happen?" answers
+    root_cause: str
+    corrective_action: str
+
+
+@router.put('/work-orders/{wo_id}/rca')
+async def submit_rca(wo_id: str, req: RCASubmit, user: dict = Depends(require_admin_or_tech)):
+    """Submit/update the structured 5-Why analysis on an RCA work order.
+    Restricted to Admins or the assigned technician. All 5 Whys + Root Cause + Corrective Action are mandatory."""
+    wo = await db.work_orders.find_one({'id': wo_id}, {'_id': 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail='Work order not found')
+    if wo.get('wo_type') != 'RCA':
+        raise HTTPException(status_code=400, detail='This work order is not an RCA work order')
+    if wo.get('status') in ('PENDING_ADMIN_CLOSURE', 'CLOSED'):
+        raise HTTPException(status_code=400, detail='RCA already completed — cannot be edited')
+    if user.get('role') != 'admin' and wo.get('assigned_to') != user['username']:
+        raise HTTPException(status_code=403, detail='Only an Admin or the assigned technician can submit this RCA')
+    whys = [str(w or '').strip() for w in (req.whys or [])]
+    if len(whys) != 5 or any(not w for w in whys):
+        raise HTTPException(status_code=400, detail='All five sequential "Why" answers are required')
+    root_cause = req.root_cause.strip()
+    corrective = req.corrective_action.strip()
+    if not root_cause or not corrective:
+        raise HTTPException(status_code=400, detail='Final Root Cause and Corrective Action are required')
+    rca = {'whys': whys, 'root_cause': root_cause, 'corrective_action': corrective,
+           'submitted_by': user['username'], 'submitted_at': now_iso()}
+    await db.work_orders.update_one({'id': wo_id}, {'$set': {
+        'rca': rca, 'root_cause': root_cause, 'action_taken': corrective,
+    }})
+    await create_timeline_event('rca_submitted', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                title=f"5-Why RCA submitted for {wo['wo_number']}", description=f"Root cause: {root_cause}",
+                                user=user['username'], reference_id=wo_id, reference_type='work_order',
+                                department=wo.get('department'), line=wo.get('line'))
+    updated = await db.work_orders.find_one({'id': wo_id}, {'_id': 0})
+    return {'ok': True, 'work_order': updated}
+
+
+@router.get('/work-orders/{wo_id}')
+async def get_work_order(wo_id: str, user: dict = Depends(require_admin_or_tech)):
+    """Single WO detail — includes linked RCA summary (for origin WOs) or origin references (for RCA WOs)."""
+    wo = await db.work_orders.find_one({'id': wo_id}, {'_id': 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail='Work order not found')
+    if wo.get('rca_task_id'):
+        wo['rca_work_order'] = await db.work_orders.find_one(
+            {'id': wo['rca_task_id']}, {'_id': 0, 'id': 1, 'wo_number': 1, 'status': 1, 'rca': 1, 'assigned_to': 1})
+    if wo.get('source_breakdown_id'):
+        wo['origin_breakdown'] = await db.breakdowns.find_one(
+            {'id': wo['source_breakdown_id']}, {'_id': 0, 'id': 1, 'ticket_number': 1, 'status': 1, 'downtime_minutes': 1, 'description': 1})
+    if wo.get('source_work_order_id'):
+        wo['origin_work_order'] = await db.work_orders.find_one(
+            {'id': wo['source_work_order_id']}, {'_id': 0, 'id': 1, 'wo_number': 1, 'status': 1, 'title': 1, 'duration_minutes': 1})
+    return wo
 
 
 # ============ PREVENTIVE MAINTENANCE ============

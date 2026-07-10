@@ -11,19 +11,30 @@ import { HealthBadge, fmtDate } from '@/components/StatusBits';
 import { KpiCard } from '@/components/Shared';
 
 const HEALTH_FILTERS = ['all', 'healthy', 'watch', 'inspection_due', 'overdue'];
+const CATEGORY_FILTERS = [
+  { key: 'all', label: 'All Categories' },
+  { key: 'MECHANICAL', label: 'Mechanical' },
+  { key: 'ELECTRICAL', label: 'Electrical' },
+  { key: 'CONTROL_PLC', label: 'PLC / Control' },
+];
+const CAT_COLOR = { MECHANICAL: '#00fff5', ELECTRICAL: '#f9f871', CONTROL_PLC: '#ff2e63' };
+const CAT_SHORT = { MECHANICAL: 'MEC', ELECTRICAL: 'ELE', CONTROL_PLC: 'PLC' };
 
 export default function AWSPage() {
   const { openMachine, isAdmin } = useApp();
   const [metrics, setMetrics] = useState([]);
   const [health, setHealth] = useState('all');
+  const [category, setCategory] = useState('all');
   const [settings, setSettings] = useState(null);
   const [savingSettings, setSavingSettings] = useState(false);
 
   const load = useCallback(() => {
-    const q = health === 'all' ? '' : `?health=${health}`;
-    api.get(`/reliability/metrics${q}`).then((r) => setMetrics(r.data));
+    const params = new URLSearchParams();
+    if (health !== 'all') params.set('health', health);
+    if (category !== 'all') params.set('category', category);
+    api.get(`/reliability/metrics?${params}`).then((r) => setMetrics(r.data));
     api.get('/reliability/settings').then((r) => setSettings(r.data));
-  }, [health]);
+  }, [health, category]);
   useEffect(() => { load(); }, [load]);
 
   const recompute = async () => {
@@ -75,11 +86,18 @@ export default function AWSPage() {
         <KpiCard testId="aws-kpi-weibull" label="Weibull Active (L3)" value={counts.weibull} accent="text-[hsl(var(--primary))]" />
       </div>
 
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         {HEALTH_FILTERS.map((h) => (
           <button key={h} data-testid={`aws-health-filter-${h}`} onClick={() => setHealth(h)}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors capitalize ${health === h ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {h.replace('_', ' ')}
+          </button>
+        ))}
+        <span className="mx-1 text-border">|</span>
+        {CATEGORY_FILTERS.map((c) => (
+          <button key={c.key} data-testid={`aws-category-filter-${c.key}`} onClick={() => setCategory(c.key)}
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${category === c.key ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            {c.label}
           </button>
         ))}
       </div>
@@ -91,6 +109,7 @@ export default function AWSPage() {
               <TableHead className="text-xs uppercase">Machine</TableHead>
               <TableHead className="text-xs uppercase">Level</TableHead>
               <TableHead className="text-xs uppercase">Tier</TableHead>
+              <TableHead className="text-xs uppercase">Failure Category</TableHead>
               <TableHead className="text-xs uppercase">MTBF</TableHead>
               <TableHead className="text-xs uppercase">Predicted Life</TableHead>
               <TableHead className="text-xs uppercase">Hours Since Failure</TableHead>
@@ -101,7 +120,7 @@ export default function AWSPage() {
           </TableHeader>
           <TableBody>
             {metrics.length === 0 && (
-              <TableRow><TableCell colSpan={9} className="py-10 text-center text-muted-foreground">No reliability data yet. Metrics appear immediately after the first recorded breakdown.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">No reliability data yet. Metrics appear immediately after the first recorded breakdown.</TableCell></TableRow>
             )}
             {metrics.map((m) => (
               <TableRow key={m.machine_id} data-testid={`aws-row-${m.machine_id}`} className="border-border hover:bg-white/[0.03]">
@@ -111,6 +130,19 @@ export default function AWSPage() {
                 </TableCell>
                 <TableCell className="text-sm">L{m.level} <span className="text-[10px] text-muted-foreground">({m.failures_count}f)</span></TableCell>
                 <TableCell className="text-xs capitalize">{m.tier}</TableCell>
+                <TableCell data-testid={`aws-category-${m.machine_id}`}>
+                  {m.dominant_category ? (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {Object.entries(m.failure_categories || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => (
+                        <span key={c} title={`${c}: ${n} failure(s)`}
+                          className={`border px-1 py-px font-mono text-[9px] uppercase tracking-wide ${c === m.dominant_category ? 'font-semibold' : 'opacity-50'}`}
+                          style={{ borderColor: `${CAT_COLOR[c] || '#888'}66`, color: CAT_COLOR[c] || '#888' }}>
+                          {CAT_SHORT[c] || c} {n}
+                        </span>
+                      ))}
+                    </div>
+                  ) : <span className="text-xs text-muted-foreground">—</span>}
+                </TableCell>
                 <TableCell className="tabular-nums text-sm">{m.mtbf}h</TableCell>
                 <TableCell className="tabular-nums text-sm">{m.predicted_failure_life}h</TableCell>
                 <TableCell className="tabular-nums text-sm">{m.hours_since_last_failure}h</TableCell>

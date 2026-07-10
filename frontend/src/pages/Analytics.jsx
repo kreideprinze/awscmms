@@ -1,10 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts';
+import { ShieldCheck, Trophy } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { KpiCard, MachineSelect } from '@/components/Shared';
 
 const chartTheme = {
@@ -21,8 +25,128 @@ const LEVELS = [
   { key: 'machine', label: 'Machine' },
 ];
 
+const WO_TYPES = ['all', 'Corrective', 'Preventive', 'Inspection', 'RCA'];
+const fmtMin = (v) => (v == null ? '—' : `${v} min`);
+const fmtPct = (v) => (v == null ? '—' : `${v}%`);
+
+// Admin-only technician performance section. The API itself is role-guarded (403 for non-admins).
+function TechnicianAnalytics({ hierarchy }) {
+  const [rows, setRows] = useState([]);
+  const [target, setTarget] = useState(30);
+  const [loading, setLoading] = useState(false);
+  const [filters, setFilters] = useState({ date_from: '', date_to: '', line: 'all', department: 'all', wo_type: 'all' });
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (filters.date_from) params.set('date_from', filters.date_from);
+    if (filters.date_to) params.set('date_to', filters.date_to);
+    if (filters.line !== 'all') params.set('line', filters.line);
+    if (filters.department !== 'all') params.set('department', filters.department);
+    if (filters.wo_type !== 'all') params.set('wo_type', filters.wo_type);
+    api.get(`/analytics/technicians?${params}`).then((r) => {
+      setRows(r.data.technicians || []);
+      setTarget(r.data.on_time_target_minutes);
+    }).finally(() => setLoading(false));
+  }, [filters]);
+  useEffect(() => { load(); }, [load]);
+
+  const top = rows[0];
+
+  return (
+    <div className="mt-8" data-testid="technician-analytics-section">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <ShieldCheck className="h-5 w-5 text-[hsl(var(--primary))]" />
+        <h2 className="text-lg font-semibold tracking-tight">Technician Analytics</h2>
+        <span className="border border-[#ff9e1c]/50 px-1.5 py-px font-mono text-[9px] uppercase tracking-widest text-[#ff9e1c]">Admin Only</span>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <div>
+          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">From</Label>
+          <Input type="date" data-testid="tech-filter-from" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} className="w-40 bg-[hsl(var(--panel-2))]" />
+        </div>
+        <div>
+          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">To</Label>
+          <Input type="date" data-testid="tech-filter-to" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} className="w-40 bg-[hsl(var(--panel-2))]" />
+        </div>
+        <div>
+          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Line</Label>
+          <Select value={filters.line} onValueChange={(v) => setFilters({ ...filters, line: v })}>
+            <SelectTrigger data-testid="tech-filter-line" className="w-44 bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">All Lines</SelectItem>{hierarchy.lines.map((l) => <SelectItem key={l.name} value={l.name}>{l.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Department</Label>
+          <Select value={filters.department} onValueChange={(v) => setFilters({ ...filters, department: v })}>
+            <SelectTrigger data-testid="tech-filter-department" className="w-44 bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">All Departments</SelectItem>{hierarchy.departments.map((d) => <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">WO Type</Label>
+          <Select value={filters.wo_type} onValueChange={(v) => setFilters({ ...filters, wo_type: v })}>
+            <SelectTrigger data-testid="tech-filter-wo-type" className="w-36 bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
+            <SelectContent>{WO_TYPES.map((t) => <SelectItem key={t} value={t}>{t === 'all' ? 'All Types' : t}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {top && (
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <KpiCard testId="tech-kpi-top" label="Top Breakdown Handler" value={top.name} accent="text-[hsl(var(--primary))]" sub={`${top.breakdowns_resolved} resolved`} />
+          <KpiCard testId="tech-kpi-active" label="Technicians Active" value={rows.filter((r) => r.breakdowns_resolved || r.wo_completed || r.pm_completed).length} />
+          <KpiCard testId="tech-kpi-total-hours" label="Total Logged Effort" value={`${rows.reduce((n, r) => n + (r.total_hours || 0), 0).toFixed(1)}h`} />
+          <KpiCard testId="tech-kpi-target" label="On-Time Target" value={`≤ ${target} min`} sub="per work order" />
+        </div>
+      )}
+
+      <div className="overflow-hidden border border-border">
+        <Table data-testid="technician-analytics-table">
+          <TableHeader>
+            <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
+              <TableHead className="text-xs uppercase">#</TableHead>
+              <TableHead className="text-xs uppercase">Technician</TableHead>
+              <TableHead className="text-xs uppercase">Breakdowns Resolved</TableHead>
+              <TableHead className="text-xs uppercase">Avg Repair</TableHead>
+              <TableHead className="text-xs uppercase">WO Completed</TableHead>
+              <TableHead className="text-xs uppercase">WO Avg Time</TableHead>
+              <TableHead className="text-xs uppercase">WO On-Time</TableHead>
+              <TableHead className="text-xs uppercase">PM Completed</TableHead>
+              <TableHead className="text-xs uppercase">PM Compliance</TableHead>
+              <TableHead className="text-xs uppercase">Total Time</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading && <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">Computing technician metrics…</TableCell></TableRow>}
+            {!loading && rows.length === 0 && <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">No technician activity in the selected window</TableCell></TableRow>}
+            {!loading && rows.map((r) => (
+              <TableRow key={r.technician} data-testid={`tech-row-${r.technician}`} className="border-border hover:bg-white/[0.03]">
+                <TableCell className="font-mono text-xs">
+                  {r.rank === 1 ? <Trophy className="h-3.5 w-3.5 text-[#f9f871]" /> : r.rank}
+                </TableCell>
+                <TableCell><div className="text-sm font-medium">{r.name}</div><div className="font-mono text-[10px] text-muted-foreground">{r.technician}</div></TableCell>
+                <TableCell className="tabular-nums text-sm text-[#ff2e63]">{r.breakdowns_resolved}</TableCell>
+                <TableCell className="tabular-nums text-sm">{fmtMin(r.avg_repair_minutes)}</TableCell>
+                <TableCell className="tabular-nums text-sm">{r.wo_completed}</TableCell>
+                <TableCell className="tabular-nums text-sm">{fmtMin(r.wo_avg_minutes)}</TableCell>
+                <TableCell className={`tabular-nums text-sm ${r.wo_on_time_rate != null ? (r.wo_on_time_rate >= 80 ? 'text-[#05ffa1]' : r.wo_on_time_rate >= 50 ? 'text-[#f9f871]' : 'text-[#ff2e63]') : ''}`}>{fmtPct(r.wo_on_time_rate)}</TableCell>
+                <TableCell className="tabular-nums text-sm">{r.pm_completed}</TableCell>
+                <TableCell className={`tabular-nums text-sm ${r.pm_compliance_rate != null ? (r.pm_compliance_rate >= 80 ? 'text-[#05ffa1]' : 'text-[#f9f871]') : ''}`}>{fmtPct(r.pm_compliance_rate)}</TableCell>
+                <TableCell className="tabular-nums text-sm">{r.total_hours}h</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">WO On-Time = completed within the configured {target}-minute target (Reliability Rules → Root Cause threshold). PM Compliance = completions on/before due date.</p>
+    </div>
+  );
+}
+
 export default function Analytics() {
-  const { openMachine } = useApp();
+  const { openMachine, isAdmin } = useApp();
   const [level, setLevel] = useState('plant');
   const [value, setValue] = useState('');
   const [hierarchy, setHierarchy] = useState({ departments: [], lines: [], process_groups: [] });
@@ -156,6 +280,8 @@ export default function Analytics() {
           </div>
         </>
       )}
+
+      {isAdmin && <TechnicianAnalytics hierarchy={hierarchy} />}
     </div>
   );
 }

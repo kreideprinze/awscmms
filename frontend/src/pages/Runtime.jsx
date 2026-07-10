@@ -8,34 +8,44 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { MachineSelect, KpiCard } from '@/components/Shared';
+import { KpiCard } from '@/components/Shared';
 
+// Runtime is logged PER LINE (one entry per line per day). Line availability = run/calendar.
+// Machines inherit their line's runtime automatically for Weibull/reliability computations.
 export default function Runtime() {
-  const { isAdmin, openMachine } = useApp();
+  const { isAdmin } = useApp();
   const [data, setData] = useState({ items: [], total: 0 });
+  const [lines, setLines] = useState([]);
+  const [lineFilter, setLineFilter] = useState('all');
   const [entryOpen, setEntryOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [form, setForm] = useState({ machine_id: '', date: new Date().toISOString().slice(0, 10), calendar_hours: 24, run_hours: '' });
+  const [form, setForm] = useState({ line: '', date: new Date().toISOString().slice(0, 10), calendar_hours: 24, run_hours: '' });
   const [csvText, setCsvText] = useState('');
   const [preview, setPreview] = useState(null);
   const [summary, setSummary] = useState({ run: 0, cal: 0 });
 
+  useEffect(() => {
+    api.get('/hierarchy').then((r) => setLines((r.data.lines || []).map((l) => l.name)));
+  }, []);
+
   const load = useCallback(() => {
-    api.get('/runtime-logs?limit=500').then((r) => {
+    const q = lineFilter !== 'all' ? `&line=${encodeURIComponent(lineFilter)}` : '';
+    api.get(`/line-runtime-logs?limit=500${q}`).then((r) => {
       setData(r.data);
       const run = r.data.items.reduce((n, x) => n + x.run_hours, 0);
       const cal = r.data.items.reduce((n, x) => n + x.calendar_hours, 0);
       setSummary({ run: Math.round(run), cal: Math.round(cal) });
     });
-  }, []);
+  }, [lineFilter]);
   useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
-    if (!form.machine_id || form.run_hours === '') { toast.error('Machine and run hours required'); return; }
+    if (!form.line || form.run_hours === '') { toast.error('Line and run hours required'); return; }
     try {
-      await api.post('/runtime-logs', { ...form, calendar_hours: parseFloat(form.calendar_hours), run_hours: parseFloat(form.run_hours) });
-      toast.success('Runtime log saved');
+      const res = await api.post('/runtime-logs', { ...form, calendar_hours: parseFloat(form.calendar_hours), run_hours: parseFloat(form.run_hours) });
+      toast.success(`Line runtime saved — ${res.data.machines_count} machines inherit ${res.data.run_hours}h`);
       setEntryOpen(false); setForm({ ...form, run_hours: '' });
       load();
     } catch (e) { toast.error(errMsg(e)); }
@@ -51,7 +61,7 @@ export default function Runtime() {
   const doApply = async () => {
     try {
       const res = await api.post('/runtime-logs/import', { csv_text: csvText, apply: true });
-      toast.success(`Imported ${res.data.imported} runtime rows`);
+      toast.success(`Imported ${res.data.imported} line runtime rows (${res.data.machines_affected} machines updated)`);
       setImportOpen(false); setPreview(null); setCsvText('');
       load();
     } catch (e) { toast.error(errMsg(e)); }
@@ -63,8 +73,8 @@ export default function Runtime() {
     <div className="p-6" data-testid="runtime-page">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Runtime Tracking</h1>
-          <p className="text-sm text-muted-foreground">Calendar Hours · Run Hours · Dark Hours · Availability = Run ÷ Calendar × 100</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Runtime Tracking — Per Line</h1>
+          <p className="text-sm text-muted-foreground">One entry per line per day · Availability = Run ÷ Calendar × 100 · Machines inherit line runtime for reliability</p>
         </div>
         {isAdmin && (
           <div className="flex gap-2">
@@ -72,17 +82,26 @@ export default function Runtime() {
               <Upload className="mr-1 h-4 w-4" /> CSV Import
             </Button>
             <Button data-testid="runtime-entry-button" onClick={() => setEntryOpen(true)} className="bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">
-              <Plus className="mr-1 h-4 w-4" /> Log Runtime
+              <Plus className="mr-1 h-4 w-4" /> Log Line Runtime
             </Button>
           </div>
         )}
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <KpiCard testId="runtime-kpi-records" label="Records" value={data.total} />
+        <KpiCard testId="runtime-kpi-records" label="Line Records" value={data.total} />
         <KpiCard testId="runtime-kpi-run" label="Run Hours" value={`${summary.run}h`} accent="text-[#05ffa1]" />
         <KpiCard testId="runtime-kpi-dark" label="Dark Hours" value={`${summary.cal - summary.run}h`} />
         <KpiCard testId="runtime-kpi-availability" label="Availability" value={avail != null ? `${avail}%` : '—'} accent="text-[hsl(var(--primary))]" />
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {['all', ...lines].map((l) => (
+          <button key={l} onClick={() => setLineFilter(l)} data-testid={`runtime-line-filter-${l}`}
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${lineFilter === l ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            {l === 'all' ? 'All Lines' : l}
+          </button>
+        ))}
       </div>
 
       <div className="overflow-hidden border border-border">
@@ -90,8 +109,9 @@ export default function Runtime() {
           <TableHeader>
             <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
               <TableHead className="text-xs uppercase">Date</TableHead>
-              <TableHead className="text-xs uppercase">Machine</TableHead>
               <TableHead className="text-xs uppercase">Line</TableHead>
+              <TableHead className="text-xs uppercase">Department</TableHead>
+              <TableHead className="text-xs uppercase">Machines</TableHead>
               <TableHead className="text-xs uppercase">Calendar h</TableHead>
               <TableHead className="text-xs uppercase">Run h</TableHead>
               <TableHead className="text-xs uppercase">Dark h</TableHead>
@@ -100,12 +120,13 @@ export default function Runtime() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.items.length === 0 && <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No runtime logs yet. Admins can log manually or import CSV.</TableCell></TableRow>}
+            {data.items.length === 0 && <TableRow><TableCell colSpan={9} className="py-10 text-center text-muted-foreground">No line runtime logs yet. Admins can log manually or import CSV.</TableCell></TableRow>}
             {data.items.map((r) => (
-              <TableRow key={r.id} className="border-border hover:bg-white/[0.03]">
+              <TableRow key={r.id} data-testid={`runtime-row-${r.line}-${r.date}`} className="border-border hover:bg-white/[0.03]">
                 <TableCell className="font-mono text-xs">{r.date}</TableCell>
-                <TableCell><button className="text-sm hover:text-[hsl(var(--primary))]" onClick={() => openMachine(r.machine_id)}>{r.machine_name}</button></TableCell>
-                <TableCell className="text-xs">{r.line}</TableCell>
+                <TableCell className="text-sm font-medium">{r.line}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{r.department}</TableCell>
+                <TableCell className="tabular-nums text-xs text-muted-foreground">{r.machines_count ?? '—'}</TableCell>
                 <TableCell className="tabular-nums text-sm">{r.calendar_hours}</TableCell>
                 <TableCell className="tabular-nums text-sm text-[#05ffa1]">{r.run_hours}</TableCell>
                 <TableCell className="tabular-nums text-sm">{r.dark_hours}</TableCell>
@@ -117,18 +138,25 @@ export default function Runtime() {
         </Table>
       </div>
 
-      {/* Manual entry */}
+      {/* Manual line entry */}
       <Dialog open={entryOpen} onOpenChange={setEntryOpen}>
         <DialogContent className="border-border bg-[hsl(var(--panel-1))]">
-          <DialogHeader><DialogTitle>Log Runtime</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Log Line Runtime</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label className="text-xs">Machine</Label><MachineSelect value={form.machine_id} onChange={(id) => setForm({ ...form, machine_id: id })} testId="runtime-machine-select" /></div>
+            <div>
+              <Label className="text-xs">Line</Label>
+              <Select value={form.line} onValueChange={(v) => setForm({ ...form, line: v })}>
+                <SelectTrigger data-testid="runtime-line-select" className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Select line" /></SelectTrigger>
+                <SelectContent>{lines.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">Date</Label><Input type="date" data-testid="runtime-date-input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
               <div><Label className="text-xs">Calendar h</Label><Input type="number" min="0.1" data-testid="runtime-calendar-input" value={form.calendar_hours} onChange={(e) => setForm({ ...form, calendar_hours: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
               <div><Label className="text-xs">Run h</Label><Input type="number" min="0" data-testid="runtime-run-input" value={form.run_hours} onChange={(e) => setForm({ ...form, run_hours: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
             </div>
-            <Button onClick={submit} data-testid="runtime-submit" className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">Save Runtime Log</Button>
+            <p className="text-[11px] text-muted-foreground">All machines in the selected line inherit this runtime for reliability (Weibull) calculations.</p>
+            <Button onClick={submit} data-testid="runtime-submit" className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">Save Line Runtime</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -136,11 +164,11 @@ export default function Runtime() {
       {/* CSV import */}
       <Dialog open={importOpen} onOpenChange={(o) => { setImportOpen(o); if (!o) setPreview(null); }}>
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto border-border bg-[hsl(var(--panel-1))]">
-          <DialogHeader><DialogTitle>Runtime CSV Import</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Line Runtime CSV Import</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">Columns: <span className="font-mono">machine_code,date,run_hours[,calendar_hours]</span> — e.g. <span className="font-mono">PC21-FRY-002,2025-01-15,22</span></p>
+            <p className="text-xs text-muted-foreground">Columns: <span className="font-mono">line,date,run_hours[,calendar_hours]</span> — e.g. <span className="font-mono">Fry Line 1,2025-01-15,22</span></p>
             <Textarea data-testid="runtime-csv-textarea" value={csvText} onChange={(e) => setCsvText(e.target.value)} rows={8}
-              placeholder={'machine_code,date,run_hours,calendar_hours\nPC21-FRY-001,2025-01-15,22,24'} className="bg-[hsl(var(--panel-2))] font-mono text-xs" />
+              placeholder={'line,date,run_hours,calendar_hours\nFry Line 1,2025-01-15,22,24'} className="bg-[hsl(var(--panel-2))] font-mono text-xs" />
             <div className="flex gap-2">
               <Button variant="outline" onClick={doPreview} data-testid="runtime-csv-preview" className="border-border bg-[hsl(var(--panel-2))]">Preview</Button>
               {preview && preview.errors.length === 0 && preview.valid_rows > 0 && (
@@ -156,10 +184,10 @@ export default function Runtime() {
                 )}
                 <div className="max-h-48 overflow-y-auto rounded-md border border-border">
                   <table className="w-full text-xs">
-                    <thead className="bg-[hsl(var(--panel-2))]"><tr><th className="p-1.5 text-left">Machine</th><th className="p-1.5">Date</th><th className="p-1.5">Run</th><th className="p-1.5">Cal</th><th className="p-1.5">Avail</th></tr></thead>
+                    <thead className="bg-[hsl(var(--panel-2))]"><tr><th className="p-1.5 text-left">Line</th><th className="p-1.5">Date</th><th className="p-1.5">Run</th><th className="p-1.5">Cal</th><th className="p-1.5">Avail</th><th className="p-1.5">Machines</th></tr></thead>
                     <tbody>
                       {preview.rows.map((r, i) => (
-                        <tr key={i} className="border-t border-border"><td className="p-1.5">{r.machine_name}</td><td className="p-1.5 text-center font-mono">{r.date}</td><td className="p-1.5 text-center">{r.run_hours}</td><td className="p-1.5 text-center">{r.calendar_hours}</td><td className="p-1.5 text-center">{r.availability}%</td></tr>
+                        <tr key={i} className="border-t border-border"><td className="p-1.5">{r.line}</td><td className="p-1.5 text-center font-mono">{r.date}</td><td className="p-1.5 text-center">{r.run_hours}</td><td className="p-1.5 text-center">{r.calendar_hours}</td><td className="p-1.5 text-center">{r.availability}%</td><td className="p-1.5 text-center">{r.machines_count}</td></tr>
                       ))}
                     </tbody>
                   </table>

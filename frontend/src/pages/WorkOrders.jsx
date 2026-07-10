@@ -18,7 +18,7 @@ import { MachineSelect, TechnicianSelect, SpareRows } from '@/components/Shared'
 // Lifecycle: OPEN -> ASSIGNED -> IN_PROGRESS -> (tech completes) PENDING_ADMIN_CLOSURE -> (admin) CLOSED
 const LIFE = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSED'];
 const COL_LABEL = { PENDING_ADMIN_CLOSURE: 'ADMIN CLOSURE' };
-const TYPES = ['all', 'Corrective', 'Preventive', 'Inspection'];
+const TYPES = ['all', 'Corrective', 'Preventive', 'Inspection', 'RCA'];
 
 // ISO <-> datetime-local input helpers (local timezone aware)
 const toLocalInput = (iso) => {
@@ -114,6 +114,23 @@ function WODetailModal({ wo, open, setOpen, onDone, onAct, onStartComplete }) {
             </div>
           )}
 
+          {/* 5-Why RCA summary (RCA work orders with a submitted analysis) */}
+          {wo.wo_type === 'RCA' && wo.rca && (
+            <div className="rounded-md border border-[#ff2e63]/40 bg-[hsl(var(--panel-2))] p-3" data-testid="wo-detail-rca-summary">
+              <Label className="text-[10px] uppercase tracking-widest text-[#ff2e63]">5-Why Analysis</Label>
+              <ol className="mt-1.5 space-y-1">
+                {(wo.rca.whys || []).map((w, i) => (
+                  <li key={i} className="flex gap-2 text-xs text-foreground/90">
+                    <span className="font-mono text-[10px] text-[#ff2e63]">W{i + 1}</span>{w}
+                  </li>
+                ))}
+              </ol>
+              <div className="mt-2 text-xs"><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Root Cause: </span>{wo.rca.root_cause}</div>
+              <div className="mt-1 text-xs"><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Corrective Action: </span>{wo.rca.corrective_action}</div>
+              <div className="mt-1 text-[10px] text-muted-foreground">Submitted by {wo.rca.submitted_by} · {fmtDate(wo.rca.submitted_at)}</div>
+            </div>
+          )}
+
           {/* Editable Start / End times */}
           <div className="rounded-md border border-[hsl(var(--primary))]/30 bg-[hsl(var(--panel-2))] p-3">
             <div className="mb-2 flex items-center justify-between">
@@ -163,6 +180,14 @@ function WODetailModal({ wo, open, setOpen, onDone, onAct, onStartComplete }) {
             {wo.wo_type === 'Preventive' && wo.pm_task_id && wo.status !== 'CLOSED' && (
               <Button size="sm" variant="outline" data-testid="wo-detail-pm-page-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
                 onClick={() => navigate(`/preventive-maintenance/close/${wo.pm_task_id}`)}>PM Closeout Page</Button>
+            )}
+            {wo.wo_type === 'RCA' && (
+              <Button size="sm" data-testid="wo-detail-rca-form-btn" className="h-7 border border-[#ff2e63]/60 bg-transparent text-xs text-[#ff2e63] hover:bg-[#ff2e63]/10"
+                onClick={() => navigate(`/work-orders/rca/${wo.id}`)}>Open 5-Why RCA Form</Button>
+            )}
+            {wo.rca_task_id && (
+              <Button size="sm" variant="outline" data-testid="wo-detail-view-rca-btn" className="h-7 border-[#ff2e63]/40 bg-[hsl(var(--panel-2))] text-xs text-[#ff2e63]"
+                onClick={() => navigate(`/work-orders/rca/${wo.rca_task_id}`)}>View Linked RCA</Button>
             )}
           </div>
         </div>
@@ -261,8 +286,12 @@ export default function WorkOrders() {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
-  // PM-type WOs open the CURRENT structured PM close page; others use the complete dialog
+  // PM-type WOs open the structured PM close page; RCA WOs open the 5-Why form; others use the complete dialog
   const startComplete = (wo) => {
+    if (wo.wo_type === 'RCA') {
+      navigate(`/work-orders/rca/${wo.id}`);
+      return;
+    }
     if (wo.wo_type === 'Preventive' && wo.pm_task_id) {
       navigate(`/preventive-maintenance/close/${wo.pm_task_id}`);
       return;
@@ -292,7 +321,10 @@ export default function WorkOrders() {
       data-testid={`wo-card-${wo.wo_number}`}>
       <div className="flex items-center justify-between gap-1">
         <span className="font-mono text-[10px] text-[hsl(var(--primary))]">{wo.wo_number}</span>
-        <CritBadge level={wo.priority} />
+        <div className="flex items-center gap-1">
+          {wo.wo_type === 'RCA' && <span className="border border-[#ff2e63]/60 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-[#ff2e63]">RCA</span>}
+          <CritBadge level={wo.priority} />
+        </div>
       </div>
       <div className="mt-0.5 line-clamp-2 text-xs font-medium leading-snug" title={wo.title}>{wo.title}</div>
       <div className="mt-0.5 truncate text-[10px] text-muted-foreground" data-testid={`wo-card-machine-${wo.wo_number}`}>{wo.machine_name}</div>
