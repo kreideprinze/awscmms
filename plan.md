@@ -19,6 +19,11 @@
 - Standardize UI interaction language:
   - All buttons/icons/pills follow **outlined hairline border styling**.
   - Background theme is **pure black** (no deep-blue undertone), while maintaining readable contrast.
+- Ensure maintenance execution is **audit-ready and printable**:
+  - PM execution is driven by **structured checklists** (component → sub-item rows) with per-row OK/NOT OK + per-row remarks.
+  - Every PM task supports **PDF export** for blank templates and completed instances, formatted like the real checklist sheet.
+- Remove friction for shop-floor breakdown reporting:
+  - Provide a **public kiosk breakdown reporting** entry point (no login required) capturing Reporter Name and flagging submissions as public.
 
 ## 2) Implementation Steps
 
@@ -44,173 +49,198 @@
 
 ---
 
-### Phase E — Control Room Ribbon + Customization + Theming (NEW)
+### Phase E — Control Room Ribbon + Customization + Theming
 > This phase turns the Control Room into a true shift-lead “command center”: availability + downtime at the exact hierarchy level people manage (line/section), plus personalization (sidebar order/colors) and proper white-label branding.
 
 #### E1) Control Room KPI Ribbon v2 (Line/Section Availability + Downtime) (P0)
-**Requirements**
-- Primary ribbon shows:
-  - **Availability per Line** (PC21, PC32, PC36, KKR, TWZ, BCP; plus seeded lines as present).
-  - **Total downtime per Line** for selected window.
-- Each Line entry is expandable to show:
-  - **Availability per Section/Process Group** within the line.
-  - **Total downtime per Section/Process Group** for the same window.
-- Plant-wide aggregate counts (Machines/Running/Failed/Open BD/Open WO/etc.) retained as a **secondary collapsible strip**.
-- Time window is configurable via presets:
-  - **Shift (8h)** / **Day (24h)** / **Week (7d)**.
-
-**Backend (Delivered)**
-- `GET /api/control-room/line-kpis?hours=8|24|168`.
-- Computation method (v1 practical):
-  - Downtime = **summed overlap** of breakdown open-time (start → end or now) with the selected window.
-  - Availability = `1 - downtime / (machines_in_group * window)` expressed as a percent.
-- Grouping:
-  - by `line` and by `process_group` (section).
-
-**Frontend (Delivered)**
-- `LineKpiRibbon.jsx` renders:
-  - Line cards (availability color-coded, downtime shown next to percent).
-  - Expandable section panel for selected line.
-  - Window selector buttons.
-  - Action: **Filter twin to line**.
-- `ControlRoom.jsx`:
-  - Primary ribbon = Line/Section KPIs.
-  - Secondary collapsible plant totals strip with inline summary when collapsed.
-
-**Exit Criteria**
-- ✅ Ribbon shows correct per-line and per-section figures for chosen window.
-- ✅ Expanding a line reveals process-group breakdown.
-- ✅ Secondary plant totals strip is collapsible.
-
 **Status:** ✅ COMPLETE
 
 #### E2) Sidebar Icon Customization (Per-user) (P0)
-**Requirements**
-- Sidebar icons support **user-assigned color** per icon.
-- Sidebar supports **drag-and-drop reorder**.
-- Persist these settings **per user**.
-
-**Backend (Delivered)**
-- User prefs stored on user document under `ui_prefs`.
-- Endpoints:
-  - `GET /api/users/me/ui-prefs`
-  - `PUT /api/users/me/ui-prefs`
-- Validation:
-  - Module keys validated.
-  - Hex colors validated (`#RRGGBB`).
-  - Duplicate keys rejected.
-
-**Frontend (Delivered)**
-- `Layout.jsx`:
-  - “Customize sidebar” mode (paintbrush toggle).
-  - HTML5 drag-and-drop reorder.
-  - Native color input per icon.
-  - Per-user persistence via `saveUiPrefs`.
-
-**Exit Criteria**
-- ✅ User reorders modules and chooses colors; refresh preserves order/colors.
-
 **Status:** ✅ COMPLETE
 
 #### E3) Custom Branding: Admin Uploadable Logo + Hex Brand Color (P0)
-**Requirements**
-- Replace top-left hardcoded mark with admin-uploaded logo/icon.
-- Admin-configurable **brand accent color** via **hex input**.
-- Accent color drives:
-  - icons, buttons, borders, highlights, focus rings, and other accent surfaces.
-- Integrate under existing Administration System/Branding settings.
-
-**Backend (Delivered)**
-- Branding document supports:
-  - `accent` (validated `#RRGGBB`)
-  - `logo_data` (data-URI)
-- Endpoints:
-  - `GET /api/branding`
-  - `PUT /api/branding` (validates `accent`)
-  - `POST /api/branding/logo` (multipart upload; type validation; max 500KB; stored as base64 data-URI)
-  - `DELETE /api/branding/logo`
-
-**Frontend (Delivered)**
-- `AppContext.js`:
-  - `applyAccent(hex)` converts hex → HSL + RGB triple and sets runtime CSS vars:
-    - `--primary`, `--accent`, `--ring`, `--accent-rgb`, etc.
-- `Administration.jsx` System tab:
-  - Accent hex input + color picker.
-  - Logo upload/preview/remove.
-- `Layout.jsx`:
-  - Uses `branding.logo_data` to replace the default factory mark.
-
-**Exit Criteria**
-- ✅ Uploading logo updates top-left immediately.
-- ✅ Changing brand hex updates accent across app without redeploy.
-
 **Status:** ✅ COMPLETE
 
 #### E4) Outlined Buttons / Icon Border Styling Standardization (P1)
-**Requirements**
-- All buttons/icons become outlined (1px border, transparent interior) consistently across:
-  - nav icons
-  - filter pills
-  - action buttons
-
-**Implementation (Delivered)**
-- `button.jsx`: default/destructive/secondary are outlined; transparent interiors.
-- `.cyber-primary`: switched from filled gradient sweep to outlined CTA.
-- Per-page sweep: ~30 replacements converting filled pills/buttons to outlined equivalents.
-
-**Exit Criteria**
-- ✅ Visual consistency across all modules; no filled-background action button outliers.
-
 **Status:** ✅ COMPLETE
 
 #### E5) Theme Background: Pure Black Base (P1)
-**Requirements**
-- Replace near-black/blue-tinted backgrounds with **pure black** (#000000 or close as contrast allows).
+**Status:** ✅ COMPLETE
 
-**Implementation (Delivered)**
-- `index.css` theme variables migrated to neutral black/greys:
-  - `--background` = `0 0% 0%`.
-  - Panels `--panel-1..3` in 3–9% neutral range.
-  - Borders neutralized (no blue undertone).
+**Phase E Testing:** ✅ COMPLETE
+- `/app/test_reports/iteration_3.json` — **backend 100% (43/43)**, **frontend 100%**
+
+---
+
+### Phase F — PM Checklist Rework (Structured Checklists + PDF Export) + Public Breakdown Reporting (NEW)
+> This phase makes PM execution **structured, repeatable, and printable**, and ensures **breakdown reporting is never blocked by authentication**.
+
+#### F1) Structured PM Templates (Checklist Builder with one-to-many grouping) (P0)
+**Requirements**
+- PM templates are **tables**, not free-text:
+  - Columns: **S.N.**, **Description (component)**, **Checked For (sub-item)**, **Parameter/Process**, **Status**, **Remarks**.
+- Support one-to-many grouping:
+  - One **Description** (e.g. Motor) contains multiple **Checked For** sub-rows.
+- Template header fields:
+  - PM title, Line(s) it applies to (v1 uses task.line), Location/Area, Frequency, Date.
+- Footer fields:
+  - Done By and Checked By (Name + Signature lines in PDF).
+- Admin builds templates once and they are reused on each scheduled instance.
+
+**Backend (Delivered)**
+- PM task create/update models now support:
+  - `checklist_groups: [{ description, items: [{ checked_for, parameter }] }]`
+  - `location` (Location/Area)
+- Validation/normalization performed server-side (`_normalize_groups`).
+- Legacy compatibility:
+  - Derives `checklist` flat strings from groups for older displays (`_groups_to_flat`).
+- Seed migration:
+  - 5 seeded PM templates converted to `checklist_groups`.
+  - Idempotent migration added to `seed.py` for existing DBs.
+
+**Frontend (Delivered)**
+- `ChecklistBuilder.jsx`:
+  - Grouped checklist builder UI (component → sub-items).
+- `PreventiveMaintenance.jsx`:
+  - New PM Task dialog uses structured builder.
+  - Template select populates grouped structure.
 
 **Exit Criteria**
-- ✅ Base app background and panels read as true black.
-- ✅ Text remains readable; charts/borders remain legible.
+- ✅ Admin can create/edit PM tasks using structured checklist groups (not free text).
+- ✅ Grouping is preserved (Description with multiple Checked For rows).
 
 **Status:** ✅ COMPLETE
+
+#### F2) Dedicated “Close PM Task” Page (Per-row status + per-row remarks) (P0)
+**Requirements**
+- Completing a PM task must open a dedicated page:
+  - Per-row **OK / NOT OK** status required.
+  - Per-row **Remarks** required/optional per row (supported).
+  - Done By + Checked By fields.
+  - Validation: cannot close until every row has a status.
+
+**Backend (Delivered)**
+- `/api/pm-tasks/{id}/complete` now accepts:
+  - `row_results: [{sn, description, checked_for, parameter, status: OK|NOT_OK, remarks}]`
+  - `done_by`, `checked_by`
+- Saves `row_results` into `pm_completions`.
+
+**Frontend (Delivered)**
+- New page route: `/preventive-maintenance/close/:taskId`
+- `ClosePMTask.jsx`:
+  - Renders full grouped table (rowspan by component).
+  - OK/NOT OK toggles + per-row remarks.
+  - Done By / Checked By sign-off.
+
+**Exit Criteria**
+- ✅ PM cannot be closed without statuses for all rows.
+- ✅ Completion saves row_results and sign-off fields.
+
+**Status:** ✅ COMPLETE
+
+#### F3) PDF Export per PM Task (Blank + Completed) (P0)
+**Requirements**
+- Download PDF for:
+  - Blank template sheet.
+  - Completed instance sheet.
+- Layout matches the client reference:
+  - Header: title + machine/line/location/frequency/date.
+  - Table: S.N./Description/Checked For/Parameter/Status/Remarks.
+  - Grouping: merged/spanned Description cells for sub-rows.
+  - Footer: Done By / Checked By with Name + Signature lines.
+
+**Backend (Delivered)**
+- Added `reportlab`.
+- Endpoint:
+  - `GET /api/pm-tasks/{id}/pdf` (blank)
+  - `GET /api/pm-tasks/{id}/pdf?completion_id=latest|<id>` (completed)
+- Completed PDF fills:
+  - per-row statuses and remarks
+  - done_by / checked_by
+
+**Frontend (Delivered)**
+- PDF download via authenticated blob:
+  - `downloadPmPdf()` helper.
+- Buttons:
+  - PM row actions: blank PDF + last-completed PDF.
+  - Close PM page: blank PDF.
+
+**Exit Criteria**
+- ✅ PDFs download successfully and are printable.
+- ✅ Completed PDFs render recorded OK/NOT OK + remarks + sign-off.
+
+**Status:** ✅ COMPLETE
+
+#### F4) Public “Report Breakdown” Entry Point (No login required) (P0)
+**Requirements**
+- Login page provides a **Report Breakdown** option before authentication.
+- Uses the same Report Breakdown form.
+- Reporter Name is required.
+- System flags these submissions (e.g. `submitted_via: public_kiosk`).
+
+**Backend (Delivered)**
+- Public endpoints (no auth):
+  - `GET /api/public/report-context` (lines + machines)
+  - `POST /api/public/breakdowns` (creates breakdown, supports auto-WO)
+- Breakdown flagged:
+  - `submitted_via = "public_kiosk"`
+
+**Frontend (Delivered)**
+- `Login.jsx`:
+  - Adds “Machine down? No login needed.” block with `public-report-breakdown-button`.
+- `ReportBreakdownDialog.jsx`:
+  - `publicMode` option:
+    - loads context from `/public/report-context`
+    - submits to `/public/breakdowns`
+- `Breakdowns.jsx`:
+  - Shows a PUBLIC badge on kiosk tickets.
+
+**Exit Criteria**
+- ✅ Breakdowns can be submitted without authentication.
+- ✅ Reporter Name required.
+- ✅ Kiosk submissions are distinguishable in the system.
+
+**Status:** ✅ COMPLETE
+
+**Phase F Testing:** ✅ COMPLETE
+- `/app/test_reports/iteration_4.json` — **backend 98.8% (82/83)** *(single miss is a test artifact)*, **frontend 100%**
 
 ---
 
 ## 3) Next Actions
-> All earlier phases are complete. Phase E is now complete and tested.
+> All earlier phases are complete. Phase E and Phase F are complete and tested.
 
 ### Completed (Prior Iterations) ✅
 - Removed infinite zoom in Control Room; enabled vertical scroll.
 - Replaced plant runtime clock display with wall-clock time.
 - Applied Cyberpunk HUD styling across all modules.
 - Verified Breakdown → auto-create WO end-to-end.
-- Completed testing pass (`/app/test_reports/iteration_2.json`).
 
 ### Phase E — Completed Work ✅
-- Implemented `GET /api/control-room/line-kpis` (availability + downtime per line and per process-group section; configurable window).
-- Implemented Control Room Ribbon v2 (LineKpiRibbon) with expand/collapse sections and “Filter twin to line”.
-- Implemented per-user sidebar customization (order + icon colors) with persistence (`/api/users/me/ui-prefs`).
-- Implemented admin branding:
-  - accent hex applied instantly platform-wide via runtime CSS variables
-  - logo upload/preview/remove (data-URI storage)
-- Standardized outlined styling for buttons/pills/icons.
-- Updated UI theme to pure black base (no blue undertone).
+- Implemented `GET /api/control-room/line-kpis` + Ribbon v2.
+- Implemented per-user sidebar customization (`/api/users/me/ui-prefs`).
+- Implemented admin branding: accent hex + logo upload.
+- Standardized outlined styling + pure black theme.
 
-### Testing ✅
-- Phase E fully regression-tested:
-  - `/app/test_reports/iteration_3.json` — **backend 100% (43/43)**, **frontend 100%**.
+### Phase F — Completed Work ✅
+- PM templates/tasks now support `checklist_groups` (component → sub-items), `location`.
+- New structured checklist builder in PM create flow.
+- New dedicated PM close page with per-row OK/NOT OK + per-row remarks + sign-off.
+- PM PDF export (blank + completed) matching reference layout.
+- Public kiosk breakdown reporting from login with `submitted_via=public_kiosk` and PUBLIC badges.
 
 ### Optional Next Enhancements (Future / Backlog)
-- Add a true “current shift” window mode using a configurable shift schedule (rather than fixed last-8h), including timezone support.
-- Add a per-line breakdown list drilldown from the ribbon (click line → open filtered breakdown/work-order panel).
-- Add section-level filtering directly (click section tile → filter twin to line+process_group).
-- Add role-scoped admin controls for sidebar defaults (template for new users).
-- Add a contrast review pass (WCAG-oriented) for pure black + neon accents.
+- PM templates UI in Administration (separate from creating a PM task) to manage reusable templates by machine type.
+- True “current shift” time window mode using a configurable shift schedule (timezone-aware) for availability KPIs.
+- Control Room ribbon drilldown: click line/section → open filtered breakdown/work-order panel.
+- Public kiosk hardening:
+  - rate limiting / spam throttling
+  - optional kiosk PIN
+  - optional photo upload for breakdowns.
+- PDF styling polish:
+  - embed a monospace font and/or add logo in header
+  - add explicit checkbox glyphs and signature capture.
+- Contrast review pass (WCAG-oriented) for pure black + neon accents.
 
 ## 4) Success Criteria
 - ✅ Control Room ribbon is **line-first**:
@@ -227,4 +257,16 @@
   - immediate visual propagation.
 - ✅ Buttons/icons are consistently outlined across the app.
 - ✅ Theme background is true black without blue undertone.
-- ✅ All changes validated by Phase E test report (`iteration_3.json`).
+- ✅ PM execution is structured and auditable:
+  - component → sub-item checklist rows
+  - per-row OK/NOT OK + per-row remarks
+  - dedicated close page
+- ✅ PM checklists are printable and consistent:
+  - blank + completed PDF export matches checklist sheet format.
+- ✅ Breakdown reporting is accessible to non-authenticated operators:
+  - login-page public report flow
+  - reporter accountability captured
+  - submissions flagged `public_kiosk` and visually tagged.
+- ✅ All changes validated by test reports:
+  - Phase E: `/app/test_reports/iteration_3.json`
+  - Phase F: `/app/test_reports/iteration_4.json`

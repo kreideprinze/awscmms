@@ -1,42 +1,42 @@
 [
   {
-    "content": "Backend: install reportlab; PM models support checklist_groups (component -> sub-items), location field",
-    "status": "in_progress"
+    "content": "Backend: structured PM checklist_groups + location field",
+    "status": "completed"
   },
   {
-    "content": "Backend: GET /pm-tasks/{id}; complete endpoint accepts per-row results + done_by/checked_by",
-    "status": "pending"
+    "content": "Backend: GET /pm-tasks/{id}; complete with per-row results + done_by/checked_by",
+    "status": "completed"
   },
   {
-    "content": "Backend: GET /pm-tasks/{id}/pdf (blank + completed) matching reference sheet layout",
-    "status": "pending"
+    "content": "Backend: PDF export endpoint (blank + completed) via reportlab",
+    "status": "completed"
   },
   {
-    "content": "Backend: public endpoints - POST /public/breakdowns + GET /public/report-context, submitted_via flag",
-    "status": "pending"
+    "content": "Backend: public breakdown endpoints + submitted_via flag",
+    "status": "completed"
   },
   {
-    "content": "Backend: migrate seeded PM templates to structured checklist_groups",
-    "status": "pending"
+    "content": "Backend: seeded PM templates migrated to structured groups",
+    "status": "completed"
   },
   {
-    "content": "Frontend: ChecklistBuilder component (grouped rows) in PM create dialog",
-    "status": "pending"
+    "content": "Frontend: ChecklistBuilder in PM create dialog",
+    "status": "completed"
   },
   {
-    "content": "Frontend: dedicated Close PM Task page with per-row OK/NOT-OK + remarks",
-    "status": "pending"
+    "content": "Frontend: dedicated Close PM Task page",
+    "status": "completed"
   },
   {
-    "content": "Frontend: PDF download buttons (blank + last completion)",
-    "status": "pending"
+    "content": "Frontend: PDF download buttons",
+    "status": "completed"
   },
   {
-    "content": "Frontend: Login page public Report Breakdown + dialog publicMode + PUBLIC badge in Breakdowns",
-    "status": "pending"
+    "content": "Frontend: Login public Report Breakdown + PUBLIC badge",
+    "status": "completed"
   },
   {
-    "content": "Test: full backend + frontend testing agent pass",
-    "status": "pending"
+    "content": "Test: testing agent pass (iteration_4: backend 98.8%, frontend 100%)",
+    "status": "completed"
   }
 ]
