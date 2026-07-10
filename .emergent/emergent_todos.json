@@ -1,26 +1,26 @@
 [
   {
     "content": "Backend: mandatory assigned_to on breakdowns/warnings (all 4 endpoints), WO always created, remove auto_create_work_order, technicians in public report-context",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Backend: DELETE /line-runtime-logs (admin) with machine fan-out cleanup",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: ReportBreakdownDialog — required Technician dropdown, remove Auto-WO checkbox (all entry points)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: Runtime calendar view — month grid with logged/partial/missing coloring + per-line day dialog (admin CRUD, others view-only)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Build check + backend smoke tests",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Comprehensive testing via testing agent",
-    "status": "pending"
+    "status": "completed"
   }
 ]
