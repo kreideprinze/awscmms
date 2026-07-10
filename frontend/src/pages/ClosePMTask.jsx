@@ -75,7 +75,7 @@ export default function ClosePMTask() {
       });
       toast.success(`PM “${task.task_name}” closed`, {
         description: 'Per-row results saved to the completion record',
-        action: { label: 'Download PDF', onClick: () => downloadPmPdf(taskId, res.data.id, `PM_${task.task_name}_completed.pdf`) },
+        action: { label: 'Download PDF', onClick: () => downloadPmPdf(taskId, res.data.id, `PM_${task.task_name}_completed.pdf`).catch(() => toast.error('PDF download failed')) },
       });
       navigate('/preventive-maintenance');
     } catch (e) {
@@ -109,7 +109,7 @@ export default function ClosePMTask() {
         </div>
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs tabular-nums text-muted-foreground" data-testid="close-pm-progress">{doneCount}/{rows.length} rows</span>
-          <Button variant="outline" size="sm" onClick={() => downloadPmPdf(task.id, null, `PM_${task.task_name}_blank.pdf`)} data-testid="close-pm-blank-pdf">
+          <Button variant="outline" size="sm" onClick={() => downloadPmPdf(task.id, null, `PM_${task.task_name}_blank.pdf`).catch(() => toast.error('PDF download failed'))} data-testid="close-pm-blank-pdf">
             <FileDown className="mr-1 h-3.5 w-3.5" /> Blank PDF
           </Button>
         </div>

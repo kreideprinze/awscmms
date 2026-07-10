@@ -24,6 +24,8 @@
   - Every PM task supports **PDF export** for blank templates and completed instances, formatted like the real checklist sheet.
 - Remove friction for shop-floor breakdown reporting:
   - Provide a **public kiosk breakdown reporting** entry point (no login required) capturing Reporter Name and flagging submissions as public.
+- Ensure reliability analytics are **verifiable with seeded data**:
+  - Provide deterministic, labeled demo datasets to validate **Weibull** fit outputs (beta/eta/mean life/B10) and AWS UI behavior.
 
 ## 2) Implementation Steps
 
@@ -72,134 +74,19 @@
 
 ---
 
-### Phase F — PM Checklist Rework (Structured Checklists + PDF Export) + Public Breakdown Reporting (NEW)
+### Phase F — PM Checklist Rework (Structured Checklists + PDF Export) + Public Breakdown Reporting
 > This phase makes PM execution **structured, repeatable, and printable**, and ensures **breakdown reporting is never blocked by authentication**.
 
 #### F1) Structured PM Templates (Checklist Builder with one-to-many grouping) (P0)
-**Requirements**
-- PM templates are **tables**, not free-text:
-  - Columns: **S.N.**, **Description (component)**, **Checked For (sub-item)**, **Parameter/Process**, **Status**, **Remarks**.
-- Support one-to-many grouping:
-  - One **Description** (e.g. Motor) contains multiple **Checked For** sub-rows.
-- Template header fields:
-  - PM title, Line(s) it applies to (v1 uses task.line), Location/Area, Frequency, Date.
-- Footer fields:
-  - Done By and Checked By (Name + Signature lines in PDF).
-- Admin builds templates once and they are reused on each scheduled instance.
-
-**Backend (Delivered)**
-- PM task create/update models now support:
-  - `checklist_groups: [{ description, items: [{ checked_for, parameter }] }]`
-  - `location` (Location/Area)
-- Validation/normalization performed server-side (`_normalize_groups`).
-- Legacy compatibility:
-  - Derives `checklist` flat strings from groups for older displays (`_groups_to_flat`).
-- Seed migration:
-  - 5 seeded PM templates converted to `checklist_groups`.
-  - Idempotent migration added to `seed.py` for existing DBs.
-
-**Frontend (Delivered)**
-- `ChecklistBuilder.jsx`:
-  - Grouped checklist builder UI (component → sub-items).
-- `PreventiveMaintenance.jsx`:
-  - New PM Task dialog uses structured builder.
-  - Template select populates grouped structure.
-
-**Exit Criteria**
-- ✅ Admin can create/edit PM tasks using structured checklist groups (not free text).
-- ✅ Grouping is preserved (Description with multiple Checked For rows).
-
 **Status:** ✅ COMPLETE
 
 #### F2) Dedicated “Close PM Task” Page (Per-row status + per-row remarks) (P0)
-**Requirements**
-- Completing a PM task must open a dedicated page:
-  - Per-row **OK / NOT OK** status required.
-  - Per-row **Remarks** required/optional per row (supported).
-  - Done By + Checked By fields.
-  - Validation: cannot close until every row has a status.
-
-**Backend (Delivered)**
-- `/api/pm-tasks/{id}/complete` now accepts:
-  - `row_results: [{sn, description, checked_for, parameter, status: OK|NOT_OK, remarks}]`
-  - `done_by`, `checked_by`
-- Saves `row_results` into `pm_completions`.
-
-**Frontend (Delivered)**
-- New page route: `/preventive-maintenance/close/:taskId`
-- `ClosePMTask.jsx`:
-  - Renders full grouped table (rowspan by component).
-  - OK/NOT OK toggles + per-row remarks.
-  - Done By / Checked By sign-off.
-
-**Exit Criteria**
-- ✅ PM cannot be closed without statuses for all rows.
-- ✅ Completion saves row_results and sign-off fields.
-
 **Status:** ✅ COMPLETE
 
 #### F3) PDF Export per PM Task (Blank + Completed) (P0)
-**Requirements**
-- Download PDF for:
-  - Blank template sheet.
-  - Completed instance sheet.
-- Layout matches the client reference:
-  - Header: title + machine/line/location/frequency/date.
-  - Table: S.N./Description/Checked For/Parameter/Status/Remarks.
-  - Grouping: merged/spanned Description cells for sub-rows.
-  - Footer: Done By / Checked By with Name + Signature lines.
-
-**Backend (Delivered)**
-- Added `reportlab`.
-- Endpoint:
-  - `GET /api/pm-tasks/{id}/pdf` (blank)
-  - `GET /api/pm-tasks/{id}/pdf?completion_id=latest|<id>` (completed)
-- Completed PDF fills:
-  - per-row statuses and remarks
-  - done_by / checked_by
-
-**Frontend (Delivered)**
-- PDF download via authenticated blob:
-  - `downloadPmPdf()` helper.
-- Buttons:
-  - PM row actions: blank PDF + last-completed PDF.
-  - Close PM page: blank PDF.
-
-**Exit Criteria**
-- ✅ PDFs download successfully and are printable.
-- ✅ Completed PDFs render recorded OK/NOT OK + remarks + sign-off.
-
 **Status:** ✅ COMPLETE
 
 #### F4) Public “Report Breakdown” Entry Point (No login required) (P0)
-**Requirements**
-- Login page provides a **Report Breakdown** option before authentication.
-- Uses the same Report Breakdown form.
-- Reporter Name is required.
-- System flags these submissions (e.g. `submitted_via: public_kiosk`).
-
-**Backend (Delivered)**
-- Public endpoints (no auth):
-  - `GET /api/public/report-context` (lines + machines)
-  - `POST /api/public/breakdowns` (creates breakdown, supports auto-WO)
-- Breakdown flagged:
-  - `submitted_via = "public_kiosk"`
-
-**Frontend (Delivered)**
-- `Login.jsx`:
-  - Adds “Machine down? No login needed.” block with `public-report-breakdown-button`.
-- `ReportBreakdownDialog.jsx`:
-  - `publicMode` option:
-    - loads context from `/public/report-context`
-    - submits to `/public/breakdowns`
-- `Breakdowns.jsx`:
-  - Shows a PUBLIC badge on kiosk tickets.
-
-**Exit Criteria**
-- ✅ Breakdowns can be submitted without authentication.
-- ✅ Reporter Name required.
-- ✅ Kiosk submissions are distinguishable in the system.
-
 **Status:** ✅ COMPLETE
 
 **Phase F Testing:** ✅ COMPLETE
@@ -207,8 +94,57 @@
 
 ---
 
+### Phase G — Bugfix + Weibull Demo Data (Verification Enablement)
+> This phase addresses a production-stopper PDF crash and adds deterministic seeded data to validate Weibull reliability calculations and AWS UI.
+
+#### G1) Fix Close PM “Download PDF” runtime error (P0)
+**Problem**
+- Downloading a PDF from Close PM page threw a runtime error (500).
+- Root cause: **non-ASCII em-dash (—)** in PM task names (e.g. `Predictive Inspection — Extruder 1`) causing **latin-1 encoding failure** in `Content-Disposition` header.
+
+**Fix (Delivered)**
+- Backend: sanitize PDF filename to ASCII-safe characters before setting header:
+  - `routers_maintenance.py` `pm_task_pdf`: `safe_name = _re.sub(r'[^A-Za-z0-9._-]+', '_', task_name)`
+- Frontend: add `.catch(...)` toast error handling for PDF download actions:
+  - `ClosePMTask.jsx` download button and toast action
+
+**Verification**
+- Previously failing task now returns **200**, and browser download works from the Close PM pane.
+
+**Status:** ✅ COMPLETE
+
+#### G2) Seed deterministic Weibull verification dataset (P0)
+**Goal**
+- Provide reproducible test data to validate Weibull fit results and AWS “Advanced (L3)” behavior.
+
+**Implementation (Delivered)**
+- Added `/app/backend/seed_weibull_demo.py` (idempotent, rerunnable) which seeds:
+  - **320 days** of historical runtime logs at **20.0 run-hours/day**
+  - **8 CLOSED** breakdown events at deterministic **median-rank Weibull quantile** TBFs
+  - Anchors `commissioned_at`, recomputes reliability for immediate AWS visibility
+- Profiles created (tagged `source='weibull_demo'` for identification/cleanup):
+  - Fryer (PC21): wear-out **beta=3.0, eta=700h**
+  - Auto Halver (PC32): random/constant **beta=1.0, eta=600h**
+  - Blending System (KKR): infant mortality **beta=0.8, eta=500h**
+
+**Expected / Observed**
+- Fitted MLE results are close to targets (n=8 ⇒ expected bias):
+  - PC21 Fryer: ~**3.60 / 689.7**
+  - PC32 Auto Halver: ~**1.17 / 577.3**
+  - KKR Blending: ~**0.93 / 474.2**
+- AWS page shows the three machines as **L3 / Advanced**, and the **Weibull Active** count reflects the seeded models.
+
+**Status:** ✅ COMPLETE
+
+**Phase G Testing:** ✅ COMPLETE
+- Manual + browser validation:
+  - Close PM “Blank PDF” downloads successfully.
+  - AWS page shows seeded Weibull machines with beta/eta.
+
+---
+
 ## 3) Next Actions
-> All earlier phases are complete. Phase E and Phase F are complete and tested.
+> All earlier phases are complete. Phase E, Phase F, and Phase G are complete and verified.
 
 ### Completed (Prior Iterations) ✅
 - Removed infinite zoom in Control Room; enabled vertical scroll.
@@ -229,6 +165,10 @@
 - PM PDF export (blank + completed) matching reference layout.
 - Public kiosk breakdown reporting from login with `submitted_via=public_kiosk` and PUBLIC badges.
 
+### Phase G — Completed Work ✅
+- Fixed PDF download crash caused by non-ASCII task names (Content-Disposition latin-1 encoding).
+- Seeded deterministic Weibull demo dataset (`seed_weibull_demo.py`) for verifying Weibull fit outputs and AWS behavior.
+
 ### Optional Next Enhancements (Future / Backlog)
 - PM templates UI in Administration (separate from creating a PM task) to manage reusable templates by machine type.
 - True “current shift” time window mode using a configurable shift schedule (timezone-aware) for availability KPIs.
@@ -240,6 +180,9 @@
 - PDF styling polish:
   - embed a monospace font and/or add logo in header
   - add explicit checkbox glyphs and signature capture.
+- Reliability demo management:
+  - add an admin endpoint/button to purge `source='weibull_demo'` data
+  - show a “DEMO” tag on seeded Weibull models in AWS UI.
 - Contrast review pass (WCAG-oriented) for pure black + neon accents.
 
 ## 4) Success Criteria
@@ -267,6 +210,9 @@
   - login-page public report flow
   - reporter accountability captured
   - submissions flagged `public_kiosk` and visually tagged.
+- ✅ Reliability calculations are verifiable:
+  - deterministic Weibull demo dataset exists (runtime logs + closed breakdowns)
+  - AWS shows L3/Advanced machines with beta/eta, predicted life and Weibull Active count.
 - ✅ All changes validated by test reports:
   - Phase E: `/app/test_reports/iteration_3.json`
   - Phase F: `/app/test_reports/iteration_4.json`

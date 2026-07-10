@@ -1,4 +1,5 @@
 """Maintenance routes: breakdowns (lifecycle + 30-min root-cause rule), work orders, PM tasks & templates."""
+import re as _re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -764,7 +765,8 @@ async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, user: d
     doc.build(story)
 
     suffix = 'completed' if completion else 'blank'
-    fname = f"PM_{task['task_name'].replace(' ', '_')[:40]}_{suffix}.pdf"
+    safe_name = _re.sub(r'[^A-Za-z0-9._-]+', '_', task['task_name'])[:40].strip('_') or 'task'
+    fname = f"PM_{safe_name}_{suffix}.pdf"
     return Response(content=buf.getvalue(), media_type='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename="{fname}"'})
 
