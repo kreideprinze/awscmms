@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// Backend origin: explicit env var in dev/preview; falls back to same-origin
+// in production deployments where nginx serves the app and proxies /api.
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || window.location.origin;
 export const API_BASE = `${BACKEND_URL}/api`;
 export const WS_URL = `${BACKEND_URL.replace(/^http/, 'ws')}/api/ws`;
 

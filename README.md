@@ -1,1 +1,174 @@
-# Here are your Instructions
+# Factory Operations Platform
+
+A LAN-first, machine-centric factory operations suite: **Digital Twin Control Room**, breakdown management with auto-dispatched work orders, structured Preventive Maintenance with printable checklists, reliability engineering (MTBF → Weibull) with an Advance Warning System, spares inventory, analytics, and full administration — wrapped in a cyberpunk HUD interface with white-label branding.
+
+**Stack:** FastAPI (Python 3.11) · React 19 (CRA/craco + Tailwind + shadcn/ui) · MongoDB 7 · WebSockets · nginx
+
+---
+
+## Quick Start — one-command deployment (Ubuntu 22.04 LTS)
+
+On a fresh Ubuntu 22.04 server, from the project root (the folder containing `backend/`, `frontend/` and `deploy.sh`):
+
+```bash
+sudo bash deploy.sh
+```
+
+That is all. The script installs and configures:
+
+| Component    | What the script does                                                            |
+| ------------ | ------------------------------------------------------------------------------- |
+| Python 3.11  | deadsnakes PPA, virtualenv at `/opt/factory-ops/backend/venv`                   |
+| Node 20/Yarn | NodeSource + corepack, production build of the React frontend                   |
+| MongoDB 7.0  | official repo, enabled as a service, listens on localhost only                  |
+| Backend      | `systemd` unit `factory-ops-backend` running uvicorn on port **8001**           |
+| nginx        | serves the UI on port **80** and proxies `/api` (incl. WebSockets) to backend   |
+| Data         | the backend **seeds itself on first start** (hierarchy, 194 machines, users, PM templates, spares, failure-mode catalog) |
+
+When it finishes it prints the URL:
+
+```
+Open:            http://<server-ip>/
+Default logins:  admin / admin123 · tech / tech123 · operator / operator123
+```
+
+> Re-running `sudo bash deploy.sh` is safe — it updates the app code, reinstalls dependencies and rebuilds the frontend without touching your data or the generated `.env`.
+
+---
+
+## Requirements
+
+- Ubuntu 22.04 LTS (x86_64 or arm64), root/sudo access
+- Internet access during installation (apt, PyPI, npm registries)
+- ~2 GB RAM minimum, ~3 GB free disk
+- Port **80** free (UI) and **8001** free (backend, localhost-proxied)
+
+If you use UFW, allow HTTP:
+
+```bash
+sudo ufw allow 80/tcp
+```
+
+---
+
+## What you get out of the box
+
+- **Control Room** — digital twin of all 194 machines grouped by department → line → process group, live status via WebSockets, line/section availability + downtime KPI ribbon (shift/day/week windows), wall-clock plant time.
+- **Breakdowns** — guided report form (department → area → machine), auto-created corrective work orders, full lifecycle (OPEN → ASSIGNED → IN_PROGRESS → COMPLETED → CLOSED).
+- **Public kiosk reporting** — a *Report Breakdown* button on the login page lets operators without accounts submit breakdowns (reporter name required, flagged `public_kiosk`).
+- **Work Orders / PM** — structured PM checklists (component → sub-item → parameter rows), a dedicated close page with per-row OK/NOT-OK + remarks and sign-off, printable **PDF export** (blank or completed sheets).
+- **Reliability & AWS** — MTBF, weighted MTBF, 2-parameter Weibull fits (β/η, mean life, B10), health states and advance warnings once machines accumulate failure history.
+- **Inventory** — SAP-coded spares, stock movements, consumption tied to breakdowns/WOs/PM.
+- **Administration** — hierarchy, users/roles, catalogs, audit log, and **branding** (upload your logo + pick a brand accent color that re-themes the whole app instantly).
+- **Personalization** — every user can drag-reorder the sidebar and assign per-icon colors.
+
+### Default users
+
+| Username   | Password      | Role       |
+| ---------- | ------------- | ---------- |
+| `admin`    | `admin123`    | admin      |
+| `tech`     | `tech123`     | technician |
+| `operator` | `operator123` | operator   |
+
+> Change these in **Administration → Users** after your first login.
+
+---
+
+## Service management
+
+```bash
+# status / logs
+sudo systemctl status factory-ops-backend
+sudo journalctl -u factory-ops-backend -f
+sudo systemctl status mongod nginx
+
+# restart after config changes
+sudo systemctl restart factory-ops-backend
+sudo systemctl reload nginx
+```
+
+Application files live in `/opt/factory-ops/`:
+
+```
+/opt/factory-ops/
+├── backend/            # FastAPI app + venv + .env
+│   └── .env            # MONGO_URL, DB_NAME, JWT_SECRET, CORS_ORIGINS
+└── frontend/
+    └── build/          # production React bundle served by nginx
+```
+
+### Configuration (`/opt/factory-ops/backend/.env`)
+
+| Variable       | Default                       | Notes                                    |
+| -------------- | ----------------------------- | ---------------------------------------- |
+| `MONGO_URL`    | `mongodb://localhost:27017`   | MongoDB connection string                |
+| `DB_NAME`      | `factory_ops`                 | database name                            |
+| `JWT_SECRET`   | random (generated by script)  | keep secret; rotating logs everyone out  |
+| `CORS_ORIGINS` | `*`                           | comma-separated origins if you tighten it |
+
+Restart the backend after editing: `sudo systemctl restart factory-ops-backend`.
+
+---
+
+## Optional: Weibull demo data
+
+To verify the reliability calculations with a known dataset, seed three machines with deterministic failure histories (wear-out β=3.0, random β=1.0, infant-mortality β=0.8):
+
+```bash
+cd /opt/factory-ops/backend && ./venv/bin/python seed_weibull_demo.py
+```
+
+The script prints fitted vs. expected β/η, and the machines appear on the **AWS** page as Level-3/Advanced. All demo records are tagged `source='weibull_demo'`.
+
+---
+
+## Updating the app
+
+```bash
+cd /path/to/project     # pull or copy the new code here
+sudo bash deploy.sh     # re-syncs code, reinstalls deps, rebuilds UI, restarts services
+```
+
+Your MongoDB data, `.env`, branding and user preferences are preserved.
+
+---
+
+## Backup & restore
+
+```bash
+# backup
+mongodump --db factory_ops --out /backup/$(date +%F)
+
+# restore
+mongorestore --db factory_ops /backup/2026-07-10/factory_ops
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Blank page / 502 on `http://server/` | `sudo journalctl -u factory-ops-backend -n 50` — backend probably failed; often a Mongo issue (`sudo systemctl status mongod`) |
+| `mongod` won't start on small VMs | MongoDB 7 needs AVX-capable CPUs; on very old hardware use a MongoDB 4.4 install and keep `MONGO_URL` the same |
+| Live feed/notifications not updating | WebSocket proxy issue — confirm the `/api` location block in `/etc/nginx/sites-available/factory-ops` has the `Upgrade`/`Connection` headers, then `sudo systemctl reload nginx` |
+| Frontend build fails (out of memory) | Add swap: `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`, then re-run the script |
+| Need a different port than 80 | Edit `HTTP_PORT` at the top of `deploy.sh` and re-run |
+| Reseed everything from scratch | `mongosh factory_ops --eval 'db.dropDatabase()'` then `sudo systemctl restart factory-ops-backend` (auto-seeds on boot) |
+
+---
+
+## Development (optional)
+
+```bash
+# backend (hot reload)
+cd backend && python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt
+./venv/bin/uvicorn server:app --reload --port 8001
+
+# frontend (dev server on :3000)
+cd frontend && yarn install
+echo "REACT_APP_BACKEND_URL=http://localhost:8001" > .env
+yarn start
+```
+
+In production the frontend is built with an empty `REACT_APP_BACKEND_URL`, which makes the app talk to the same origin nginx serves it from — no rebuild needed when the server's IP changes.
