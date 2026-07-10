@@ -15,8 +15,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
 import { MachineSelect, TechnicianSelect, SpareRows, DateTimeField } from '@/components/Shared';
 
-// Lifecycle: OPEN -> ASSIGNED -> IN_PROGRESS -> (tech completes) PENDING_ADMIN_CLOSURE -> (admin) CLOSED
-const LIFE = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSED'];
+// Lifecycle: ASSIGNED -> IN_PROGRESS -> (tech completes) PENDING_ADMIN_CLOSURE -> (admin) CLOSED
+// (OPEN column removed — every WO is born assigned; rare legacy OPEN records merge into ASSIGNED)
+const LIFE = ['ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSED'];
+const colStatuses = (col) => (col === 'ASSIGNED' ? ['OPEN', 'ASSIGNED'] : [col]);
 const COL_LABEL = { PENDING_ADMIN_CLOSURE: 'ADMIN CLOSURE' };
 const TYPES = ['all', 'Corrective', 'Preventive', 'Inspection', 'RCA'];
 
@@ -283,9 +285,10 @@ export default function WorkOrders() {
 
   const create = async () => {
     if (!form.machine_id || !form.title) { toast.error('Machine and title are required'); return; }
+    if (!form.assigned_to) { toast.error('Assigned technician is required'); return; }
     try {
-      const res = await api.post('/work-orders', { ...form, assigned_to: form.assigned_to || undefined });
-      toast.success(`${res.data.wo_number} created`);
+      const res = await api.post('/work-orders', { ...form });
+      toast.success(`${res.data.wo_number} created — assigned to ${form.assigned_to}`);
       setCreateOpen(false);
       setForm({ machine_id: '', title: '', description: '', wo_type: 'Corrective', priority: 'medium', assigned_to: '' });
       load();
@@ -315,6 +318,14 @@ export default function WorkOrders() {
   };
 
   const openDetail = (wo) => { setDetailWo(wo); setDetailOpen(true); };
+
+  const clearClosed = async () => {
+    try {
+      const r = await api.post('/work-orders/clear-closed');
+      toast.success(`${r.data.cleared} closed work order(s) cleared from the board — still available in the Table view`);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
 
   // Refresh the board AND the WO currently open in the detail modal (after time edits)
   const refreshDetail = useCallback(async () => {
@@ -389,19 +400,29 @@ export default function WorkOrders() {
       </div>
 
       {view === 'kanban' ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5" data-testid="work-orders-kanban">
-          {LIFE.map((col) => (
-            <div key={col} className="rounded-lg border border-border bg-[hsl(var(--panel-1))]/50">
-              <div className="border-b border-border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                {COL_LABEL[col] || col} <span className="ml-1 text-[hsl(var(--primary))]">{data.items.filter((w) => w.status === col).length}</span>
-              </div>
-              <ScrollArea className="h-[62vh]">
-                <div className="space-y-1.5 p-1.5">
-                  {data.items.filter((w) => w.status === col).map((wo) => <WOCard key={wo.id} wo={wo} />)}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="work-orders-kanban">
+          {LIFE.map((col) => {
+            const colItems = data.items.filter((w) => colStatuses(col).includes(w.status) && !w.kanban_cleared);
+            return (
+              <div key={col} className="rounded-lg border border-border bg-[hsl(var(--panel-1))]/50">
+                <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  <span>{COL_LABEL[col] || col} <span className="ml-1 text-[hsl(var(--primary))]">{colItems.length}</span></span>
+                  {col === 'CLOSED' && colItems.length > 0 && (
+                    <button data-testid="wo-clear-closed" onClick={clearClosed}
+                      className="flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground transition-colors hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]"
+                      title="Clear closed work orders off the board (they remain in the Table view)">
+                      Clear List
+                    </button>
+                  )}
                 </div>
-              </ScrollArea>
-            </div>
-          ))}
+                <ScrollArea className="h-[62vh]">
+                  <div className="space-y-1.5 p-1.5">
+                    {colItems.map((wo) => <WOCard key={wo.id} wo={wo} />)}
+                  </div>
+                </ScrollArea>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="overflow-hidden border border-border">
@@ -471,7 +492,7 @@ export default function WorkOrders() {
                 </Select>
               </div>
             </div>
-            <div><Label className="text-xs">Assign Technician (optional)</Label><TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="wo-create-technician" /></div>
+            <div><Label className="text-xs">Assign Technician *</Label><TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="wo-create-technician" /></div>
             <Button onClick={create} data-testid="wo-create-submit" className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">Create Work Order</Button>
           </div>
         </DialogContent>

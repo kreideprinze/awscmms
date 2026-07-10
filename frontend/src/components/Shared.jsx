@@ -174,7 +174,7 @@ export function SpareRows({ rows, setRows }) {
 export function TechnicianSelect({ value, onChange, testId = 'technician-select' }) {
   const [techs, setTechs] = useState([]);
   useEffect(() => {
-    api.get('/users/technicians').then((r) => setTechs(r.data)).catch(() => {});
+    api.get('/users/technicians').then((r) => setTechs((r.data || []).filter((t) => t.role === 'technician'))).catch(() => {});
   }, []);
   return (
     <Select value={value || ''} onValueChange={onChange}>

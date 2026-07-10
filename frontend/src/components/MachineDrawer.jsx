@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge, HealthBadge, LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
-import { SpareRows, TechnicianSelect } from '@/components/Shared';
+import { SpareRows } from '@/components/Shared';
 import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 const TABS = ['Overview', 'Reports', 'Breakdowns', 'Work Orders', 'PM Tasks', 'Analytics', 'Timeline', 'Notes', 'Documents', 'Reliability', 'Spares'];
@@ -168,20 +168,17 @@ function ReportsTab({ machineId, machineName }) {
 export function BreakdownActions({ bd, onDone, compact }) {
   const { isTech } = useApp();
   const navigate = useNavigate();
-  const [assigning, setAssigning] = useState(false);
-  const [tech, setTech] = useState('');
 
   if (!isTech) return null;
   const act = async (payload) => {
     try {
       const res = await api.put(`/breakdowns/${bd.id}`, payload);
       toast.success(`Breakdown ${res.data.status || 'updated'}`);
-      setAssigning(false);
       onDone();
     } catch (e) { toast.error(errMsg(e)); }
   };
 
-  // Start Repair opens the dedicated repair page (progress, root cause, spares, completion)
+  // Start Repair opens the dedicated repair page (progress, spares, completion)
   const startRepair = async () => {
     try {
       if (['OPEN', 'ASSIGNED'].includes(bd.status)) {
@@ -194,14 +191,7 @@ export function BreakdownActions({ bd, onDone, compact }) {
   return (
     <div className="mt-2 space-y-2">
       <div className="flex flex-wrap gap-1.5">
-        {bd.status === 'OPEN' && (assigning ? (
-          <div className="flex w-full items-center gap-2">
-            <div className="flex-1"><TechnicianSelect value={tech} onChange={setTech} testId={`bd-assign-select-${bd.ticket_number}`} /></div>
-            <Button size="sm" className="h-8 text-xs" data-testid={`bd-assign-confirm-${bd.ticket_number}`} onClick={() => tech && act({ action: 'assign', assigned_to: tech })}>Assign</Button>
-          </div>
-        ) : (
-          <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-assign-${bd.ticket_number}`} onClick={() => setAssigning(true)}>Assign Technician</Button>
-        ))}
+        {/* Assign button removed — every breakdown is assigned to a technician at creation */}
         {['OPEN', 'ASSIGNED'].includes(bd.status) && (
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={startRepair}>Start Repair</Button>
         )}

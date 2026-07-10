@@ -33,16 +33,20 @@
   - Work order completion requires **Admin closure** before final CLOSED — applies to **Corrective AND PM-generated Work Orders**.
 - Improve Kanban operational UX:
   - Kanban cards open a **detail popout modal** for fast inspection and quick edits.
-  - Work Orders support **editable Start/End times** (admin + assigned technician) with validation and audit trail.
+  - Work Orders support **editable Start/End times** (all roles who action WOs/Bds) with validation and audit trail.
 - Runtime governance:
   - Runtime is **line-level** as the source of truth for availability.
   - Machines **inherit** their line runtime via fan-out to preserve per-machine reliability/Weibull calculations.
   - A **calendar view** must make missing line-days obvious and support admin CRUD.
   - **Plant Runtime Clock per-machine auto accumulation remains enabled alongside line logging** (per user choice).
-- Data integrity + audit correctness (new):
+- Data integrity + audit correctness:
   - Breakdown and Work Order lifecycle must remain **synchronized** (no stale Kanban cards).
   - Downtime/RCA triggers must respect **corrected/edited** times, not only raw timers.
   - Root Cause capture must be **governed exclusively** through the RCA 5‑Why module.
+- Kanban hygiene (new):
+  - Remove redundant lifecycle columns.
+  - Allow clearing closed WOs off Kanban while retaining them in Table view.
+  - Ensure no new Work Order can be created unassigned (no new OPEN status).
 
 ### Phase L (delivered) objectives
 - Enforce standardized **Root Cause Analysis (5-Why)** governance:
@@ -65,7 +69,7 @@
   - Day dialog supports per-line log/update/delete for Admins; view-only for others.
   - Admin-only deletion removes fanned per-machine logs.
 
-### Phase N (now delivered) objectives — “Plant Bugfix Pack”
+### Phase N (delivered) objectives — “Plant Bugfix Pack”
 - Fix Breakdown↔WO lifecycle synchronization:
   - Breakdown completion must immediately update the linked WO status.
   - WO admin closure is the single closure point and must auto-close the linked breakdown.
@@ -83,13 +87,21 @@
 - PM checklist print fidelity:
   - Embed branding logo as a real image, render outlined checkboxes, allow editable Date.
 
+### Phase O (delivered) objectives — “Kanban cleanup + Clear Closed + Redundancy removal”
+- Remove redundant **OPEN** Kanban column (WOs are never created unassigned going forward).
+- Provide **Clear List** on CLOSED Kanban column:
+  - Clears closed WOs off Kanban only; keeps them in Table view and all reporting.
+- Eliminate remaining sources of new OPEN work orders:
+  - Manual WO creation requires technician assignment (backend + frontend enforcement).
+- Remove legacy redundant UI elements:
+  - Remove OPEN status filter chip in WO table filters.
+  - Remove legacy breakdown “Assign Technician” button in Machine Drawer.
+
 ---
 
 ## 2) Implementation Steps
 
 ### Phase 1 — Core “Operational Loop” POC (Isolation) (WebSocket + eventing + derived machine state)
-> Core = if this breaks, the system isn’t “live”: machine state aggregation + timeline/notifications + Digital Twin can’t be trusted.
-
 **Status:** ✅ COMPLETE
 
 ---
@@ -110,21 +122,6 @@
 ---
 
 ### Phase E — Control Room Ribbon + Customization + Theming
-> This phase turns the Control Room into a true shift-lead “command center”: availability + downtime at the exact hierarchy level people manage (line/section), plus personalization (sidebar order/colors) and proper white-label branding.
-
-#### E1) Control Room KPI Ribbon v2 (Line/Section Availability + Downtime) (P0)
-**Status:** ✅ COMPLETE
-
-#### E2) Sidebar Icon Customization (Per-user) (P0)
-**Status:** ✅ COMPLETE
-
-#### E3) Custom Branding: Admin Uploadable Logo + Hex Brand Color (P0)
-**Status:** ✅ COMPLETE
-
-#### E4) Outlined Buttons / Icon Border Styling Standardization (P1)
-**Status:** ✅ COMPLETE
-
-#### E5) Theme Background: Pure Black Base (P1)
 **Status:** ✅ COMPLETE
 
 **Phase E Testing:** ✅ COMPLETE
@@ -133,18 +130,6 @@
 ---
 
 ### Phase F — PM Checklist Rework (Structured Checklists + PDF Export) + Public Breakdown Reporting
-> This phase makes PM execution **structured, repeatable, and printable**, and ensures **breakdown reporting is never blocked by authentication**.
-
-#### F1) Structured PM Templates (Checklist Builder with one-to-many grouping) (P0)
-**Status:** ✅ COMPLETE
-
-#### F2) Dedicated “Close PM Task” Page (Per-row status + per-row remarks) (P0)
-**Status:** ✅ COMPLETE
-
-#### F3) PDF Export per PM Task (Blank + Completed) (P0)
-**Status:** ✅ COMPLETE
-
-#### F4) Public “Report Breakdown” Entry Point (No login required) (P0)
 **Status:** ✅ COMPLETE
 
 **Phase F Testing:** ✅ COMPLETE
@@ -153,55 +138,16 @@
 ---
 
 ### Phase G — Bugfix + Weibull Demo Data (Verification Enablement)
-> This phase addresses a production-stopper PDF crash and adds deterministic seeded data to validate Weibull reliability calculations and AWS UI.
-
-#### G1) Fix Close PM “Download PDF” runtime error (P0)
 **Status:** ✅ COMPLETE
-
-#### G2) Seed deterministic Weibull verification dataset (P0)
-**Status:** ✅ COMPLETE
-
-**Phase G Testing:** ✅ COMPLETE
-- Manual + browser validation
 
 ---
 
 ### Phase H — UI Polish Pass (Creative Freedom; Zero Logic Changes)
-> A purely visual refinement pass to improve readability, “HUD coherence”, and perceived quality without touching business logic.
-
-#### H1) Global CSS micro-interactions + HUD detailing (P1)
-**Status:** ✅ COMPLETE
-
-#### H2) JSX presentational tweaks (P1)
 **Status:** ✅ COMPLETE
 
 ---
 
 ### Phase I — Warnings + Workflow Changes + Kanban/Repair Dedicated Pages
-> This phase differentiates “machine down” vs “needs attention”, tightens CMMS governance (admin closure), improves Kanban as default execution surface, and standardizes dedicated-page patterns for execution (repair page).
-
-#### I1) Add “Warning” entry type (non-downtime, yellow-tagged) (P0)
-**Status:** ✅ COMPLETE
-
-#### I2) Report Breakdown/Warning modal must not close on outside click/escape (P0)
-**Status:** ✅ COMPLETE
-
-#### I3) Change Breakdown icon from flame → cracked gear (P0)
-**Status:** ✅ COMPLETE
-
-#### I4) Work Orders: machine name not clickable to machine stats (P0)
-**Status:** ✅ COMPLETE
-
-#### I5) Work Order completion requires Admin closure (Corrective lifecycle) (P0)
-**Status:** ✅ COMPLETE
-
-#### I6) Operator/public breakdown submissions always auto-dispatch WO + auto-assign tech (P0)
-**Status:** ✅ COMPLETE *(superseded by Phase M which mandates explicit technician selection)*
-
-#### I7) Work Orders defaults to Kanban + PM-from-Kanban navigation fix + density improvements (P0)
-**Status:** ✅ COMPLETE
-
-#### I8) Dedicated Repair page for breakdown execution (P0)
 **Status:** ✅ COMPLETE
 
 **Phase I Testing:** ✅ COMPLETE
@@ -212,15 +158,6 @@
 ---
 
 ### Phase J — PM WO Admin Closure + Kanban Detail Popout Modal (P0)
-> This phase standardizes the WO lifecycle across **all** WO sources (Corrective + PM), and upgrades Kanban UX with a fast detail popout for inspection and time edits.
-
-#### J1) PM completion must park linked Work Order at `PENDING_ADMIN_CLOSURE` (P0)
-**Status:** ✅ COMPLETE
-
-#### J2) Work Order time edits via `action='update'` (P0)
-**Status:** ✅ COMPLETE
-
-#### J3) Kanban card detail popout modal (P0)
 **Status:** ✅ COMPLETE
 
 **Phase J Testing:** ✅ COMPLETE
@@ -231,18 +168,6 @@
 ---
 
 ### Phase L — RCA 5-Why Module + Technician Analytics + Line Runtime + AWS Category Sorting (P0)
-> This phase upgrades governance and analytics: enforce structured RCA, add admin-only technician analytics, shift runtime logging to line-level (machines inherit line runtime), and add failure-category sorting in AWS.
-
-#### L1) Root Cause Analysis (RCA) Module — Structured 5-Why + Auto-triggered RCA Work Order (P0)
-**Status:** ✅ COMPLETE
-
-#### L2) Technician Analytics — Admin-only (P0)
-**Status:** ✅ COMPLETE
-
-#### L3) Runtime logging per Line (not per Machine) + inheritance to machines (P0)
-**Status:** ✅ COMPLETE
-
-#### L4) AWS category sorting — Mechanical / Electrical / PLC (P0)
 **Status:** ✅ COMPLETE
 
 **Phase L Testing:** ✅ COMPLETE
@@ -253,12 +178,6 @@
 ---
 
 ### Phase M — Mandatory Technician Assignment + Mandatory WO Creation + Runtime Calendar (P0)
-> This phase removes optional dispatch behavior: every Breakdown/Warning report explicitly assigns a technician and always creates a linked work order. It also upgrades runtime entry UX to a calendar-first, line-wise logging module.
-
-#### M1) Mandatory technician assignment + mandatory WO creation on all Breakdown/Warning submissions (P0)
-**Status:** ✅ COMPLETE
-
-#### M2) Runtime Module — calendar-first, line-wise logging (P0)
 **Status:** ✅ COMPLETE
 
 **Phase M Testing:** ✅ COMPLETE
@@ -269,95 +188,59 @@
 ---
 
 ### Phase N — Plant bugfix pack (Breakdown/WO sync + Time edits + Availability + Warnings + Spares + PM PDF) (P0)
-> This phase implements the plant’s corrective bugfix list to ensure operational truth: lifecycle sync, corrected time usage, correct availability, and printable PM artifacts.
-
-#### N1) Breakdown/Work Order status sync (P0)
-**Delivered**
-- Breakdown complete/close instantly propagates to linked WO:
-  - Breakdown complete → linked WO `PENDING_ADMIN_CLOSURE` + admin notification.
-  - Admin breakdown close → linked WO `CLOSED`.
-- Reverse direction:
-  - Admin closing a WO is the single final closure point and auto-closes linked breakdown + restores machine status.
-
-#### N2) Time editing for real downtime (P0)
-**Delivered**
-- Added a shared `DateTimeField` component (native picker on click via `showPicker()`).
-- Report form includes **Breakdown Start Time** (`bd-start-time`).
-- Repair page includes editable **Breakdown Start/End** (`repair-start-time`, `repair-end-time`).
-- WO completion dialog includes editable **Start/End** (`wo-complete-start-time`, `wo-complete-end-time`).
-- Backend validates `end < start` as 400.
-
-#### N3) RCA trigger uses edited times (P0)
-**Delivered**
-- Downtime/duration and RCA 30-min rule evaluate against corrected `start/end` edits for:
-  - breakdowns
-  - work orders
-
-#### N4) Remove Root Cause from Repair/Complete (P0)
-**Delivered**
-- Removed the Root Cause field from Repair UI.
-- Removed backend rule requiring root_cause for downtime > threshold.
-- Root cause capture is governed exclusively in the dedicated 5‑Why RCA WO.
-
-#### N5) Remove redundant Final Close (P0)
-**Delivered**
-- Removed “Final Close” from Machine Drawer breakdown UI.
-- Replaced with informational text: “closure via WO admin approval”.
-
-#### N6) Breakdowns subtitle open count only (P0)
-**Delivered**
-- `GET /breakdowns` now returns `open_total`.
-- Breakdowns subtitle displays open/active count only.
-
-#### N7) Fix Line Availability calculation (P0)
-**Delivered**
-- `/control-room/line-kpis` rewritten:
-  - downtime = merged/union overlap of breakdown intervals with the window
-  - downtime capped at window length
-  - availability = (window − downtime)/window × 100
-  - full-window outage correctly shows 0%.
-
-#### N8) Line KPI card click filters Digital Twin (P0)
-**Delivered**
-- Line KPI card click now filters Control Room to that line (toggle back to “all”).
-- Highlight + state kept in sync via `selectedLine` prop.
-
-#### N9) Warning click: WO generation with technician assignment (P0)
-**Delivered**
-- Warning row click opens a detail dialog:
-  - shows linked WO when present
-  - supports “Generate Work Order” for legacy warnings without WO via `POST /warnings/{id}/generate-wo` with technician selection.
-
-#### N10) SAP material search fuzzy/typeahead (P0)
-**Delivered**
-- `SpareRows` now uses fuzzy typeahead (`SpareSearch`) instead of a static dropdown.
-- Live filtering matches partial SAP code/material/description with token matching.
-
-#### N11) PM Checklist PDF export fixes (P0)
-**Delivered**
-- PDF header embeds the branding logo as a real image (base64 from Administration → Branding).
-- Status column checkboxes render as **outlined empty boxes** (not filled squares).
-- Date is editable:
-  - UI: editable `close-pm-date` input
-  - backend: `checklist_date` stored on completion
-  - PDF: optional `?date=YYYY-MM-DD` parameter.
+**Status:** ✅ COMPLETE
 
 **Phase N Testing:** ✅ COMPLETE
-- Backend: **15/15 tests passed (100%)** (reported in latest test summary)
-- Frontend: verified (line filter, time pickers, warning dialog, spare typeahead, PM date)
-- Test artifacts cleaned (10 breakdowns, 17 WOs, 1 warning; 2 machines restored)
+- Backend: **15/15 tests passed (100%)**
+- Frontend: verified
+
+---
+
+### Phase O — Kanban cleanup (remove OPEN column) + Clear Closed + remove redundant elements (P0)
+**Status:** ✅ COMPLETE
+
+#### O1) Remove OPEN column from WO Kanban
+**Delivered**
+- Kanban lifecycle columns now: `ASSIGNED → IN_PROGRESS → PENDING_ADMIN_CLOSURE → CLOSED`.
+- Legacy `OPEN` WOs are merged into `ASSIGNED` column.
+
+#### O2) Clear CLOSED list from Kanban (keep in Table)
+**Delivered**
+- Added `POST /api/work-orders/clear-closed` which sets:
+  - `kanban_cleared=true`, `kanban_cleared_by`, `kanban_cleared_at`.
+- Kanban filters out `kanban_cleared` items.
+- Table view and all reporting remain unaffected.
+
+#### O3) Mandatory technician for manual WO creation
+**Delivered**
+- `POST /api/work-orders` now requires `assigned_to` and validates active technician.
+- WO status is always born `ASSIGNED` (no new OPEN WOs).
+- Create WO dialog enforces technician required.
+
+#### O4) Remove redundant legacy UI
+**Delivered**
+- Removed OPEN filter chip from Work Orders table.
+- Removed legacy “Assign Technician” button in Machine Drawer breakdown actions.
+- `TechnicianSelect` filters to `role='technician'` only.
+
+**Phase O Verification:** ✅ COMPLETE
+- Backend curl verified:
+  - 400 on manual WO without technician.
+  - Clear-closed clears from Kanban while remaining in table (`kanban_cleared=true`).
+- Frontend build clean; screenshot verified 4 columns, no OPEN.
+- Cleaned leftover test WOs + orphan RCA WOs.
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- None required; Phase N deliverables implemented and validated.
+- None required; Phase O deliverables implemented and validated.
 
 ### Hardening / Refactor (P1)
 - Centralize “admin review required” notification/timeline logic for all WO sources (Corrective, PM, RCA) to reduce duplication.
 - Add MongoDB indexes:
-  - `work_orders`: `pm_task_id`, `rca_task_id`, `source_breakdown_id`, `source_warning_id`, `source_work_order_id`, `assigned_to`, `status`, `completed_at`
+  - `work_orders`: `pm_task_id`, `rca_task_id`, `source_breakdown_id`, `source_warning_id`, `source_work_order_id`, `assigned_to`, `status`, `completed_at`, `kanban_cleared`
   - `breakdowns`: `assigned_to`, `status`, `end_time`, `work_order_id`
   - `warnings`: `assigned_to`, `status`, `work_order_id`
   - `runtime_logs`: `machine_id`, `line`, `date`, `source`
@@ -370,6 +253,7 @@
   - If conflicts appear (same machine+date written by multiple sources), define precedence (e.g., `source='line'` overrides `plant_clock`) or disable plant clock.
 
 ### Optional Next Enhancements (Future / Backlog)
+- Add a “Kanban Cleared” filter toggle in Table view to quickly find/restore cleared CLOSED items.
 - RCA aging dashboard for admins (open RCAs, aging, overdue) linked from Admin/Analytics.
 - Harden public kiosk endpoints:
   - rate limiting / spam throttling
@@ -428,37 +312,17 @@
   - admin notification targeted to `admin` role.
 - ✅ Kanban has fast inspection + quick edits:
   - card click opens detail modal
-  - Start/End time edits available to admin + assignee
+  - Start/End time edits available per role rules
   - validation enforced (no end before start)
 - ✅ Runtime is line-first and calendar-visible:
   - month calendar highlights missing line-days
   - admin can log/edit/delete per line/day
   - technician/operator view-only
   - machines inherit line runtime for per-machine analytics/reliability.
-
-### Phase L success criteria (all met)
-- ✅ **RCA module enforces structured 5-Why**.
-- ✅ **Technician Analytics is admin-only**.
-- ✅ **Runtime logged per line**.
-- ✅ **AWS category sorting exists**.
-
-### Phase M success criteria (all met)
-- ✅ **Mandatory technician assignment** on Breakdown + Warning submissions across all entry points.
-- ✅ **Mandatory WO creation** on all Breakdown/Warning submissions (no opt-out).
-- ✅ **Public report context includes technicians** for kiosk dropdown.
-- ✅ **Runtime calendar view** with logged/partial/missing visibility + per-line day dialog + admin-only delete.
-
-### Phase N success criteria (all met)
-- ✅ Breakdown↔WO lifecycle sync works both directions; no stale Kanban state.
-- ✅ Time edits are available where required and drive downtime/duration + RCA.
-- ✅ Root Cause removed from repair; RCA governs root cause capture.
-- ✅ Redundant "Final Close" removed; single closure point via WO admin closure.
-- ✅ Breakdowns subtitle counts open only.
-- ✅ Line availability formula correct and capped; full-window outage shows 0%.
-- ✅ Digital Twin filters sync when clicking line availability cards.
-- ✅ Warning click supports WO generation with technician assignment for legacy records.
-- ✅ Spare selector is fuzzy/typeahead search.
-- ✅ PM PDF: embedded logo, outlined checkboxes, editable Date.
+- ✅ Kanban hygiene:
+  - OPEN column removed; legacy OPEN merged into ASSIGNED.
+  - CLOSED column can be cleared off Kanban while records remain visible in Table.
+  - No new OPEN WOs can be created (technician mandatory everywhere).
 
 ### Validation evidence
 - ✅ All changes validated by test reports:
@@ -469,3 +333,4 @@
   - Phase L: `/app/test_reports/iteration_7.json`
   - Phase M: `/app/test_reports/iteration_8.json`
   - Phase N: (included in latest iteration_8.json summary; backend 15/15 + frontend verified)
+  - Phase O: verified via backend curl + frontend screenshot automation (4 Kanban columns; no OPEN)

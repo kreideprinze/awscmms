@@ -404,14 +404,16 @@ async def create_work_order(req: WOCreate, user: dict = Depends(require_admin_or
         raise HTTPException(status_code=404, detail='Machine not found')
     if req.wo_type not in ('Corrective', 'Preventive', 'Inspection'):
         raise HTTPException(status_code=400, detail='Invalid wo_type')
+    # Mandatory technician assignment — no WO is ever created unassigned/OPEN
+    assigned_to = await _validate_technician(req.assigned_to)
     wo_num = await next_counter('work_orders', 'WO')
     wo = {
         'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': req.wo_type,
         'title': req.title, 'description': req.description,
         'machine_id': machine['id'], 'machine_name': machine['name'],
         'department': machine['department'], 'line': machine['line'],
-        'assigned_to': req.assigned_to, 'priority': req.priority,
-        'status': 'ASSIGNED' if req.assigned_to else 'OPEN',
+        'assigned_to': assigned_to, 'priority': req.priority,
+        'status': 'ASSIGNED',
         'root_cause': None, 'action_taken': None, 'spare_parts': [],
         'duration_minutes': None, 'source': 'manual', 'auto_generated': False, 'created_at': now_iso(),
     }
@@ -424,6 +426,16 @@ async def create_work_order(req: WOCreate, user: dict = Depends(require_admin_or
                               reference_id=wo['id'], reference_type='work_order')
     wo.pop('_id', None)
     return wo
+
+
+@router.post('/work-orders/clear-closed')
+async def clear_closed_work_orders(user: dict = Depends(require_admin_or_tech)):
+    """Clear CLOSED work orders off the Kanban board (cosmetic — records remain in the
+    table view, reports and analytics; sets kanban_cleared flag)."""
+    res = await db.work_orders.update_many(
+        {'status': 'CLOSED', 'kanban_cleared': {'$ne': True}},
+        {'$set': {'kanban_cleared': True, 'kanban_cleared_by': user['username'], 'kanban_cleared_at': now_iso()}})
+    return {'ok': True, 'cleared': res.modified_count}
 
 
 @router.get('/work-orders')
