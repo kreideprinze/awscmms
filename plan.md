@@ -15,7 +15,7 @@
   - Keep plant-wide totals accessible but demoted.
 - Enable **deep personalization and white-labeling**:
   - Per-user sidebar ordering and icon colors.
-  - Admin-managed logo and brand accent color that re-themes the entire platform instantly.
+  - Admin-managed logo and brand accent color (hex) that re-themes the entire platform instantly.
 - Standardize UI interaction language:
   - All buttons/icons/pills follow **outlined hairline border styling**.
   - Background theme is **pure black** (no deep-blue undertone), while maintaining readable contrast.
@@ -26,6 +26,8 @@
   - Provide a **public kiosk breakdown reporting** entry point (no login required) capturing Reporter Name and flagging submissions as public.
 - Ensure reliability analytics are **verifiable with seeded data**:
   - Provide deterministic, labeled demo datasets to validate **Weibull** fit outputs (beta/eta/mean life/B10) and AWS UI behavior.
+- Maintain **UI excellence without logic risk**:
+  - Allow iterative UI polish improvements **without changing backend/frontend business logic**.
 
 ## 2) Implementation Steps
 
@@ -143,8 +145,45 @@
 
 ---
 
+### Phase H — UI Polish Pass (Creative Freedom; Zero Logic Changes)
+> A purely visual refinement pass to improve readability, “HUD coherence”, and perceived quality without touching business logic.
+
+#### H1) Global CSS micro-interactions + HUD detailing (P1)
+**Status:** ✅ COMPLETE
+
+**Delivered (visual-only)**
+- Accent-tinted `::selection`
+- Global button press feedback (`:active` translateY + scale)
+- `cyber-panel` hover border lift + **HUD corner brackets** via `::before`
+- Table row hover **accent rail** (inset shadow)
+- Page title **neon underline signature** (`main h1::after`)
+- Dialog aura shadow + glass overlay (backdrop blur on overlays)
+- Sidebar icon hover scale + glow
+- Input hover border affordance
+- Stronger background vignette over noise overlay (focuses eye center)
+- Login animated perspective grid floor (`.login-grid`)
+- `prefers-reduced-motion` block for accessibility
+
+#### H2) JSX presentational tweaks (P1)
+**Status:** ✅ COMPLETE
+
+**Delivered (visual-only)**
+- Control Room `MachineTile` hover lift + stronger glow
+- `LineKpiRibbon` line cards hover lift
+- `KpiCard` hover: value glow + label brighten
+- Login: add grid background + glass/aura card shadow
+- Login submit button normalized to app-wide outlined styling (removed hardcoded solid fill)
+
+**Verification**
+- Screenshots captured: login (grid + outlined), Control Room (panel brackets + hover lift), Breakdowns (h1 underline + row rail), dialog (glass overlay)
+- No testids changed; esbuild clean; no console errors observed.
+
+**Status:** ✅ COMPLETE
+
+---
+
 ## 3) Next Actions
-> All earlier phases are complete. Phase E, Phase F, and Phase G are complete and verified.
+> All phases through H are complete. Remaining work is optional backlog only.
 
 ### Completed (Prior Iterations) ✅
 - Removed infinite zoom in Control Room; enabled vertical scroll.
@@ -168,6 +207,9 @@
 ### Phase G — Completed Work ✅
 - Fixed PDF download crash caused by non-ASCII task names (Content-Disposition latin-1 encoding).
 - Seeded deterministic Weibull demo dataset (`seed_weibull_demo.py`) for verifying Weibull fit outputs and AWS behavior.
+
+### Phase H — Completed Work ✅
+- Visual-only UX polish pass (global micro-interactions, HUD detailing, hover behaviors, login grid, dialog glass overlay) without any business-logic changes.
 
 ### Optional Next Enhancements (Future / Backlog)
 - PM templates UI in Administration (separate from creating a PM task) to manage reusable templates by machine type.
@@ -213,6 +255,9 @@
 - ✅ Reliability calculations are verifiable:
   - deterministic Weibull demo dataset exists (runtime logs + closed breakdowns)
   - AWS shows L3/Advanced machines with beta/eta, predicted life and Weibull Active count.
+- ✅ UI polish improvements do not introduce logic regressions:
+  - visual-only enhancements applied consistently
+  - reduced-motion users respected
 - ✅ All changes validated by test reports:
   - Phase E: `/app/test_reports/iteration_3.json`
   - Phase F: `/app/test_reports/iteration_4.json`

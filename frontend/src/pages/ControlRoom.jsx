@@ -21,7 +21,7 @@ const MachineTile = React.memo(function MachineTile({ machine, onOpen }) {
     <button
       data-testid={`machine-tile-${machine.code}`}
       onClick={() => onOpen(machine.id)}
-      className={`cyber-chamfer-sm relative w-[200px] border border-border bg-[hsl(var(--panel-1))] p-3 text-left transition-all duration-150 hover:border-[hsl(var(--primary))]/60 hover:shadow-[0_0_12px_rgba(var(--accent-rgb),0.15)] ${critical ? 'glow-critical border-[#ff2e63]/50' : ''}`}
+      className={`cyber-chamfer-sm relative w-[200px] border border-border bg-[hsl(var(--panel-1))] p-3 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-[hsl(var(--primary))]/60 hover:shadow-[0_0_14px_rgba(var(--accent-rgb),0.2)] ${critical ? 'glow-critical border-[#ff2e63]/50' : ''}`}
     >
       <span className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: meta.color, boxShadow: `0 0 8px ${meta.color}66` }} />
       <div className="flex items-start justify-between gap-1">

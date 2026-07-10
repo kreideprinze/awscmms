@@ -32,12 +32,13 @@ export default function Login() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4">
       <div
         className="pointer-events-none absolute inset-0"
         style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(var(--accent-rgb),0.08), transparent 60%), radial-gradient(700px 420px at 80% 0%, rgba(255,46,99,0.05), transparent 55%)' }}
       />
-      <div className="relative w-full max-w-md rounded-xl border border-border bg-[hsl(var(--panel-1))] p-8">
+      <div className="login-grid" aria-hidden="true" />
+      <div className="relative w-full max-w-md border border-border bg-[hsl(var(--panel-1))]/90 p-8 backdrop-blur-md" style={{ boxShadow: '0 0 0 1px rgba(var(--accent-rgb),0.1), 0 0 60px rgba(var(--accent-rgb),0.06), 0 30px 80px rgba(0,0,0,0.85)' }}>
         <div className="mb-8 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/10">
             {branding?.logo_data ? (
@@ -61,7 +62,7 @@ export default function Login() {
             <Input id="password" data-testid="login-password-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" required className="bg-[hsl(var(--panel-2))]" />
           </div>
           {error && <div data-testid="login-error" className="rounded-md border border-[#ff2e63]/40 bg-[#ff2e63]/10 px-3 py-2 text-sm text-[#ff2e63]">{error}</div>}
-          <Button type="submit" data-testid="login-submit-button" disabled={loading} className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90">
+          <Button type="submit" data-testid="login-submit-button" disabled={loading} className="w-full">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign in to Control Room'}
           </Button>
         </form>

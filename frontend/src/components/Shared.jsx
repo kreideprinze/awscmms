@@ -158,9 +158,9 @@ export function AnimatedNumber({ value }) {
 
 export function KpiCard({ label, value, sub, accent, testId }) {
   return (
-    <div data-testid={testId} className="cyber-panel px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{label}</div>
-      <div className={`mt-1 font-mono text-2xl tabular-nums ${accent || ''}`}>
+    <div data-testid={testId} className="cyber-panel group px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground transition-colors group-hover:text-foreground/80">{label}</div>
+      <div className={`mt-1 font-mono text-2xl tabular-nums transition-all duration-200 group-hover:[text-shadow:0_0_14px_rgba(var(--accent-rgb),0.35)] ${accent || ''}`}>
         <AnimatedNumber value={value} />
       </div>
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}

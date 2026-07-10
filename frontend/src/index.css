@@ -313,3 +313,140 @@ main > * {
 .text-neon-cyan { color: hsl(var(--neon-cyan)); }
 .text-neon-magenta { color: hsl(var(--neon-magenta)); }
 .text-neon-yellow { color: hsl(var(--neon-yellow)); }
+
+/* ============================================================
+   POLISH PASS — micro-interactions, depth & HUD detailing
+   (visual only; no behavioral changes)
+   ============================================================ */
+
+/* ---------- Text selection matches the accent system ---------- */
+::selection {
+  background: rgba(var(--accent-rgb), 0.25);
+  color: hsl(var(--foreground));
+}
+
+/* ---------- Global tactile press feedback on buttons ---------- */
+button {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+}
+button:not(:disabled):active {
+  transform: translateY(1px) scale(0.995);
+}
+
+/* ---------- Panels feel "live" on hover ---------- */
+.cyber-panel {
+  transition: border-color 0.25s ease, filter 0.25s ease;
+}
+.cyber-panel:hover {
+  border-color: rgba(var(--accent-rgb), 0.3);
+}
+/* HUD corner brackets — signature frame detail on panels */
+.cyber-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(var(--accent-rgb), 0.55), rgba(var(--accent-rgb), 0.55)) top left / 14px 1px no-repeat,
+    linear-gradient(0deg, rgba(var(--accent-rgb), 0.55), rgba(var(--accent-rgb), 0.55)) top left / 1px 14px no-repeat,
+    linear-gradient(90deg, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.35)) bottom right / 14px 1px no-repeat,
+    linear-gradient(0deg, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.35)) bottom right / 1px 14px no-repeat;
+  opacity: 0.7;
+  transition: opacity 0.25s ease;
+}
+.cyber-panel:hover::before {
+  opacity: 1;
+}
+
+/* ---------- Data tables: accent rail sweeps in on row hover ---------- */
+tbody tr {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+tbody tr:hover {
+  box-shadow: inset 2px 0 0 rgba(var(--accent-rgb), 0.55);
+}
+
+/* ---------- Page titles get a neon underline signature ---------- */
+main h1::after {
+  content: '';
+  display: block;
+  width: 42px;
+  height: 2px;
+  margin-top: 5px;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.9), rgba(255, 46, 99, 0.6), transparent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
+}
+
+/* ---------- Dialogs & popovers: neon aura + glass overlay ---------- */
+[role='dialog'] {
+  box-shadow:
+    0 0 0 1px rgba(var(--accent-rgb), 0.12),
+    0 0 45px rgba(var(--accent-rgb), 0.07),
+    0 30px 80px rgba(0, 0, 0, 0.9);
+}
+div.fixed.inset-0[data-state='open'] {
+  backdrop-filter: blur(10px);
+}
+
+/* ---------- Sidebar: icons nudge alive on hover ---------- */
+aside nav svg {
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+aside nav a:hover svg {
+  transform: scale(1.15);
+  filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.45));
+}
+
+/* ---------- Inputs: quiet hover affordance before focus ---------- */
+input:hover:not(:focus-visible),
+textarea:hover:not(:focus-visible) {
+  border-color: hsl(0 0% 28%);
+}
+
+/* ---------- Background vignette: focuses the eye center-screen ---------- */
+body::after {
+  background-image:
+    radial-gradient(130% 100% at 50% 0%, transparent 55%, rgba(0, 0, 0, 0.55) 100%),
+    url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="120" height="120"%3E%3Cfilter id="n"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="120" height="120" filter="url(%23n)" opacity="0.04"/%3E%3C/svg%3E');
+}
+
+/* ---------- Login: animated perspective grid floor ---------- */
+@keyframes grid-drift {
+  from { background-position: 0 0; }
+  to { background-position: 0 44px; }
+}
+.login-grid {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46vh;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(var(--accent-rgb), 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--accent-rgb), 0.14) 1px, transparent 1px);
+  background-size: 44px 44px;
+  transform: perspective(420px) rotateX(58deg) scale(1.6);
+  transform-origin: center bottom;
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent 85%);
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent 85%);
+  animation: grid-drift 4.5s linear infinite;
+}
+
+/* ---------- Live status chip: soft breathing glow ---------- */
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 4px rgba(5, 255, 161, 0.25); }
+  50% { box-shadow: 0 0 12px rgba(5, 255, 161, 0.5); }
+}
+header .alarm-pulse {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+/* ---------- Accessibility: honor reduced-motion preference ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

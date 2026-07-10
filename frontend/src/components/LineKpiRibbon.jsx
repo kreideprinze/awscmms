@@ -89,7 +89,7 @@ export function LineKpiRibbon({ onSelectLine, refreshSignal }) {
               key={l.line}
               data-testid={`line-kpi-${l.line.replace(/\s+/g, '-')}`}
               onClick={() => setExpandedLine(isOpen ? null : l.line)}
-              className={`cyber-chamfer-sm min-w-[170px] shrink-0 border bg-transparent px-3 py-2 text-left transition-all duration-150 ${
+              className={`cyber-chamfer-sm min-w-[170px] shrink-0 border bg-transparent px-3 py-2 text-left transition-all duration-150 hover:-translate-y-0.5 ${
                 isOpen
                   ? 'border-[hsl(var(--primary))] shadow-[0_0_12px_rgba(var(--accent-rgb),0.2)]'
                   : 'border-border hover:border-[hsl(var(--primary))]/60'
