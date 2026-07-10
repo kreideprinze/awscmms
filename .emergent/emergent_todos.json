@@ -1,42 +1,42 @@
 [
   {
-    "content": "Backend: structured PM checklist_groups + location field",
+    "content": "Backend: warnings endpoints + watch status + auto-WO",
     "status": "completed"
   },
   {
-    "content": "Backend: GET /pm-tasks/{id}; complete with per-row results + done_by/checked_by",
+    "content": "Backend: least-loaded tech auto-assign; operator/public forced auto-WO",
     "status": "completed"
   },
   {
-    "content": "Backend: PDF export endpoint (blank + completed) via reportlab",
+    "content": "Backend: WO lifecycle PENDING_ADMIN_CLOSURE + admin-only close + migration",
     "status": "completed"
   },
   {
-    "content": "Backend: public breakdown endpoints + submitted_via flag",
+    "content": "Backend: WO close restores warning machine + closes warning",
     "status": "completed"
   },
   {
-    "content": "Backend: seeded PM templates migrated to structured groups",
+    "content": "Frontend: CrackedGear icon + PENDING_ADMIN_CLOSURE badge",
     "status": "completed"
   },
   {
-    "content": "Frontend: ChecklistBuilder in PM create dialog",
+    "content": "Frontend: dialog locked-open + warning mode + operator checkbox removal",
     "status": "completed"
   },
   {
-    "content": "Frontend: dedicated Close PM Task page",
+    "content": "Frontend: warning launch points + warnings view + yellow feed rails",
     "status": "completed"
   },
   {
-    "content": "Frontend: PDF download buttons",
+    "content": "Frontend: WO kanban default, compact cards, plain machine text, admin close, PM routing fix",
     "status": "completed"
   },
   {
-    "content": "Frontend: Login public Report Breakdown + PUBLIC badge",
+    "content": "Frontend: dedicated Repair page + Start Repair navigation",
     "status": "completed"
   },
   {
-    "content": "Test: testing agent pass (iteration_4: backend 98.8%, frontend 100%)",
+    "content": "Test: testing agent pass (iteration_5: backend 100%, frontend 95%)",
     "status": "completed"
   }
 ]

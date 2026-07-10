@@ -22,12 +22,18 @@
 - Ensure maintenance execution is **audit-ready and printable**:
   - PM execution is driven by **structured checklists** (component → sub-item rows) with per-row OK/NOT OK + per-row remarks.
   - Every PM task supports **PDF export** for blank templates and completed instances, formatted like the real checklist sheet.
-- Remove friction for shop-floor breakdown reporting:
-  - Provide a **public kiosk breakdown reporting** entry point (no login required) capturing Reporter Name and flagging submissions as public.
+- Remove friction for shop-floor reporting:
+  - Provide **public kiosk reporting** entry points (no login required) capturing Reporter Name and flagging submissions as public.
 - Ensure reliability analytics are **verifiable with seeded data**:
   - Provide deterministic, labeled demo datasets to validate **Weibull** fit outputs (beta/eta/mean life/B10) and AWS UI behavior.
+- **Differentiate downtime vs non-downtime events** clearly:
+  - Add **Warning** observations that **do not affect** Availability/MTBF/MTTR but **do auto-dispatch** a WO and visually appear yellow across the HUD.
+- Ensure execution governance in CMMS:
+  - Work order completion requires **Admin closure** before final CLOSED.
 - Maintain **UI excellence without logic risk**:
   - Allow iterative UI polish improvements **without changing backend/frontend business logic**.
+
+---
 
 ## 2) Implementation Steps
 
@@ -100,48 +106,13 @@
 > This phase addresses a production-stopper PDF crash and adds deterministic seeded data to validate Weibull reliability calculations and AWS UI.
 
 #### G1) Fix Close PM “Download PDF” runtime error (P0)
-**Problem**
-- Downloading a PDF from Close PM page threw a runtime error (500).
-- Root cause: **non-ASCII em-dash (—)** in PM task names (e.g. `Predictive Inspection — Extruder 1`) causing **latin-1 encoding failure** in `Content-Disposition` header.
-
-**Fix (Delivered)**
-- Backend: sanitize PDF filename to ASCII-safe characters before setting header:
-  - `routers_maintenance.py` `pm_task_pdf`: `safe_name = _re.sub(r'[^A-Za-z0-9._-]+', '_', task_name)`
-- Frontend: add `.catch(...)` toast error handling for PDF download actions:
-  - `ClosePMTask.jsx` download button and toast action
-
-**Verification**
-- Previously failing task now returns **200**, and browser download works from the Close PM pane.
-
 **Status:** ✅ COMPLETE
 
 #### G2) Seed deterministic Weibull verification dataset (P0)
-**Goal**
-- Provide reproducible test data to validate Weibull fit results and AWS “Advanced (L3)” behavior.
-
-**Implementation (Delivered)**
-- Added `/app/backend/seed_weibull_demo.py` (idempotent, rerunnable) which seeds:
-  - **320 days** of historical runtime logs at **20.0 run-hours/day**
-  - **8 CLOSED** breakdown events at deterministic **median-rank Weibull quantile** TBFs
-  - Anchors `commissioned_at`, recomputes reliability for immediate AWS visibility
-- Profiles created (tagged `source='weibull_demo'` for identification/cleanup):
-  - Fryer (PC21): wear-out **beta=3.0, eta=700h**
-  - Auto Halver (PC32): random/constant **beta=1.0, eta=600h**
-  - Blending System (KKR): infant mortality **beta=0.8, eta=500h**
-
-**Expected / Observed**
-- Fitted MLE results are close to targets (n=8 ⇒ expected bias):
-  - PC21 Fryer: ~**3.60 / 689.7**
-  - PC32 Auto Halver: ~**1.17 / 577.3**
-  - KKR Blending: ~**0.93 / 474.2**
-- AWS page shows the three machines as **L3 / Advanced**, and the **Weibull Active** count reflects the seeded models.
-
 **Status:** ✅ COMPLETE
 
 **Phase G Testing:** ✅ COMPLETE
-- Manual + browser validation:
-  - Close PM “Blank PDF” downloads successfully.
-  - AWS page shows seeded Weibull machines with beta/eta.
+- Manual + browser validation
 
 ---
 
@@ -151,39 +122,106 @@
 #### H1) Global CSS micro-interactions + HUD detailing (P1)
 **Status:** ✅ COMPLETE
 
-**Delivered (visual-only)**
-- Accent-tinted `::selection`
-- Global button press feedback (`:active` translateY + scale)
-- `cyber-panel` hover border lift + **HUD corner brackets** via `::before`
-- Table row hover **accent rail** (inset shadow)
-- Page title **neon underline signature** (`main h1::after`)
-- Dialog aura shadow + glass overlay (backdrop blur on overlays)
-- Sidebar icon hover scale + glow
-- Input hover border affordance
-- Stronger background vignette over noise overlay (focuses eye center)
-- Login animated perspective grid floor (`.login-grid`)
-- `prefers-reduced-motion` block for accessibility
-
 #### H2) JSX presentational tweaks (P1)
 **Status:** ✅ COMPLETE
-
-**Delivered (visual-only)**
-- Control Room `MachineTile` hover lift + stronger glow
-- `LineKpiRibbon` line cards hover lift
-- `KpiCard` hover: value glow + label brighten
-- Login: add grid background + glass/aura card shadow
-- Login submit button normalized to app-wide outlined styling (removed hardcoded solid fill)
-
-**Verification**
-- Screenshots captured: login (grid + outlined), Control Room (panel brackets + hover lift), Breakdowns (h1 underline + row rail), dialog (glass overlay)
-- No testids changed; esbuild clean; no console errors observed.
 
 **Status:** ✅ COMPLETE
 
 ---
 
+### Phase I — Warnings + Workflow Changes + Kanban/Repair Dedicated Pages
+> This phase differentiates “machine down” vs “needs attention”, tightens CMMS governance (admin closure), improves Kanban as default execution surface, and standardizes dedicated-page patterns for execution (repair page).
+
+#### I1) Add “Warning” entry type (non-downtime, yellow-tagged) (P0)
+**Delivered**
+- Backend:
+  - `db.warnings` collection + `WRN-` counter
+  - `POST /api/warnings`, `GET /api/warnings`
+  - `POST /api/public/warnings` (no login), flagged `submitted_via=public_kiosk`
+  - Warning creates **no breakdown** and **does not affect** availability/MTBF/MTTR.
+  - Machine status set to **watch** (yellow) for visibility.
+  - Always auto-creates a WO (Inspection/Corrective) and auto-assigns to **least-loaded** technician.
+  - Admin closing warning-sourced WO closes warning and restores machine status from watch → running.
+- Frontend:
+  - Warning mode in the same dialog (same fields), visually yellow.
+  - Launch points: Login (public), Breakdowns page, Machine Drawer.
+  - Breakdowns page has **Breakdowns/Warn​ings** toggle and warnings table view.
+  - Control Room feed rails highlight warning-created events in yellow.
+
+**Status:** ✅ COMPLETE
+
+#### I2) Report Breakdown/Warning modal must not close on outside click/escape (P0)
+- Dialog now prevents `onInteractOutside`, `onPointerDownOutside`, and `onEscapeKeyDown`.
+- Only the explicit **×** closes.
+
+**Status:** ✅ COMPLETE
+
+#### I3) Change Breakdown icon from flame → cracked gear (P0)
+- Implemented `CrackedGear` SVG icon and replaced flame usage in:
+  - Sidebar / navigation
+  - Login public breakdown button
+  - Repair page header
+  - (and shared imports through `StatusBits`)
+
+**Status:** ✅ COMPLETE
+
+#### I4) Work Orders: machine name not clickable to machine stats (P0)
+- Removed `openMachine(...)` linking from:
+  - Work Orders Kanban cards
+  - Work Orders table view
+
+**Status:** ✅ COMPLETE
+
+#### I5) Work Order completion requires Admin closure (P0)
+- Lifecycle updated:
+  - `OPEN → ASSIGNED → IN_PROGRESS → (tech) PENDING_ADMIN_CLOSURE → (admin) CLOSED`
+- Backend:
+  - tech `complete` sets `PENDING_ADMIN_CLOSURE` and sends **admin-role notifications**.
+  - tech `close` returns **403**.
+  - admin `close` finalizes CLOSED.
+  - Migrated existing `COMPLETED` WOs → `PENDING_ADMIN_CLOSURE`.
+- Frontend:
+  - Kanban includes **ADMIN CLOSURE** column.
+  - Admin sees **Admin Close** action; non-admin sees “awaiting admin”.
+
+**Status:** ✅ COMPLETE
+
+#### I6) Operator/public breakdown submissions always auto-dispatch WO + auto-assign tech (P0)
+- Backend:
+  - Forces `auto_create_work_order=True` for operator role.
+  - Uses least-loaded technician assignment.
+- Frontend:
+  - Auto-create checkbox hidden for operator/public flows (replaced by note).
+  - Admin/technician still have checkbox for authenticated breakdown creation.
+
+**Status:** ✅ COMPLETE
+
+#### I7) Work Orders defaults to Kanban + PM-from-Kanban navigation fix + density improvements (P0)
+- Default Work Orders view is Kanban.
+- Cards made denser (smaller padding/text) to show more per column.
+- PM-type WO “Complete” routes to current structured checklist page:
+  - `/preventive-maintenance/close/{pm_task_id}`
+
+**Status:** ✅ COMPLETE
+
+#### I8) Dedicated Repair page for breakdown execution (P0)
+- Added `/breakdowns/repair/:breakdownId` dedicated page:
+  - Live elapsed downtime display
+  - root cause + action taken + spares
+  - completion restores machine
+- “Start Repair” navigates to repair page (and triggers `start` if needed).
+
+**Status:** ✅ COMPLETE
+
+**Phase I Testing:** ✅ COMPLETE
+- `/app/test_reports/iteration_5.json`
+  - **backend 100% (34/34)**
+  - **frontend 95%** *(1 skipped automation step due to no OPEN breakdowns available; verified manually via direct repair URL)*
+
+---
+
 ## 3) Next Actions
-> All phases through H are complete. Remaining work is optional backlog only.
+> All phases through I are complete. Remaining work is optional backlog only.
 
 ### Completed (Prior Iterations) ✅
 - Removed infinite zoom in Control Room; enabled vertical scroll.
@@ -191,41 +229,35 @@
 - Applied Cyberpunk HUD styling across all modules.
 - Verified Breakdown → auto-create WO end-to-end.
 
-### Phase E — Completed Work ✅
-- Implemented `GET /api/control-room/line-kpis` + Ribbon v2.
-- Implemented per-user sidebar customization (`/api/users/me/ui-prefs`).
-- Implemented admin branding: accent hex + logo upload.
-- Standardized outlined styling + pure black theme.
-
-### Phase F — Completed Work ✅
-- PM templates/tasks now support `checklist_groups` (component → sub-items), `location`.
-- New structured checklist builder in PM create flow.
-- New dedicated PM close page with per-row OK/NOT OK + per-row remarks + sign-off.
-- PM PDF export (blank + completed) matching reference layout.
-- Public kiosk breakdown reporting from login with `submitted_via=public_kiosk` and PUBLIC badges.
-
-### Phase G — Completed Work ✅
-- Fixed PDF download crash caused by non-ASCII task names (Content-Disposition latin-1 encoding).
-- Seeded deterministic Weibull demo dataset (`seed_weibull_demo.py`) for verifying Weibull fit outputs and AWS behavior.
-
-### Phase H — Completed Work ✅
-- Visual-only UX polish pass (global micro-interactions, HUD detailing, hover behaviors, login grid, dialog glass overlay) without any business-logic changes.
+### Phase I — Completed Work ✅
+- Warning records + yellow watch status + always-dispatched WO.
+- Report dialogs: no outside click/escape dismiss.
+- Cracked gear breakdown icon across app.
+- WO machine names are plain text (stats only via Control Room).
+- WO admin-closure governance implemented.
+- Operator/public breakdowns always auto-dispatch and auto-assign.
+- Work Orders Kanban default + PM route fix.
+- Dedicated Breakdown Repair page.
 
 ### Optional Next Enhancements (Future / Backlog)
+- Add an Admin “Warnings” management view (filters, close/reopen, trends) and/or link warnings to WO details.
+- Extend timeline filtering for warnings and add a “Warning” chip in machine tiles.
+- Harden public kiosk endpoints:
+  - rate limiting / spam throttling
+  - optional kiosk PIN
+  - optional photo upload.
 - PM templates UI in Administration (separate from creating a PM task) to manage reusable templates by machine type.
 - True “current shift” time window mode using a configurable shift schedule (timezone-aware) for availability KPIs.
 - Control Room ribbon drilldown: click line/section → open filtered breakdown/work-order panel.
-- Public kiosk hardening:
-  - rate limiting / spam throttling
-  - optional kiosk PIN
-  - optional photo upload for breakdowns.
 - PDF styling polish:
-  - embed a monospace font and/or add logo in header
-  - add explicit checkbox glyphs and signature capture.
+  - embed logo in header
+  - optional signature capture.
 - Reliability demo management:
   - add an admin endpoint/button to purge `source='weibull_demo'` data
   - show a “DEMO” tag on seeded Weibull models in AWS UI.
 - Contrast review pass (WCAG-oriented) for pure black + neon accents.
+
+---
 
 ## 4) Success Criteria
 - ✅ Control Room ribbon is **line-first**:
@@ -248,16 +280,28 @@
   - dedicated close page
 - ✅ PM checklists are printable and consistent:
   - blank + completed PDF export matches checklist sheet format.
-- ✅ Breakdown reporting is accessible to non-authenticated operators:
-  - login-page public report flow
+- ✅ Reporting is accessible to non-authenticated operators:
+  - login-page public reporting
   - reporter accountability captured
   - submissions flagged `public_kiosk` and visually tagged.
 - ✅ Reliability calculations are verifiable:
   - deterministic Weibull demo dataset exists (runtime logs + closed breakdowns)
   - AWS shows L3/Advanced machines with beta/eta, predicted life and Weibull Active count.
+- ✅ Warnings are functionally distinct from breakdowns:
+  - no downtime impact
+  - yellow watch state
+  - WO auto-dispatched and auto-assigned
+  - launchable from all reporting entry points.
+- ✅ Work orders require admin closure:
+  - `PENDING_ADMIN_CLOSURE` implemented
+  - admin notifications sent
+  - only admin can final-close.
+- ✅ Dedicated execution pages exist where required:
+  - PM close-out page
+  - Breakdown repair page.
 - ✅ UI polish improvements do not introduce logic regressions:
-  - visual-only enhancements applied consistently
   - reduced-motion users respected
 - ✅ All changes validated by test reports:
   - Phase E: `/app/test_reports/iteration_3.json`
   - Phase F: `/app/test_reports/iteration_4.json`
+  - Phase I: `/app/test_reports/iteration_5.json`
