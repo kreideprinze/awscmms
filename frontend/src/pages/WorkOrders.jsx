@@ -20,6 +20,157 @@ const LIFE = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSE
 const COL_LABEL = { PENDING_ADMIN_CLOSURE: 'ADMIN CLOSURE' };
 const TYPES = ['all', 'Corrective', 'Preventive', 'Inspection'];
 
+// ISO <-> datetime-local input helpers (local timezone aware)
+const toLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+const toIso = (local) => (local ? new Date(local).toISOString() : '');
+
+// Kanban card detail popout — full WO inspection + editable Start/End times.
+// Times editable by Admins or the assigned Technician (enforced server-side too).
+function WODetailModal({ wo, open, setOpen, onDone, onAct, onStartComplete }) {
+  const { user, isAdmin } = useApp();
+  const navigate = useNavigate();
+  const [startT, setStartT] = useState('');
+  const [endT, setEndT] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (wo) { setStartT(toLocalInput(wo.started_at)); setEndT(toLocalInput(wo.completed_at)); }
+  }, [wo]);
+
+  if (!wo) return null;
+  const canEditTimes = isAdmin || wo.assigned_to === user?.username;
+  const dirty = startT !== toLocalInput(wo.started_at) || endT !== toLocalInput(wo.completed_at);
+
+  const saveTimes = async () => {
+    setSaving(true);
+    try {
+      await api.put(`/work-orders/${wo.id}`, { action: 'update', started_at: toIso(startT), completed_at: toIso(endT) });
+      toast.success(`${wo.wo_number} times updated`);
+      onDone();
+    } catch (e) { toast.error(errMsg(e)); }
+    setSaving(false);
+  };
+
+  const Row = ({ label, value, testId }) => (
+    <div>
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className="font-mono text-xs text-foreground" data-testid={testId}>{value || '—'}</div>
+    </div>
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent data-testid="wo-detail-modal" className="max-h-[88vh] max-w-lg overflow-y-auto border-border bg-[hsl(var(--panel-1))]">
+        <DialogHeader>
+          <DialogTitle className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm text-[hsl(var(--primary))]" data-testid="wo-detail-number">{wo.wo_number}</span>
+            <LifecycleBadge status={wo.status} />
+            <CritBadge level={wo.priority} />
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="text-sm font-medium leading-snug" data-testid="wo-detail-title">{wo.title}</div>
+
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3">
+            <Row label="Machine" value={wo.machine_name} testId="wo-detail-machine" />
+            <Row label="Type" value={`${wo.wo_type}${wo.auto_generated ? ' (auto)' : ''}`} testId="wo-detail-type" />
+            <Row label="Assigned To" value={wo.assigned_to} testId="wo-detail-assigned" />
+            <Row label="Created" value={fmtDate(wo.created_at)} testId="wo-detail-created" />
+            <Row label="Duration" value={wo.duration_minutes != null ? `${wo.duration_minutes} min` : null} testId="wo-detail-duration" />
+            <Row label="Closed By" value={wo.closed_by} testId="wo-detail-closed-by" />
+          </div>
+
+          {wo.description && (
+            <div>
+              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Description</Label>
+              <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90" data-testid="wo-detail-description">{wo.description}</p>
+            </div>
+          )}
+          {wo.root_cause && (
+            <div>
+              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Root Cause</Label>
+              <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90" data-testid="wo-detail-root-cause">{wo.root_cause}</p>
+            </div>
+          )}
+          {wo.action_taken && (
+            <div>
+              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Action Taken</Label>
+              <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90" data-testid="wo-detail-action-taken">{wo.action_taken}</p>
+            </div>
+          )}
+          {(wo.spare_parts || []).length > 0 && (
+            <div>
+              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Spare Parts Consumed</Label>
+              <div className="mt-1 space-y-0.5">
+                {wo.spare_parts.map((s, i) => (
+                  <div key={i} className="font-mono text-[11px] text-foreground/80">{s.sap_code} × {s.quantity}{s.name ? ` — ${s.name}` : ''}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Editable Start / End times */}
+          <div className="rounded-md border border-[hsl(var(--primary))]/30 bg-[hsl(var(--panel-2))] p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <Label className="text-[10px] uppercase tracking-widest text-[hsl(var(--primary))]">Execution Times</Label>
+              {!canEditTimes && <span className="text-[9px] text-muted-foreground">read-only (admin / assignee)</span>}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Start Time</Label>
+                <Input type="datetime-local" data-testid="wo-detail-start-time" value={startT} disabled={!canEditTimes}
+                  onChange={(e) => setStartT(e.target.value)} className="mt-0.5 bg-[hsl(var(--panel-1))] font-mono text-xs" />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground">End Time</Label>
+                <Input type="datetime-local" data-testid="wo-detail-end-time" value={endT} disabled={!canEditTimes}
+                  onChange={(e) => setEndT(e.target.value)} className="mt-0.5 bg-[hsl(var(--panel-1))] font-mono text-xs" />
+              </div>
+            </div>
+            {canEditTimes && (
+              <Button size="sm" onClick={saveTimes} disabled={!dirty || saving} data-testid="wo-detail-save-times"
+                className="mt-3 w-full border border-[hsl(var(--primary))]/60 bg-transparent text-xs text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 disabled:opacity-40">
+                {saving ? 'Saving…' : 'Save Times'}
+              </Button>
+            )}
+          </div>
+
+          {/* Workflow actions */}
+          <div className="flex flex-wrap gap-2 border-t border-border pt-3">
+            {['OPEN', 'ASSIGNED'].includes(wo.status) && (
+              <Button size="sm" variant="outline" data-testid="wo-detail-start-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
+                onClick={() => { onAct(wo, 'start'); setOpen(false); }}>Start</Button>
+            )}
+            {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && (
+              <Button size="sm" data-testid="wo-detail-complete-btn" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10"
+                onClick={() => { setOpen(false); onStartComplete(wo); }}>Complete</Button>
+            )}
+            {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
+              <Button size="sm" data-testid="wo-detail-admin-close-btn" className="h-7 border border-[#ff9e1c]/60 bg-transparent text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/10"
+                onClick={() => { onAct(wo, 'close'); setOpen(false); }}>Admin Close</Button>
+            ) : (
+              <span className="self-center text-[10px] text-[#ff9e1c]">awaiting admin closure</span>
+            ))}
+            {(wo.breakdown_id || wo.source_breakdown_id) && wo.status !== 'CLOSED' && (
+              <Button size="sm" variant="outline" data-testid="wo-detail-repair-page-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
+                onClick={() => navigate(`/breakdowns/repair/${wo.breakdown_id || wo.source_breakdown_id}`)}>Open Repair Page</Button>
+            )}
+            {wo.wo_type === 'Preventive' && wo.pm_task_id && wo.status !== 'CLOSED' && (
+              <Button size="sm" variant="outline" data-testid="wo-detail-pm-page-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
+                onClick={() => navigate(`/preventive-maintenance/close/${wo.pm_task_id}`)}>PM Closeout Page</Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function CompleteDialog({ wo, open, setOpen, onDone }) {
   const [actionTaken, setActionTaken] = useState('');
   const [rootCause, setRootCause] = useState('');
@@ -79,6 +230,8 @@ export default function WorkOrders() {
   const [createOpen, setCreateOpen] = useState(false);
   const [completeWo, setCompleteWo] = useState(null);
   const [completeOpen, setCompleteOpen] = useState(false);
+  const [detailWo, setDetailWo] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [form, setForm] = useState({ machine_id: '', title: '', description: '', wo_type: 'Corrective', priority: 'medium', assigned_to: '' });
 
   const load = useCallback(() => {
@@ -118,9 +271,25 @@ export default function WorkOrders() {
     setCompleteOpen(true);
   };
 
-  // Compact kanban card — machine name is plain text (stats live in the Control Room only)
+  const openDetail = (wo) => { setDetailWo(wo); setDetailOpen(true); };
+
+  // Refresh the board AND the WO currently open in the detail modal (after time edits)
+  const refreshDetail = useCallback(async () => {
+    load();
+    if (detailWo) {
+      try {
+        const r = await api.get(`/work-orders?search=${encodeURIComponent(detailWo.wo_number)}`);
+        const fresh = (r.data.items || []).find((w) => w.id === detailWo.id);
+        if (fresh) setDetailWo(fresh);
+      } catch {}
+    }
+  }, [load, detailWo]);
+
+  // Compact kanban card — click anywhere on the card to open the detail popout
   const WOCard = ({ wo }) => (
-    <div className="border border-border bg-[hsl(var(--panel-1))] p-2" data-testid={`wo-card-${wo.wo_number}`}>
+    <div role="button" tabIndex={0} onClick={() => openDetail(wo)} onKeyDown={(e) => e.key === 'Enter' && openDetail(wo)}
+      className="cursor-pointer border border-border bg-[hsl(var(--panel-1))] p-2 transition-colors hover:border-[hsl(var(--primary))]/60 hover:shadow-[0_0_8px_rgba(var(--accent-rgb),0.15)]"
+      data-testid={`wo-card-${wo.wo_number}`}>
       <div className="flex items-center justify-between gap-1">
         <span className="font-mono text-[10px] text-[hsl(var(--primary))]">{wo.wo_number}</span>
         <CritBadge level={wo.priority} />
@@ -129,10 +298,10 @@ export default function WorkOrders() {
       <div className="mt-0.5 truncate text-[10px] text-muted-foreground" data-testid={`wo-card-machine-${wo.wo_number}`}>{wo.machine_name}</div>
       <div className="text-[9px] text-muted-foreground">{wo.wo_type} · {wo.assigned_to || 'unassigned'} · {fmtDate(wo.created_at)}</div>
       <div className="mt-1.5 flex flex-wrap gap-1">
-        {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-5 border-border bg-[hsl(var(--panel-2))] px-1.5 text-[9px]" onClick={() => act(wo, 'start')}>Start</Button>}
-        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-5 border border-[#05ffa1]/60 bg-transparent px-1.5 text-[9px] text-[#05ffa1] hover:bg-[#05ffa1]/10" onClick={() => startComplete(wo)}>Complete</Button>}
+        {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-5 border-border bg-[hsl(var(--panel-2))] px-1.5 text-[9px]" onClick={(e) => { e.stopPropagation(); act(wo, 'start'); }}>Start</Button>}
+        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-5 border border-[#05ffa1]/60 bg-transparent px-1.5 text-[9px] text-[#05ffa1] hover:bg-[#05ffa1]/10" onClick={(e) => { e.stopPropagation(); startComplete(wo); }}>Complete</Button>}
         {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
-          <Button size="sm" className="h-5 border border-[#ff9e1c]/60 bg-transparent px-1.5 text-[9px] text-[#ff9e1c] hover:bg-[#ff9e1c]/10" data-testid={`wo-admin-close-${wo.wo_number}`} onClick={() => act(wo, 'close')}>Admin Close</Button>
+          <Button size="sm" className="h-5 border border-[#ff9e1c]/60 bg-transparent px-1.5 text-[9px] text-[#ff9e1c] hover:bg-[#ff9e1c]/10" data-testid={`wo-admin-close-${wo.wo_number}`} onClick={(e) => { e.stopPropagation(); act(wo, 'close'); }}>Admin Close</Button>
         ) : (
           <span className="text-[9px] text-[#ff9e1c]">awaiting admin</span>
         ))}
@@ -263,6 +432,7 @@ export default function WorkOrders() {
       </Dialog>
 
       <CompleteDialog wo={completeWo} open={completeOpen} setOpen={setCompleteOpen} onDone={load} />
+      <WODetailModal wo={detailWo} open={detailOpen} setOpen={setDetailOpen} onDone={refreshDetail} onAct={act} onStartComplete={startComplete} />
     </div>
   );
 }

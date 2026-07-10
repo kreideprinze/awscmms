@@ -1,42 +1,22 @@
 [
   {
-    "content": "Backend: warnings endpoints + watch status + auto-WO",
+    "content": "Backend: PM completion transitions linked WO to PENDING_ADMIN_CLOSURE + admin notification",
     "status": "completed"
   },
   {
-    "content": "Backend: least-loaded tech auto-assign; operator/public forced auto-WO",
+    "content": "Backend: extend WO update action to support editing started_at/completed_at (admin or assigned tech)",
     "status": "completed"
   },
   {
-    "content": "Backend: WO lifecycle PENDING_ADMIN_CLOSURE + admin-only close + migration",
+    "content": "Frontend: Kanban card detail popout modal with editable Start/End times",
     "status": "completed"
   },
   {
-    "content": "Backend: WO close restores warning machine + closes warning",
+    "content": "Build check + backend curl verification",
     "status": "completed"
   },
   {
-    "content": "Frontend: CrackedGear icon + PENDING_ADMIN_CLOSURE badge",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: dialog locked-open + warning mode + operator checkbox removal",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: warning launch points + warnings view + yellow feed rails",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: WO kanban default, compact cards, plain machine text, admin close, PM routing fix",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: dedicated Repair page + Start Repair navigation",
-    "status": "completed"
-  },
-  {
-    "content": "Test: testing agent pass (iteration_5: backend 100%, frontend 95%)",
-    "status": "completed"
+    "content": "Comprehensive testing via testing agent",
+    "status": "in_progress"
   }
 ]

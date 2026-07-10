@@ -378,6 +378,8 @@ class WOUpdate(BaseModel):
     spare_parts: Optional[List[SpareUse]] = None
     duration_minutes: Optional[float] = None
     checklist_results: Optional[dict] = None
+    started_at: Optional[str] = None    # ISO datetime — editable via Kanban detail modal
+    completed_at: Optional[str] = None  # ISO datetime — editable via Kanban detail modal
 
 
 @router.put('/work-orders/{wo_id}')
@@ -474,9 +476,29 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
             updates['root_cause'] = req.root_cause
         if req.action_taken is not None:
             updates['action_taken'] = req.action_taken
+        # Start/End time edits — restricted to Admins or the assigned Technician
+        if req.started_at is not None or req.completed_at is not None:
+            if user.get('role') != 'admin' and wo.get('assigned_to') != user['username']:
+                raise HTTPException(status_code=403, detail='Only an Admin or the assigned technician can edit work order times')
+            start_s = req.started_at if req.started_at is not None else wo.get('started_at')
+            end_s = req.completed_at if req.completed_at is not None else wo.get('completed_at')
+            start_dt = parse_dt(start_s) if start_s else None
+            end_dt = parse_dt(end_s) if end_s else None
+            if start_dt and end_dt and end_dt < start_dt:
+                raise HTTPException(status_code=400, detail='End time cannot be before start time')
+            if req.started_at is not None:
+                updates['started_at'] = req.started_at or None
+            if req.completed_at is not None:
+                updates['completed_at'] = req.completed_at or None
+            if start_dt and end_dt:
+                updates['duration_minutes'] = round((end_dt - start_dt).total_seconds() / 60.0, 1)
+            await create_timeline_event('wo_updated', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                        title=f"WO {wo['wo_number']} times updated", user=user['username'],
+                                        reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
         if updates:
             await db.work_orders.update_one({'id': wo_id}, {'$set': updates})
-        return {'ok': True}
+        updated = await db.work_orders.find_one({'id': wo_id}, {'_id': 0})
+        return {'ok': True, 'work_order': updated}
 
     raise HTTPException(status_code=400, detail='Invalid action')
 
@@ -666,6 +688,33 @@ async def complete_pm_task(task_id: str, req: PMComplete, user: dict = Depends(r
     await create_notification('work_order', f"PM Completed: {task['machine_name']}",
                               f"{task['task_name']} completed by {user['username']}", severity='success',
                               machine_id=task['machine_id'], machine_name=task['machine_name'], reference_id=task_id, reference_type='pm_task')
+
+    # Lifecycle standardization: any open WO linked to this PM parks at PENDING_ADMIN_CLOSURE
+    # (identical to the Corrective flow) — only an Admin can perform final closure.
+    open_wos = await db.work_orders.find(
+        {'pm_task_id': task_id, 'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS']}}, {'_id': 0}).to_list(50)
+    for wo in open_wos:
+        started = wo.get('started_at') or wo.get('created_at')
+        duration = None
+        if started:
+            try:
+                duration = round((datetime.now(timezone.utc) - parse_dt(started)).total_seconds() / 60.0, 1)
+            except Exception:
+                duration = None
+        await db.work_orders.update_one({'id': wo['id']}, {'$set': {
+            'status': 'PENDING_ADMIN_CLOSURE', 'completed_at': now_iso(),
+            'action_taken': req.remarks or wo.get('action_taken'),
+            'duration_minutes': duration, 'pm_completion_id': completion['id'],
+        }})
+        await create_timeline_event('wo_completed', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                    title=f"WO {wo['wo_number']} completed — awaiting admin closure",
+                                    description=f"PM checklist submitted: {task['task_name']}", user=user['username'],
+                                    reference_id=wo['id'], reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
+        await create_notification('work_order', f"Admin Review Required: {wo['machine_name']}",
+                                  f"{wo['wo_number']} — {wo['title']} (PM) completed by {user['username']}. Admin closure required.",
+                                  severity='warning', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                  reference_id=wo['id'], reference_type='work_order', target_role='admin')
+
     completion.pop('_id', None)
     return completion
 
