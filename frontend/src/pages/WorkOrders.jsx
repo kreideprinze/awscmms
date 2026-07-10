@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Plus, LayoutGrid, Rows3 } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
@@ -14,7 +15,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
 import { MachineSelect, TechnicianSelect, SpareRows } from '@/components/Shared';
 
-const LIFE = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CLOSED'];
+// Lifecycle: OPEN -> ASSIGNED -> IN_PROGRESS -> (tech completes) PENDING_ADMIN_CLOSURE -> (admin) CLOSED
+const LIFE = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSED'];
+const COL_LABEL = { PENDING_ADMIN_CLOSURE: 'ADMIN CLOSURE' };
 const TYPES = ['all', 'Corrective', 'Preventive', 'Inspection'];
 
 function CompleteDialog({ wo, open, setOpen, onDone }) {
@@ -35,7 +38,7 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
         spare_parts: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
         checklist_results: Object.keys(checklist).length ? checklist : undefined,
       });
-      toast.success(`${wo.wo_number} completed — inventory updated`);
+      toast.success(`${wo.wo_number} completed — awaiting admin closure`);
       setOpen(false); onDone();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -50,7 +53,7 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">Checklist</Label>
               {wo.checklist.map((c) => (
                 <label key={c} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={!!checklist[c]} onChange={(e) => setChecklist({ ...checklist, [c]: e.target.checked })} className="accent-[#2ea8ff]" />
+                  <input type="checkbox" checked={!!checklist[c]} onChange={(e) => setChecklist({ ...checklist, [c]: e.target.checked })} className="accent-[#00fff5]" />
                   {c}
                 </label>
               ))}
@@ -67,9 +70,10 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
 }
 
 export default function WorkOrders() {
-  const { openMachine } = useApp();
+  const { isAdmin } = useApp();
+  const navigate = useNavigate();
   const [data, setData] = useState({ items: [], total: 0 });
-  const [view, setView] = useState('table');
+  const [view, setView] = useState('kanban'); // kanban is the default view
   const [status, setStatus] = useState('all');
   const [woType, setWoType] = useState('all');
   const [createOpen, setCreateOpen] = useState(false);
@@ -104,19 +108,34 @@ export default function WorkOrders() {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
+  // PM-type WOs open the CURRENT structured PM close page; others use the complete dialog
+  const startComplete = (wo) => {
+    if (wo.wo_type === 'Preventive' && wo.pm_task_id) {
+      navigate(`/preventive-maintenance/close/${wo.pm_task_id}`);
+      return;
+    }
+    setCompleteWo(wo);
+    setCompleteOpen(true);
+  };
+
+  // Compact kanban card — machine name is plain text (stats live in the Control Room only)
   const WOCard = ({ wo }) => (
-    <div className="rounded-md border border-border bg-[hsl(var(--panel-1))] p-3">
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-xs text-[hsl(var(--primary))]">{wo.wo_number}</span>
+    <div className="border border-border bg-[hsl(var(--panel-1))] p-2" data-testid={`wo-card-${wo.wo_number}`}>
+      <div className="flex items-center justify-between gap-1">
+        <span className="font-mono text-[10px] text-[hsl(var(--primary))]">{wo.wo_number}</span>
         <CritBadge level={wo.priority} />
       </div>
-      <div className="mt-1 text-sm font-medium">{wo.title}</div>
-      <button className="mt-0.5 text-xs text-muted-foreground hover:text-[hsl(var(--primary))]" onClick={() => openMachine(wo.machine_id)}>{wo.machine_name}</button>
-      <div className="mt-1 text-[10px] text-muted-foreground">{wo.wo_type} · {wo.assigned_to || 'unassigned'} · {fmtDate(wo.created_at)}</div>
-      <div className="mt-2 flex flex-wrap gap-1">
-        {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" onClick={() => act(wo, 'start')}>Start</Button>}
-        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 border border-[#05ffa1]/60 bg-transparent text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/10" onClick={() => { setCompleteWo(wo); setCompleteOpen(true); }}>Complete</Button>}
-        {wo.status === 'COMPLETED' && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" onClick={() => act(wo, 'close')}>Close</Button>}
+      <div className="mt-0.5 line-clamp-2 text-xs font-medium leading-snug" title={wo.title}>{wo.title}</div>
+      <div className="mt-0.5 truncate text-[10px] text-muted-foreground" data-testid={`wo-card-machine-${wo.wo_number}`}>{wo.machine_name}</div>
+      <div className="text-[9px] text-muted-foreground">{wo.wo_type} · {wo.assigned_to || 'unassigned'} · {fmtDate(wo.created_at)}</div>
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-5 border-border bg-[hsl(var(--panel-2))] px-1.5 text-[9px]" onClick={() => act(wo, 'start')}>Start</Button>}
+        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-5 border border-[#05ffa1]/60 bg-transparent px-1.5 text-[9px] text-[#05ffa1] hover:bg-[#05ffa1]/10" onClick={() => startComplete(wo)}>Complete</Button>}
+        {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
+          <Button size="sm" className="h-5 border border-[#ff9e1c]/60 bg-transparent px-1.5 text-[9px] text-[#ff9e1c] hover:bg-[#ff9e1c]/10" data-testid={`wo-admin-close-${wo.wo_number}`} onClick={() => act(wo, 'close')}>Admin Close</Button>
+        ) : (
+          <span className="text-[9px] text-[#ff9e1c]">awaiting admin</span>
+        ))}
       </div>
     </div>
   );
@@ -158,11 +177,11 @@ export default function WorkOrders() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5" data-testid="work-orders-kanban">
           {LIFE.map((col) => (
             <div key={col} className="rounded-lg border border-border bg-[hsl(var(--panel-1))]/50">
-              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                {col} <span className="ml-1 text-[hsl(var(--primary))]">{data.items.filter((w) => w.status === col).length}</span>
+              <div className="border-b border-border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                {COL_LABEL[col] || col} <span className="ml-1 text-[hsl(var(--primary))]">{data.items.filter((w) => w.status === col).length}</span>
               </div>
-              <ScrollArea className="h-[60vh]">
-                <div className="space-y-2 p-2">
+              <ScrollArea className="h-[62vh]">
+                <div className="space-y-1.5 p-1.5">
                   {data.items.filter((w) => w.status === col).map((wo) => <WOCard key={wo.id} wo={wo} />)}
                 </div>
               </ScrollArea>
@@ -191,17 +210,19 @@ export default function WorkOrders() {
                   <TableCell className="font-mono text-xs text-[hsl(var(--primary))]">{wo.wo_number}</TableCell>
                   <TableCell className="text-xs">{wo.wo_type}{wo.auto_generated && <span className="ml-1 text-[9px] text-muted-foreground">(auto)</span>}</TableCell>
                   <TableCell className="max-w-64 truncate text-sm">{wo.title}</TableCell>
-                  <TableCell>
-                    <button className="text-sm hover:text-[hsl(var(--primary))]" onClick={() => openMachine(wo.machine_id)}>{wo.machine_name}</button>
-                  </TableCell>
+                  <TableCell className="text-sm" data-testid={`wo-machine-${wo.wo_number}`}>{wo.machine_name}</TableCell>
                   <TableCell><CritBadge level={wo.priority} /></TableCell>
                   <TableCell><LifecycleBadge status={wo.status} /></TableCell>
                   <TableCell className="text-sm">{wo.assigned_to || '—'}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" data-testid={`wo-start-${wo.wo_number}`} onClick={() => act(wo, 'start')}>Start</Button>}
-                      {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 border border-[#05ffa1]/60 bg-transparent text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`wo-complete-${wo.wo_number}`} onClick={() => { setCompleteWo(wo); setCompleteOpen(true); }}>Complete</Button>}
-                      {wo.status === 'COMPLETED' && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" data-testid={`wo-close-${wo.wo_number}`} onClick={() => act(wo, 'close')}>Close</Button>}
+                      {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 border border-[#05ffa1]/60 bg-transparent text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`wo-complete-${wo.wo_number}`} onClick={() => startComplete(wo)}>Complete</Button>}
+                      {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
+                        <Button size="sm" className="h-6 border border-[#ff9e1c]/60 bg-transparent text-[10px] text-[#ff9e1c] hover:bg-[#ff9e1c]/10" data-testid={`wo-close-${wo.wo_number}`} onClick={() => act(wo, 'close')}>Admin Close</Button>
+                      ) : (
+                        <span className="text-[10px] text-[#ff9e1c]">awaiting admin</span>
+                      ))}
                     </div>
                   </TableCell>
                 </TableRow>

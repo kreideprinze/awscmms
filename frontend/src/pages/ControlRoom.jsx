@@ -319,13 +319,16 @@ export default function ControlRoom() {
             </div>
             <ScrollArea className="h-[calc(100%-2.5rem)]">
               {combinedFeed.length === 0 && <div className="p-4 text-xs text-muted-foreground">No events yet. Actions across the plant appear here in real time.</div>}
-              {combinedFeed.map((e) => (
-                <button key={e.id} onClick={() => e.machine_id && openMachine(e.machine_id)} className="block w-full border-b border-border/50 px-3 py-2 text-left hover:bg-white/5">
-                  <div className="text-xs font-medium">{e.title}</div>
+              {combinedFeed.map((e) => {
+                const rail = e.event_type === 'warning_created' ? '#f9f871' : e.event_type === 'breakdown_created' ? '#ff2e63' : e.event_type === 'wo_completed' || e.event_type === 'breakdown_closed' ? '#05ffa1' : 'transparent';
+                return (
+                <button key={e.id} onClick={() => e.machine_id && openMachine(e.machine_id)} className="block w-full border-b border-border/50 border-l-2 px-3 py-2 text-left hover:bg-white/5" style={{ borderLeftColor: rail }}>
+                  <div className="text-xs font-medium" style={e.event_type === 'warning_created' ? { color: '#f9f871' } : undefined}>{e.title}</div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">{e.machine_name} {e.line ? `· ${e.line}` : ''}</div>
                   <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{fmtDate(e.created_at)} · {e.user}</div>
                 </button>
-              ))}
+                );
+              })}
             </ScrollArea>
           </aside>
         )}

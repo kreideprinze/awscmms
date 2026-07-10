@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Factory, Loader2, Flame } from 'lucide-react';
+import { Factory, Loader2, AlertTriangle } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { errMsg } from '@/lib/api';
+import { CrackedGear } from '@/components/StatusBits';
 import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 export default function Login() {
@@ -16,6 +17,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [warningOpen, setWarningOpen] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -66,17 +68,23 @@ export default function Login() {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign in to Control Room'}
           </Button>
         </form>
-        {/* Public kiosk breakdown reporting — no login required */}
+        {/* Public kiosk reporting — no login required */}
         <div className="mt-4 border border-[#ff2e63]/30 p-3" data-testid="public-report-section">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-semibold text-foreground">Machine down? No login needed.</div>
-              <div className="text-[11px] text-muted-foreground">Report a breakdown directly — just give your name.</div>
+              <div className="text-xs font-semibold text-foreground">Machine issue? No login needed.</div>
+              <div className="text-[11px] text-muted-foreground">Breakdown = machine down · Warning = concern, still running</div>
             </div>
-            <Button type="button" data-testid="public-report-breakdown-button" onClick={() => setReportOpen(true)}
-              className="shrink-0 border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10">
-              <Flame className="mr-1 h-4 w-4" /> Report Breakdown
-            </Button>
+            <div className="flex shrink-0 gap-2">
+              <Button type="button" data-testid="public-report-breakdown-button" onClick={() => setReportOpen(true)}
+                className="border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10">
+                <CrackedGear className="mr-1 h-4 w-4" /> Breakdown
+              </Button>
+              <Button type="button" data-testid="public-report-warning-button" onClick={() => setWarningOpen(true)}
+                className="border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10">
+                <AlertTriangle className="mr-1 h-4 w-4" /> Warning
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -91,6 +99,7 @@ export default function Login() {
       </div>
 
       <ReportBreakdownDialog open={reportOpen} setOpen={setReportOpen} publicMode />
+      <ReportBreakdownDialog open={warningOpen} setOpen={setWarningOpen} publicMode mode="warning" />
     </div>
   );
 }

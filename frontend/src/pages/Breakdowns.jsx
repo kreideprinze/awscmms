@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,64 @@ import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 const STATUSES = ['all', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CLOSED'];
 
+function WarningsView() {
+  const [data, setData] = useState({ items: [], total: 0 });
+  useEffect(() => { api.get('/warnings').then((r) => setData(r.data)); }, []);
+  return (
+    <div className="overflow-hidden border border-[#f9f871]/25" data-testid="warnings-table">
+      <Table>
+        <TableHeader>
+          <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
+            <TableHead className="text-xs uppercase">Tag</TableHead>
+            <TableHead className="text-xs uppercase">Machine</TableHead>
+            <TableHead className="text-xs uppercase">Type</TableHead>
+            <TableHead className="text-xs uppercase">Description</TableHead>
+            <TableHead className="text-xs uppercase">Status</TableHead>
+            <TableHead className="text-xs uppercase">Work Order</TableHead>
+            <TableHead className="text-xs uppercase">Raised</TableHead>
+            <TableHead className="text-xs uppercase">Reporter</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {data.items.length === 0 && (
+            <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No warnings raised yet</TableCell></TableRow>
+          )}
+          {data.items.map((w) => (
+            <TableRow key={w.id} data-testid={`warning-row-${w.tag_number}`} className="border-border hover:bg-white/[0.03]">
+              <TableCell className="font-mono text-xs text-[#f9f871]">
+                <AlertTriangle className="mr-1 inline h-3 w-3" />{w.tag_number}
+                {w.submitted_via === 'public_kiosk' && (
+                  <span className="ml-1.5 border border-[#f9f871]/50 px-1 py-px text-[8px] uppercase tracking-wide text-[#f9f871]">Public</span>
+                )}
+              </TableCell>
+              <TableCell>
+                <div className="text-sm font-medium">{w.machine_name}</div>
+                <div className="text-[10px] text-muted-foreground">{w.line} / {w.process_group}</div>
+              </TableCell>
+              <TableCell><TypeBadge type={w.warning_type} /></TableCell>
+              <TableCell className="max-w-[320px] truncate text-sm" title={w.description}>{w.description}</TableCell>
+              <TableCell>
+                <span className={`border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide ${w.status === 'OPEN' ? 'border-[#f9f871]/50 text-[#f9f871]' : 'border-border text-muted-foreground'}`}>{w.status}</span>
+              </TableCell>
+              <TableCell className="font-mono text-xs">{w.work_order_number || '—'}</TableCell>
+              <TableCell className="font-mono text-xs">{fmtDate(w.created_at)}</TableCell>
+              <TableCell className="text-sm">{w.reporter}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export default function Breakdowns() {
   const { openMachine, liveFeed } = useApp();
   const [data, setData] = useState({ items: [], total: 0 });
   const [status, setStatus] = useState('all');
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [warningOpen, setWarningOpen] = useState(false);
+  const [view, setView] = useState('breakdowns'); // breakdowns | warnings
   const [expanded, setExpanded] = useState(null);
 
   const load = useCallback(() => {
@@ -36,11 +88,29 @@ export default function Breakdowns() {
           <h1 className="text-2xl font-semibold tracking-tight">Breakdowns</h1>
           <p className="text-sm text-muted-foreground">{data.total} total · lifecycle OPEN → ASSIGNED → IN_PROGRESS → COMPLETED → CLOSED</p>
         </div>
-        <Button data-testid="breakdowns-create-button" onClick={() => setCreateOpen(true)} className="border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10">
-          <Plus className="mr-1 h-4 w-4" /> Report Breakdown
-        </Button>
+        <div className="flex gap-2">
+          <Button data-testid="breakdowns-report-warning-button" onClick={() => setWarningOpen(true)} className="border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10">
+            <AlertTriangle className="mr-1 h-4 w-4" /> Report Warning
+          </Button>
+          <Button data-testid="breakdowns-create-button" onClick={() => setCreateOpen(true)} className="border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10">
+            <Plus className="mr-1 h-4 w-4" /> Report Breakdown
+          </Button>
+        </div>
       </div>
 
+      <div className="mb-4 flex gap-2">
+        {[['breakdowns', 'Breakdowns'], ['warnings', 'Warnings']].map(([k, lbl]) => (
+          <button key={k} data-testid={`breakdowns-view-${k}`} onClick={() => setView(k)}
+            className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${view === k
+              ? (k === 'warnings' ? 'power-on border-[#f9f871] bg-transparent text-[#f9f871] shadow-[0_0_8px_rgba(249,248,113,0.25)]' : 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]')
+              : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {view === 'warnings' ? <WarningsView /> : (
+      <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -114,8 +184,11 @@ export default function Breakdowns() {
           </TableBody>
         </Table>
       </div>
+      </>
+      )}
 
       <ReportBreakdownDialog open={createOpen} setOpen={setCreateOpen} onCreated={load} />
+      <ReportBreakdownDialog open={warningOpen} setOpen={setWarningOpen} mode="warning" onCreated={() => setView('warnings')} />
     </div>
   );
 }

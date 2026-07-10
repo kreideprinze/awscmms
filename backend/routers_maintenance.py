@@ -35,6 +35,21 @@ class BreakdownCreate(BaseModel):
     start_time: Optional[str] = None
 
 
+async def _pick_technician():
+    """Least-loaded active technician (fewest open work orders)."""
+    techs = await db.users.find({'role': 'technician', 'active': True}, {'_id': 0, 'username': 1}).to_list(1000)
+    if not techs:
+        return None
+    counts = {t['username']: 0 for t in techs}
+    agg = await db.work_orders.aggregate([
+        {'$match': {'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS']}, 'assigned_to': {'$in': list(counts)}}},
+        {'$group': {'_id': '$assigned_to', 'n': {'$sum': 1}}},
+    ]).to_list(1000)
+    for row in agg:
+        counts[row['_id']] = row['n']
+    return min(counts, key=counts.get)
+
+
 async def _create_breakdown_internal(machine_id: str, description: str, failure_mode: str, reporter: str,
                                      start_time: str = None, breakdown_type: str = 'MECHANICAL',
                                      auto_create_work_order: bool = True):
@@ -74,8 +89,7 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
 
     # Auto-dispatch a Corrective Work Order to maintenance immediately
     if auto_create_work_order:
-        tech = await db.users.find_one({'role': 'technician', 'active': True}, {'_id': 0, 'username': 1})
-        assigned = tech['username'] if tech else None
+        assigned = await _pick_technician()
         wo_num = await next_counter('work_orders', 'WO')
         wo = {
             'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Corrective',
@@ -108,8 +122,10 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
 @router.post('/breakdowns')
 async def create_breakdown(req: BreakdownCreate, user: dict = Depends(get_current_user)):
     reporter = req.reporter_name or user['username']
+    # Operators cannot opt out: a work order is always auto-generated and auto-assigned
+    auto_wo = True if user.get('role') == 'operator' else req.auto_create_work_order
     return await _create_breakdown_internal(req.machine_id, req.description, req.failure_mode, reporter,
-                                            req.start_time, req.breakdown_type, req.auto_create_work_order)
+                                            req.start_time, req.breakdown_type, auto_wo)
 
 
 @router.get('/breakdowns')
@@ -390,6 +406,8 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
         return {'ok': True, 'status': 'IN_PROGRESS'}
 
     if req.action in ('complete', 'close'):
+        if req.action == 'close' and user.get('role') != 'admin':
+            raise HTTPException(status_code=403, detail='Only an Admin can close a work order (final closure requires admin review)')
         spares = [s.model_dump() for s in (req.spare_parts or [])]
         if spares:
             from routers_spares import consume_spares
@@ -402,33 +420,52 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                 duration = round((datetime.now(timezone.utc) - parse_dt(started)).total_seconds() / 60.0, 1)
             except Exception:
                 duration = None
-        new_status = 'COMPLETED' if req.action == 'complete' else 'CLOSED'
+        # Lifecycle: tech completion parks the WO at PENDING_ADMIN_CLOSURE; only admin can CLOSE
+        new_status = 'PENDING_ADMIN_CLOSURE' if req.action == 'complete' else 'CLOSED'
         updates = {
             'status': new_status, 'completed_at': now_iso(),
             'root_cause': req.root_cause or wo.get('root_cause'),
             'action_taken': req.action_taken or wo.get('action_taken'),
-            'duration_minutes': duration,
+            'duration_minutes': duration if req.action == 'complete' else (wo.get('duration_minutes') or duration),
         }
+        if req.action == 'close':
+            updates['closed_at'] = now_iso()
+            updates['closed_by'] = user['username']
         if spares:
             updates['spare_parts'] = (wo.get('spare_parts') or []) + spares
         if req.checklist_results:
             updates['checklist_results'] = req.checklist_results
         await db.work_orders.update_one({'id': wo_id}, {'$set': updates})
 
-        # if PM-generated, mark PM occurrence complete
-        if wo.get('pm_task_id'):
+        # if PM-generated, mark PM occurrence complete on tech completion
+        if wo.get('pm_task_id') and req.action == 'complete':
             await db.pm_tasks.update_one({'id': wo['pm_task_id']}, {'$set': {'last_completed_at': now_iso()}})
             await create_timeline_event('pm_completed', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
                                         title=f"PM completed: {wo['title']}", user=user['username'],
                                         reference_id=wo['pm_task_id'], reference_type='pm_task', department=wo.get('department'), line=wo.get('line'))
 
+        # warning-sourced WO fully closed by admin -> resolve warning, restore machine from watch
+        if req.action == 'close' and wo.get('source_warning_id'):
+            await db.warnings.update_one({'id': wo['source_warning_id']}, {'$set': {'status': 'CLOSED', 'closed_at': now_iso()}})
+            machine = await db.machines.find_one({'id': wo['machine_id']}, {'_id': 0})
+            if machine and machine.get('status') == 'watch':
+                await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'running'}})
+                machine['status'] = 'running'
+                await broadcast_machine_update(machine)
+
         await create_timeline_event('wo_completed', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
-                                    title=f"WO {wo['wo_number']} {new_status.lower()}",
+                                    title=f"WO {wo['wo_number']} {'completed — awaiting admin closure' if req.action == 'complete' else 'closed'}",
                                     description=req.action_taken or '', user=user['username'],
                                     reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
-        await create_notification('work_order', f"WO {new_status.title()}: {wo['machine_name']}",
-                                  f"{wo['wo_number']} \u2014 {wo['title']}", severity='success',
-                                  machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
+        if req.action == 'complete':
+            await create_notification('work_order', f"Admin Review Required: {wo['machine_name']}",
+                                      f"{wo['wo_number']} — {wo['title']} completed by {user['username']}. Admin closure required.",
+                                      severity='warning', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                      reference_id=wo_id, reference_type='work_order', target_role='admin')
+        else:
+            await create_notification('work_order', f"WO Closed: {wo['machine_name']}",
+                                      f"{wo['wo_number']} — {wo['title']} closed by admin {user['username']}", severity='success',
+                                      machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
         return {'ok': True, 'status': new_status}
 
     if req.action == 'update':
@@ -798,7 +835,126 @@ async def public_create_breakdown(req: PublicBreakdownCreate):
     if not req.description.strip():
         raise HTTPException(status_code=400, detail='Description is required')
     bd = await _create_breakdown_internal(req.machine_id, req.description.strip(), None, reporter,
-                                          None, req.breakdown_type, req.auto_create_work_order)
+                                          None, req.breakdown_type, True)  # public: WO always auto-created
     await db.breakdowns.update_one({'id': bd['id']}, {'$set': {'submitted_via': 'public_kiosk'}})
     bd['submitted_via'] = 'public_kiosk'
     return bd
+
+
+# ============ WARNINGS (non-downtime observations, yellow-tagged) ============
+async def _create_warning_internal(machine_id: str, description: str, warning_type: str, reporter: str,
+                                   wo_type: str = 'Inspection', submitted_via: str = 'authenticated'):
+    """A Warning flags a machine concern WITHOUT declaring downtime:
+    - no breakdown record, no effect on availability / MTBF / MTTR
+    - machine goes to yellow 'watch' status in the Control Room
+    - an Inspection/Corrective work order is ALWAYS auto-created and auto-assigned"""
+    machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
+    if not machine:
+        raise HTTPException(status_code=404, detail='Machine not found')
+    if warning_type not in BREAKDOWN_TYPES:
+        raise HTTPException(status_code=400, detail=f'Invalid warning_type. Valid: {BREAKDOWN_TYPES}')
+    if wo_type not in ('Inspection', 'Corrective'):
+        raise HTTPException(status_code=400, detail='Warning work order must be Inspection or Corrective')
+    tag = await next_counter('warnings', 'WRN')
+    warning = {
+        'id': str(uuid.uuid4()), 'tag_number': tag,
+        'machine_id': machine['id'], 'machine_name': machine['name'],
+        'department': machine['department'], 'line': machine['line'], 'process_group': machine.get('process_group'),
+        'warning_type': warning_type, 'description': description, 'reporter': reporter,
+        'status': 'OPEN', 'submitted_via': submitted_via,
+        'work_order_id': None, 'work_order_number': None, 'created_at': now_iso(),
+    }
+    await db.warnings.insert_one(dict(warning))
+
+    # yellow visibility in the Control Room (does NOT count as downtime)
+    if machine.get('status') == 'running':
+        await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'watch'}})
+        machine['status'] = 'watch'
+        await broadcast_machine_update(machine)
+
+    await create_timeline_event('warning_created', machine_id=machine['id'], machine_name=machine['name'],
+                                title=f"Warning {tag} raised", description=description, user=reporter,
+                                reference_id=warning['id'], reference_type='warning',
+                                department=machine['department'], line=machine['line'])
+    await create_notification('warning', f"Warning: {machine['name']}",
+                              f"{tag} — [{warning_type}] {description}", severity='warning',
+                              machine_id=machine['id'], machine_name=machine['name'],
+                              reference_id=warning['id'], reference_type='warning')
+
+    # ALWAYS auto-create + auto-assign the work order so it gets actioned
+    assigned = await _pick_technician()
+    wo_num = await next_counter('work_orders', 'WO')
+    wo = {
+        'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': wo_type,
+        'title': f"{wo_type} — {machine['name']} ({tag})",
+        'description': f"Auto-dispatched from warning {tag} [{warning_type}]: {description}",
+        'machine_id': machine['id'], 'machine_name': machine['name'],
+        'department': machine['department'], 'line': machine['line'],
+        'assigned_to': assigned, 'priority': 'medium',
+        'status': 'ASSIGNED' if assigned else 'OPEN',
+        'root_cause': None, 'action_taken': None, 'spare_parts': [],
+        'duration_minutes': None, 'source': 'warning_auto', 'source_warning_id': warning['id'],
+        'auto_generated': True, 'created_at': now_iso(),
+    }
+    await db.work_orders.insert_one(dict(wo))
+    await db.warnings.update_one({'id': warning['id']}, {'$set': {'work_order_id': wo['id'], 'work_order_number': wo_num}})
+    warning['work_order_id'] = wo['id']
+    warning['work_order_number'] = wo_num
+    await create_timeline_event('wo_created', machine_id=machine['id'], machine_name=machine['name'],
+                                title=f"WO {wo_num} auto-dispatched from warning {tag}", user='system',
+                                reference_id=wo['id'], reference_type='work_order',
+                                department=machine['department'], line=machine['line'])
+    warning.pop('_id', None)
+    return warning
+
+
+class WarningCreate(BaseModel):
+    machine_id: str
+    description: str
+    warning_type: str = 'MECHANICAL'
+    reporter_name: Optional[str] = None
+    wo_type: str = 'Inspection'  # Inspection | Corrective
+
+
+@router.post('/warnings')
+async def create_warning(req: WarningCreate, user: dict = Depends(get_current_user)):
+    reporter = req.reporter_name or user['username']
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail='Description is required')
+    return await _create_warning_internal(req.machine_id, req.description.strip(), req.warning_type, reporter, req.wo_type)
+
+
+@router.get('/warnings')
+async def list_warnings(machine_id: Optional[str] = None, status: Optional[str] = None,
+                        search: Optional[str] = None, limit: int = Query(200, le=2000), skip: int = 0,
+                        user: dict = Depends(get_current_user)):
+    q = {}
+    if machine_id:
+        q['machine_id'] = machine_id
+    if status:
+        q['status'] = status
+    if search:
+        q['$or'] = [{'tag_number': {'$regex': search, '$options': 'i'}}, {'machine_name': {'$regex': search, '$options': 'i'}}, {'description': {'$regex': search, '$options': 'i'}}]
+    total = await db.warnings.count_documents(q)
+    items = await db.warnings.find(q, {'_id': 0}).sort('created_at', -1).skip(skip).limit(limit).to_list(limit)
+    return {'items': items, 'total': total}
+
+
+class PublicWarningCreate(BaseModel):
+    machine_id: str
+    description: str
+    warning_type: str = 'MECHANICAL'
+    reporter_name: str
+    wo_type: str = 'Inspection'
+
+
+@router.post('/public/warnings')
+async def public_create_warning(req: PublicWarningCreate):
+    """Public kiosk warning — same accountability rules as public breakdowns."""
+    reporter = req.reporter_name.strip()
+    if not reporter:
+        raise HTTPException(status_code=400, detail='Reporter name is required')
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail='Description is required')
+    return await _create_warning_internal(req.machine_id, req.description.strip(), req.warning_type, reporter,
+                                          req.wo_type, submitted_via='public_kiosk')

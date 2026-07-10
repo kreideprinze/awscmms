@@ -15,10 +15,17 @@ const BREAKDOWN_TYPES = [
   { value: 'ELECTRICAL', label: 'ELECTRICAL' },
   { value: 'CONTROL_PLC', label: 'CONTROL (PLC)' },
 ];
+const WO_TYPES = [
+  { value: 'Inspection', label: 'INSPECTION' },
+  { value: 'Corrective', label: 'CORRECTIVE' },
+];
 
-function Segmented({ options, value, onChange, testPrefix }) {
+function Segmented({ options, value, onChange, testPrefix, accent = 'primary' }) {
+  const selCls = accent === 'yellow'
+    ? 'power-on border-[#f9f871] bg-transparent text-[#f9f871] shadow-[0_0_10px_rgba(249,248,113,0.25)]'
+    : 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_10px_rgba(var(--accent-rgb),0.25)]';
   return (
-    <div className="grid grid-cols-3 gap-2">
+    <div className={`grid gap-2 ${options.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
       {options.map((opt) => {
         const val = typeof opt === 'string' ? opt : opt.value;
         const label = typeof opt === 'string' ? opt : opt.label;
@@ -30,9 +37,7 @@ function Segmented({ options, value, onChange, testPrefix }) {
             data-testid={`${testPrefix}-${val}`}
             onClick={() => onChange(val)}
             className={`cyber-chamfer-sm border px-2 py-2 text-[11px] font-semibold uppercase tracking-widest transition-all duration-150 ${
-              selected
-                ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)] shadow-[0_0_10px_rgba(var(--accent-rgb),0.25)]'
-                : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
+              selected ? selCls : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
             }`}
           >
             {label}
@@ -43,8 +48,16 @@ function Segmented({ options, value, onChange, testPrefix }) {
   );
 }
 
-export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, onCreated, publicMode = false }) {
+/**
+ * Shared report dialog.
+ * mode="breakdown" — machine down, counts as downtime, creates a Breakdown (red)
+ * mode="warning"   — observation only: NO downtime, NO breakdown record, machine goes
+ *                    yellow 'watch', and an Inspection/Corrective WO is always dispatched.
+ * The dialog only closes via the explicit × button (no outside-click / Escape dismiss).
+ */
+export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, onCreated, publicMode = false, mode = 'breakdown' }) {
   const { user } = useApp();
+  const isWarning = mode === 'warning';
   const [lines, setLines] = useState([]);
   const [machines, setMachines] = useState([]);
   const [dept, setDept] = useState('PROCESS');
@@ -52,10 +65,14 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
   const [machineId, setMachineId] = useState('');
   const [reporterName, setReporterName] = useState('');
   const [breakdownType, setBreakdownType] = useState('MECHANICAL');
+  const [woType, setWoType] = useState('Inspection');
   const [remarks, setRemarks] = useState('');
   const [autoWo, setAutoWo] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
+
+  // Operators & public kiosk cannot opt out — WO is always auto-created & auto-assigned
+  const canToggleAutoWo = !isWarning && !publicMode && ['admin', 'technician'].includes(user?.role);
 
   useEffect(() => {
     if (!open) return;
@@ -70,6 +87,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
     }
     setReporterName(publicMode ? '' : user?.name || '');
     setBreakdownType('MECHANICAL');
+    setWoType('Inspection');
     setRemarks('');
     setAutoWo(true);
     setErrors({});
@@ -82,16 +100,16 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
       setArea('');
       setMachineId('');
     }
-  }, [open, prefillMachine, user]);
+  }, [open, prefillMachine, user, publicMode]);
 
   const areaOptions = useMemo(() => lines.filter((l) => l.department === dept).map((l) => l.name), [lines, dept]);
   const machineOptions = useMemo(() => machines.filter((m) => m.line === area), [machines, area]);
   const selectedMachine = machines.find((m) => m.id === machineId);
 
   const ctx = {
-    dept: selectedMachine?.department || dept || '\u2014',
-    area: selectedMachine?.line || area || '\u2014',
-    equipment: selectedMachine ? selectedMachine.name : '\u2014',
+    dept: selectedMachine?.department || dept || '—',
+    area: selectedMachine?.line || area || '—',
+    equipment: selectedMachine ? selectedMachine.name : '—',
   };
 
   const submit = async () => {
@@ -106,14 +124,26 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
     }
     setSubmitting(true);
     try {
-      const res = await api.post(publicMode ? '/public/breakdowns' : '/breakdowns', {
-        machine_id: machineId,
-        description: remarks,
-        breakdown_type: breakdownType,
-        reporter_name: reporterName,
-        auto_create_work_order: autoWo,
-      });
-      toast.success(`Breakdown ${res.data.ticket_number} created${res.data.work_order_number ? ` \u2014 ${res.data.work_order_number} dispatched to maintenance` : ''}`);
+      let res;
+      if (isWarning) {
+        res = await api.post(publicMode ? '/public/warnings' : '/warnings', {
+          machine_id: machineId,
+          description: remarks,
+          warning_type: breakdownType,
+          reporter_name: reporterName,
+          wo_type: woType,
+        });
+        toast.warning(`Warning ${res.data.tag_number} raised — ${res.data.work_order_number} dispatched (no downtime recorded)`);
+      } else {
+        res = await api.post(publicMode ? '/public/breakdowns' : '/breakdowns', {
+          machine_id: machineId,
+          description: remarks,
+          breakdown_type: breakdownType,
+          reporter_name: reporterName,
+          auto_create_work_order: canToggleAutoWo ? autoWo : true,
+        });
+        toast.success(`Breakdown ${res.data.ticket_number} created${res.data.work_order_number ? ` — ${res.data.work_order_number} dispatched to maintenance` : ''}`);
+      }
       setOpen(false);
       onCreated && onCreated(res.data);
     } catch (e) {
@@ -125,15 +155,28 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[90vh] gap-0 overflow-y-auto border-border bg-[#0a0a0f] p-0 sm:max-w-lg" data-testid="report-breakdown-dialog">
+      <DialogContent
+        className="max-h-[90vh] gap-0 overflow-y-auto border-border bg-[#0a0a0f] p-0 sm:max-w-lg"
+        data-testid={isWarning ? 'report-warning-dialog' : 'report-breakdown-dialog'}
+        onInteractOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
         {/* Header bar */}
-        <div className="flex items-center justify-between border-b border-border bg-[#08080c] px-5 py-4">
-          <DialogTitle className="text-base font-semibold uppercase tracking-[0.3em] text-foreground">Report Breakdown</DialogTitle>
+        <div className={`flex items-center justify-between border-b px-5 py-4 ${isWarning ? 'border-[#f9f871]/30 bg-[#f9f871]/[0.04]' : 'border-border bg-[#08080c]'}`}>
+          <DialogTitle className={`text-base font-semibold uppercase tracking-[0.3em] ${isWarning ? 'text-[#f9f871]' : 'text-foreground'}`}>
+            {isWarning ? 'Report Warning' : 'Report Breakdown'}
+          </DialogTitle>
         </div>
 
         <div className="space-y-4 p-5">
-          {/* Context strip \u2014 read-only, green-tinted */}
-          <div className="cyber-chamfer-sm grid grid-cols-3 gap-3 border border-[#05ffa1]/20 bg-[#05ffa1]/[0.05] px-4 py-3" data-testid="breakdown-context-strip">
+          {isWarning && (
+            <div className="border border-[#f9f871]/30 bg-[#f9f871]/[0.05] px-3 py-2 text-[11px] text-[#f9f871]" data-testid="warning-info-note">
+              Observation only — no downtime is recorded and availability/MTBF are unaffected. A work order is always dispatched.
+            </div>
+          )}
+          {/* Context strip — read-only */}
+          <div className={`cyber-chamfer-sm grid grid-cols-3 gap-3 border px-4 py-3 ${isWarning ? 'border-[#f9f871]/20 bg-[#f9f871]/[0.04]' : 'border-[#05ffa1]/20 bg-[#05ffa1]/[0.05]'}`} data-testid="breakdown-context-strip">
             {[['DEPT', ctx.dept], ['AREA', ctx.area], ['EQUIPMENT', ctx.equipment]].map(([k, v]) => (
               <div key={k} className="min-w-0">
                 <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{k}</div>
@@ -142,11 +185,11 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
             ))}
           </div>
 
-          {/* Editable hierarchy group \u2014 dotted border card */}
+          {/* Editable hierarchy group */}
           <div className="space-y-3 border border-dashed border-border p-4">
             <div>
               <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Department</Label>
-              <Segmented options={DEPARTMENTS} value={dept} onChange={(v) => { setDept(v); setArea(''); setMachineId(''); }} testPrefix="bd-dept" />
+              <Segmented options={DEPARTMENTS} value={dept} onChange={(v) => { setDept(v); setArea(''); setMachineId(''); }} testPrefix="bd-dept" accent={isWarning ? 'yellow' : 'primary'} />
             </div>
             <div>
               <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Area</Label>
@@ -168,7 +211,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
                   {machineOptions.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No machines under {area || 'selected area'}</div>}
                   {machineOptions.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
-                      <span className="font-mono text-xs">{m.code}</span> \u00b7 {m.name}
+                      <span className="font-mono text-xs">{m.code}</span> · {m.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -188,11 +231,19 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
             />
           </div>
 
-          {/* Breakdown type */}
+          {/* Type */}
           <div>
-            <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Breakdown Type</Label>
-            <Segmented options={BREAKDOWN_TYPES} value={breakdownType} onChange={setBreakdownType} testPrefix="bd-type" />
+            <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{isWarning ? 'Warning Type' : 'Breakdown Type'}</Label>
+            <Segmented options={BREAKDOWN_TYPES} value={breakdownType} onChange={setBreakdownType} testPrefix="bd-type" accent={isWarning ? 'yellow' : 'primary'} />
           </div>
+
+          {/* Warning: WO type choice */}
+          {isWarning && (
+            <div>
+              <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Work Order Type (always dispatched)</Label>
+              <Segmented options={WO_TYPES} value={woType} onChange={setWoType} testPrefix="bd-wo-type" accent="yellow" />
+            </div>
+          )}
 
           {/* Remarks */}
           <div>
@@ -207,23 +258,36 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
             />
           </div>
 
-          {/* Auto-create WO */}
-          <label className="flex cursor-pointer items-start gap-2.5" data-testid="bd-auto-wo-toggle">
-            <input
-              type="checkbox"
-              checked={autoWo}
-              onChange={(e) => setAutoWo(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-[#00fff5]"
-              data-testid="bd-auto-wo-checkbox"
-            />
-            <span>
-              <span className="block text-xs font-semibold uppercase tracking-widest">Auto-create Work Order</span>
-              <span className="block text-[11px] text-muted-foreground">dispatches to maintenance immediately</span>
-            </span>
-          </label>
+          {/* Auto-create WO — admins/technicians filing breakdowns only; everyone else always auto */}
+          {!isWarning && (canToggleAutoWo ? (
+            <label className="flex cursor-pointer items-start gap-2.5" data-testid="bd-auto-wo-toggle">
+              <input
+                type="checkbox"
+                checked={autoWo}
+                onChange={(e) => setAutoWo(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[#00fff5]"
+                data-testid="bd-auto-wo-checkbox"
+              />
+              <span>
+                <span className="block text-xs font-semibold uppercase tracking-widest">Auto-create Work Order</span>
+                <span className="block text-[11px] text-muted-foreground">dispatches to maintenance immediately</span>
+              </span>
+            </label>
+          ) : (
+            <div className="border border-border/60 px-3 py-2 text-[11px] text-muted-foreground" data-testid="bd-auto-wo-note">
+              A work order is automatically created and assigned to a technician.
+            </div>
+          ))}
 
-          <Button onClick={submit} disabled={submitting} data-testid="bd-submit-button" className="cyber-primary w-full">
-            {submitting ? 'Transmitting\u2026' : 'Report Breakdown'}
+          <Button
+            onClick={submit}
+            disabled={submitting}
+            data-testid="bd-submit-button"
+            className={isWarning
+              ? 'w-full border border-[#f9f871]/60 bg-transparent font-semibold text-[#f9f871] hover:bg-[#f9f871]/10 hover:shadow-[0_0_14px_rgba(249,248,113,0.3)]'
+              : 'cyber-primary w-full'}
+          >
+            {submitting ? 'Transmitting…' : isWarning ? 'Raise Warning' : 'Report Breakdown'}
           </Button>
         </div>
       </DialogContent>

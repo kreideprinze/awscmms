@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area,
@@ -166,20 +167,27 @@ function ReportsTab({ machineId, machineName }) {
 /* ---------------- Breakdowns ---------------- */
 export function BreakdownActions({ bd, onDone, compact }) {
   const { isTech } = useApp();
-  const [closing, setClosing] = useState(false);
+  const navigate = useNavigate();
   const [assigning, setAssigning] = useState(false);
   const [tech, setTech] = useState('');
-  const [rootCause, setRootCause] = useState('');
-  const [actionTaken, setActionTaken] = useState('');
-  const [spares, setSpares] = useState([]);
 
   if (!isTech) return null;
   const act = async (payload) => {
     try {
       const res = await api.put(`/breakdowns/${bd.id}`, payload);
       toast.success(`Breakdown ${res.data.status || 'updated'}`);
-      setClosing(false); setAssigning(false);
+      setAssigning(false);
       onDone();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
+  // Start Repair opens the dedicated repair page (progress, root cause, spares, completion)
+  const startRepair = async () => {
+    try {
+      if (['OPEN', 'ASSIGNED'].includes(bd.status)) {
+        await api.put(`/breakdowns/${bd.id}`, { action: 'start' });
+      }
+      navigate(`/breakdowns/repair/${bd.id}`);
     } catch (e) { toast.error(errMsg(e)); }
   };
 
@@ -195,31 +203,15 @@ export function BreakdownActions({ bd, onDone, compact }) {
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-assign-${bd.ticket_number}`} onClick={() => setAssigning(true)}>Assign Technician</Button>
         ))}
         {['OPEN', 'ASSIGNED'].includes(bd.status) && (
-          <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={() => act({ action: 'start' })}>Start Repair</Button>
+          <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={startRepair}>Start Repair</Button>
         )}
-        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(bd.status) && !closing && (
-          <Button size="sm" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`bd-close-open-${bd.ticket_number}`} onClick={() => setClosing(true)}>Complete / Close</Button>
+        {bd.status === 'IN_PROGRESS' && (
+          <Button size="sm" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`bd-open-repair-${bd.ticket_number}`} onClick={() => navigate(`/breakdowns/repair/${bd.id}`)}>Open Repair Page</Button>
         )}
         {bd.status === 'COMPLETED' && (
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-final-close-${bd.ticket_number}`} onClick={() => act({ action: 'close', action_taken: bd.action_taken, root_cause: bd.root_cause })}>Final Close</Button>
         )}
       </div>
-      {closing && (
-        <div className="space-y-2 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3">
-          <Label className="text-xs">Root Cause {`(mandatory if downtime > 30 min)`}</Label>
-          <Textarea data-testid={`bd-root-cause-${bd.ticket_number}`} value={rootCause} onChange={(e) => setRootCause(e.target.value)} placeholder="e.g. Bearing seized due to lubrication failure" className="bg-[hsl(var(--panel-1))]" />
-          <Label className="text-xs">Action Taken</Label>
-          <Textarea data-testid={`bd-action-taken-${bd.ticket_number}`} value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} placeholder="e.g. Replaced bearing 6205 ZZ, realigned shaft" className="bg-[hsl(var(--panel-1))]" />
-          <SpareRows rows={spares} setRows={setSpares} />
-          <div className="flex gap-2">
-            <Button size="sm" data-testid={`bd-complete-confirm-${bd.ticket_number}`} className="border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10"
-              onClick={() => act({ action: 'complete', root_cause: rootCause || undefined, action_taken: actionTaken || undefined, consumed_spares: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })) })}>
-              Confirm Complete
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setClosing(false)}>Cancel</Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -227,6 +219,7 @@ export function BreakdownActions({ bd, onDone, compact }) {
 function BreakdownsTab({ machineId, machine }) {
   const [items, setItems] = useState([]);
   const [reportOpen, setReportOpen] = useState(false);
+  const [warningOpen, setWarningOpen] = useState(false);
 
   const load = useCallback(() => {
     api.get(`/breakdowns?machine_id=${machineId}`).then((r) => setItems(r.data.items));
@@ -235,11 +228,18 @@ function BreakdownsTab({ machineId, machine }) {
 
   return (
     <div className="space-y-4">
-      <Button data-testid="drawer-report-breakdown-button" onClick={() => setReportOpen(true)}
-        className="w-full border border-[#ff2e63]/60 bg-[#ff2e63]/10 text-[#ff2e63] hover:bg-[#ff2e63]/20 hover:shadow-[0_0_14px_rgba(255,46,99,0.4)]">
-        Report Breakdown
-      </Button>
+      <div className="grid grid-cols-2 gap-2">
+        <Button data-testid="drawer-report-breakdown-button" onClick={() => setReportOpen(true)}
+          className="w-full border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10 hover:shadow-[0_0_14px_rgba(255,46,99,0.4)]">
+          Report Breakdown
+        </Button>
+        <Button data-testid="drawer-report-warning-button" onClick={() => setWarningOpen(true)}
+          className="w-full border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10 hover:shadow-[0_0_14px_rgba(249,248,113,0.35)]">
+          Report Warning
+        </Button>
+      </div>
       <ReportBreakdownDialog open={reportOpen} setOpen={setReportOpen} prefillMachine={machine} onCreated={load} />
+      <ReportBreakdownDialog open={warningOpen} setOpen={setWarningOpen} prefillMachine={machine} mode="warning" onCreated={load} />
       {items.length === 0 ? <Empty text="No breakdowns recorded" /> : items.map((bd) => (
         <div key={bd.id} className="rounded-md border border-border bg-[hsl(var(--panel-1))] p-3" data-testid={`bd-item-${bd.ticket_number}`}>
           <div className="flex items-center justify-between">
@@ -353,7 +353,7 @@ function AnalyticsTab({ machineId }) {
 }
 
 /* ---------------- Timeline ---------------- */
-const EVENT_TYPES = ['all', 'report_created', 'breakdown_created', 'breakdown_closed', 'wo_assigned', 'wo_completed', 'pm_generated', 'pm_completed', 'reliability_alert', 'status_changed', 'note_added'];
+const EVENT_TYPES = ['all', 'report_created', 'breakdown_created', 'breakdown_closed', 'warning_created', 'wo_assigned', 'wo_completed', 'pm_generated', 'pm_completed', 'reliability_alert', 'status_changed', 'note_added'];
 
 function TimelineTab({ machineId }) {
   const [events, setEvents] = useState([]);

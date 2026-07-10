@@ -7,6 +7,7 @@ import { Layout } from '@/components/Layout';
 import Login from '@/pages/Login';
 import ControlRoom from '@/pages/ControlRoom';
 import Breakdowns from '@/pages/Breakdowns';
+import RepairBreakdown from '@/pages/RepairBreakdown';
 import WorkOrders from '@/pages/WorkOrders';
 import PreventiveMaintenance from '@/pages/PreventiveMaintenance';
 import ClosePMTask from '@/pages/ClosePMTask';
@@ -29,6 +30,7 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<Protected><ControlRoom /></Protected>} />
       <Route path="/breakdowns" element={<Protected><Breakdowns /></Protected>} />
+      <Route path="/breakdowns/repair/:breakdownId" element={<Protected roles={['admin', 'technician']}><RepairBreakdown /></Protected>} />
       <Route path="/work-orders" element={<Protected roles={['admin', 'technician']}><WorkOrders /></Protected>} />
       <Route path="/preventive-maintenance" element={<Protected roles={['admin', 'technician']}><PreventiveMaintenance /></Protected>} />
       <Route path="/preventive-maintenance/close/:taskId" element={<Protected roles={['admin', 'technician']}><ClosePMTask /></Protected>} />

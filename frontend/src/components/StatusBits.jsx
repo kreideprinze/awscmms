@@ -1,6 +1,21 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
 
+// Cracked gear — the platform's breakdown icon (lucide-style 24x24 stroke icon)
+export const CrackedGear = ({ className = 'h-4 w-4', style }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={style} aria-hidden="true">
+    <path d="M12 20a8 8 0 1 1 8-8" />
+    <path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" />
+    <path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" />
+    <path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" />
+    {/* crack */}
+    <path d="M20 12l-2.5 2.2 1.8 2.4" />
+    <path d="M12 9.5a2.5 2.5 0 1 0 2.5 2.5" />
+    <path d="M14.5 12 13 10.4l1-1.6" />
+  </svg>
+);
+
 // Cyberpunk neon status palette — functionally distinct, reskinned from traffic-light colors
 export const STATUS_META = {
   running: { label: 'Running', color: '#05ffa1', cls: 'bg-[#05ffa1]/10 text-[#05ffa1] border-[#05ffa1]/40' },
@@ -23,6 +38,7 @@ export const LIFECYCLE_META = {
   ASSIGNED: 'bg-[#00fff5]/10 text-[#00fff5] border-[#00fff5]/40',
   IN_PROGRESS: 'bg-[#f9f871]/10 text-[#f9f871] border-[#f9f871]/40',
   COMPLETED: 'bg-[#05ffa1]/10 text-[#05ffa1] border-[#05ffa1]/40',
+  PENDING_ADMIN_CLOSURE: 'bg-[#ff9e1c]/10 text-[#ff9e1c] border-[#ff9e1c]/40',
   CLOSED: 'bg-[#7b84a8]/10 text-[#9aa2c0] border-[#7b84a8]/40',
   PENDING_REVIEW: 'bg-[#f9f871]/10 text-[#f9f871] border-[#f9f871]/40',
   ACKNOWLEDGED: 'bg-[#00fff5]/10 text-[#00fff5] border-[#00fff5]/40',

@@ -1,19 +1,19 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  Radar, Flame, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, Siren,
+  Radar, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, Siren,
   Bell, LogOut, Pin, PinOff, Factory, Paintbrush, GripVertical, Check,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { fmtDate } from '@/components/StatusBits';
+import { fmtDate, CrackedGear } from '@/components/StatusBits';
 import { MachineDrawer } from '@/components/MachineDrawer';
 
 const MODULES = [
   { key: 'control-room', path: '/', label: 'Control Room', icon: Radar, roles: ['admin', 'technician', 'operator'] },
-  { key: 'breakdowns', path: '/breakdowns', label: 'Breakdowns', icon: Flame, roles: ['admin', 'technician', 'operator'] },
+  { key: 'breakdowns', path: '/breakdowns', label: 'Breakdowns', icon: CrackedGear, roles: ['admin', 'technician', 'operator'] },
   { key: 'work-orders', path: '/work-orders', label: 'Work Orders', icon: ClipboardList, roles: ['admin', 'technician'] },
   { key: 'pm', path: '/preventive-maintenance', label: 'Preventive Maintenance', icon: CalendarCheck, roles: ['admin', 'technician'] },
   { key: 'analytics', path: '/analytics', label: 'Analytics', icon: BarChart3, roles: ['admin', 'technician', 'operator'] },
