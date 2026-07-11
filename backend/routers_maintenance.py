@@ -31,14 +31,22 @@ class BreakdownCreate(BaseModel):
     failure_mode: Optional[str] = None
     breakdown_type: str = 'MECHANICAL'
     reporter_name: Optional[str] = None
-    assigned_to: Optional[str] = None  # REQUIRED (validated in endpoint) — technician who will attend
+    assigned_to: Optional[str] = None  # OPTIONAL — WO starts UNASSIGNED when omitted
     start_time: Optional[str] = None
 
 
-async def _validate_technician(username):
-    """Mandatory technician assignment: must be an existing, active technician."""
+# Work order types that REQUIRE admin approval before final closure.
+# Corrective / Inspection / Predictive (AWS) WOs are closed directly by the technician.
+ADMIN_CLOSURE_TYPES = ('Preventive', 'RCA')
+
+
+async def _validate_technician(username, required=False):
+    """Technician assignment is OPTIONAL (unassigned WOs are allowed universally).
+    When provided, it must reference an existing, active technician."""
     if not username or not str(username).strip():
-        raise HTTPException(status_code=400, detail='Assigned technician is required — select a technician for this report')
+        if required:
+            raise HTTPException(status_code=400, detail='Assigned technician is required')
+        return None
     tech = await db.users.find_one({'username': username, 'role': 'technician', 'active': True}, {'_id': 0, 'username': 1})
     if not tech:
         raise HTTPException(status_code=400, detail=f'Invalid technician "{username}" — must be an active technician')
@@ -90,18 +98,35 @@ async def _create_rca_wo(machine_id, machine_name, department, line, tech, origi
     return rca_wo
 
 
+async def _cancel_outstanding_predictive(machine_id, category, reason, user='system'):
+    """A breakdown in a category makes any outstanding AWS/Predictive WO for that category
+    moot — cancel it and note the reason. The health pool resets via reliability recompute."""
+    open_pred = await db.work_orders.find(
+        {'machine_id': machine_id, 'wo_type': 'Predictive', 'aws_category': category,
+         'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE']}}, {'_id': 0}).to_list(20)
+    for wo in open_pred:
+        await db.work_orders.update_one({'id': wo['id']}, {'$set': {
+            'status': 'CANCELLED', 'cancelled_at': now_iso(), 'cancelled_by': user,
+            'cancel_reason': reason, 'kanban_cleared': True,
+        }})
+        await create_timeline_event('wo_cancelled', machine_id=machine_id, machine_name=wo.get('machine_name'),
+                                    title=f"Predictive WO {wo['wo_number']} auto-cancelled",
+                                    description=reason, user=user,
+                                    reference_id=wo['id'], reference_type='work_order',
+                                    department=wo.get('department'), line=wo.get('line'))
+    return len(open_pred)
+
+
 async def _create_breakdown_internal(machine_id: str, description: str, failure_mode: str, reporter: str,
                                      start_time: str = None, breakdown_type: str = 'MECHANICAL',
                                      assigned_to: str = None):
-    """A linked Corrective Work Order is ALWAYS created (no opt-out). The submitter selects the
-    technician; internal callers (e.g. report conversion) fall back to least-loaded auto-pick."""
+    """A linked Corrective Work Order is ALWAYS created. Technician assignment is OPTIONAL —
+    when omitted, the WO starts UNASSIGNED (OPEN) on the Kanban board and any technician can claim it."""
     machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
     if breakdown_type not in BREAKDOWN_TYPES:
         raise HTTPException(status_code=400, detail=f'Invalid breakdown_type. Valid: {BREAKDOWN_TYPES}')
-    if not assigned_to:
-        assigned_to = await _pick_technician()
     ticket = await next_counter('breakdowns', 'BD')
     bd = {
         'id': str(uuid.uuid4()), 'ticket_number': ticket,
@@ -120,6 +145,11 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
     await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'failed'}})
     machine['status'] = 'failed'
     await broadcast_machine_update(machine)
+    # AWS rule: a real failure in a category supersedes any outstanding Predictive WO for it —
+    # cancel the predictive WO; the category health pool resets from this failure event.
+    await _cancel_outstanding_predictive(
+        machine['id'], breakdown_type,
+        f"Breakdown {ticket} occurred in {breakdown_type} — predictive warning is moot; reliability clock restarts from this failure")
     await create_timeline_event('breakdown_created', machine_id=machine['id'], machine_name=machine['name'],
                                 title=f"Breakdown {ticket} created", description=description, user=reporter,
                                 reference_id=bd['id'], reference_type='breakdown',
@@ -131,7 +161,8 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
                               machine_id=machine['id'], machine_name=machine['name'],
                               reference_id=bd['id'], reference_type='breakdown')
 
-    # Mandatory: auto-dispatch a Corrective Work Order to the selected technician (no opt-out)
+    # Auto-dispatch a Corrective Work Order — assigned if a technician was selected,
+    # otherwise UNASSIGNED (OPEN) so any technician can claim it from the Kanban board.
     assigned = assigned_to
     wo_num = await next_counter('work_orders', 'WO')
     wo = {
@@ -165,7 +196,7 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
 @router.post('/breakdowns')
 async def create_breakdown(req: BreakdownCreate, user: dict = Depends(get_current_user)):
     reporter = req.reporter_name or user['username']
-    # Mandatory technician assignment — a WO is always created for the selected technician
+    # Technician assignment is OPTIONAL — a WO is always created (unassigned when omitted)
     assigned_to = await _validate_technician(req.assigned_to)
     return await _create_breakdown_internal(req.machine_id, req.description, req.failure_mode, reporter,
                                             req.start_time, req.breakdown_type, assigned_to)
@@ -299,11 +330,12 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
             consumed = await consume_spares(consumed, 'BREAKDOWN_CONSUMPTION', bd_id, f"Breakdown {bd['ticket_number']}",
                                             bd['machine_id'], bd['machine_name'], user['username'])
 
-        new_status = 'COMPLETED' if req.action == 'complete' else 'CLOSED'
+        new_status = 'CLOSED'  # Breakdowns are closed DIRECTLY by the technician (no admin gate)
         updates = {
             'status': new_status, 'start_time': start_time, 'end_time': end_time, 'downtime_minutes': downtime,
             'repair_duration_minutes': repair_duration, 'root_cause': root_cause,
             'action_taken': req.action_taken or bd.get('action_taken'),
+            'closed_by': user['username'], 'closed_at': now_iso(),
         }
         if consumed:
             updates['consumed_spares'] = (bd.get('consumed_spares') or []) + consumed
@@ -321,43 +353,27 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
 
         await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
 
-        # SYNC: breakdown resolution must immediately propagate to the linked Work Order
+        # SYNC: breakdown closure immediately closes the linked Corrective Work Order.
+        # Corrective/general WOs need NO admin approval (only PM/RCA/Predictive do).
         linked_wo = None
         if bd.get('work_order_id'):
             linked_wo = await db.work_orders.find_one({'id': bd['work_order_id']}, {'_id': 0})
         if not linked_wo:
             linked_wo = await db.work_orders.find_one(
-                {'source_breakdown_id': bd_id, 'wo_type': {'$ne': 'RCA'}, 'status': {'$ne': 'CLOSED'}}, {'_id': 0})
-        if linked_wo and linked_wo.get('status') != 'CLOSED':
-            if req.action == 'close' and user.get('role') == 'admin':
-                await db.work_orders.update_one({'id': linked_wo['id']}, {'$set': {
-                    'status': 'CLOSED', 'closed_by': user['username'], 'closed_at': now_iso(),
-                    'completed_at': linked_wo.get('completed_at') or end_time,
-                    'started_at': linked_wo.get('started_at') or start_time,
-                    'duration_minutes': linked_wo.get('duration_minutes') or repair_duration,
-                    'action_taken': req.action_taken or linked_wo.get('action_taken'),
-                }})
-                await create_timeline_event('wo_closed', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
-                                            title=f"WO {linked_wo['wo_number']} closed (breakdown {bd['ticket_number']} closed)",
-                                            user=user['username'], reference_id=linked_wo['id'], reference_type='work_order',
-                                            department=bd['department'], line=bd['line'])
-            elif linked_wo.get('status') != 'PENDING_ADMIN_CLOSURE':
-                await db.work_orders.update_one({'id': linked_wo['id']}, {'$set': {
-                    'status': 'PENDING_ADMIN_CLOSURE',
-                    'started_at': linked_wo.get('started_at') or start_time,
-                    'completed_at': end_time,
-                    'duration_minutes': repair_duration,
-                    'action_taken': req.action_taken or linked_wo.get('action_taken'),
-                }})
-                await create_timeline_event('wo_completed', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
-                                            title=f"WO {linked_wo['wo_number']} completed — awaiting admin closure",
-                                            description=f"Synced from breakdown {bd['ticket_number']} resolution",
-                                            user=user['username'], reference_id=linked_wo['id'], reference_type='work_order',
-                                            department=bd['department'], line=bd['line'])
-                await create_notification('work_order', f"Admin Review Required: {bd['machine_name']}",
-                                          f"{linked_wo['wo_number']} — repair of {bd['ticket_number']} completed by {user['username']}. Admin closure required.",
-                                          severity='warning', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
-                                          reference_id=linked_wo['id'], reference_type='work_order', target_role='admin')
+                {'source_breakdown_id': bd_id, 'wo_type': {'$nin': list(ADMIN_CLOSURE_TYPES)}, 'status': {'$ne': 'CLOSED'}}, {'_id': 0})
+        if linked_wo and linked_wo.get('status') not in ('CLOSED', 'CANCELLED') and linked_wo.get('wo_type') not in ADMIN_CLOSURE_TYPES:
+            await db.work_orders.update_one({'id': linked_wo['id']}, {'$set': {
+                'status': 'CLOSED', 'closed_by': user['username'], 'closed_at': now_iso(),
+                'completed_at': linked_wo.get('completed_at') or end_time,
+                'started_at': linked_wo.get('started_at') or start_time,
+                'duration_minutes': linked_wo.get('duration_minutes') or repair_duration,
+                'action_taken': req.action_taken or linked_wo.get('action_taken'),
+                'assigned_to': linked_wo.get('assigned_to') or bd.get('assigned_to') or user['username'],
+            }})
+            await create_timeline_event('wo_closed', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
+                                        title=f"WO {linked_wo['wo_number']} closed (breakdown {bd['ticket_number']} closed)",
+                                        user=user['username'], reference_id=linked_wo['id'], reference_type='work_order',
+                                        department=bd['department'], line=bd['line'])
 
         # repair event record
         await db.repair_events.insert_one({
@@ -402,9 +418,9 @@ async def create_work_order(req: WOCreate, user: dict = Depends(require_admin_or
     machine = await db.machines.find_one({'id': req.machine_id}, {'_id': 0})
     if not machine:
         raise HTTPException(status_code=404, detail='Machine not found')
-    if req.wo_type not in ('Corrective', 'Preventive', 'Inspection'):
+    if req.wo_type not in ('Corrective', 'Preventive', 'Inspection', 'Predictive'):
         raise HTTPException(status_code=400, detail='Invalid wo_type')
-    # Mandatory technician assignment — no WO is ever created unassigned/OPEN
+    # Technician assignment is OPTIONAL — unassigned WOs start in the UNASSIGNED kanban column
     assigned_to = await _validate_technician(req.assigned_to)
     wo_num = await next_counter('work_orders', 'WO')
     wo = {
@@ -413,7 +429,7 @@ async def create_work_order(req: WOCreate, user: dict = Depends(require_admin_or
         'machine_id': machine['id'], 'machine_name': machine['name'],
         'department': machine['department'], 'line': machine['line'],
         'assigned_to': assigned_to, 'priority': req.priority,
-        'status': 'ASSIGNED',
+        'status': 'ASSIGNED' if assigned_to else 'OPEN',
         'root_cause': None, 'action_taken': None, 'spare_parts': [],
         'duration_minutes': None, 'source': 'manual', 'auto_generated': False, 'created_at': now_iso(),
     }
@@ -460,7 +476,7 @@ async def list_work_orders(machine_id: Optional[str] = None, status: Optional[st
 
 
 class WOUpdate(BaseModel):
-    action: str  # assign | start | complete | close | update
+    action: str  # assign | claim | start | complete | close | update
     assigned_to: Optional[str] = None
     root_cause: Optional[str] = None
     action_taken: Optional[str] = None
@@ -489,6 +505,19 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                                     reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
         return {'ok': True, 'status': 'ASSIGNED'}
 
+    if req.action == 'claim':
+        # Any technician (or admin) can claim an unassigned work order from the Kanban board
+        if wo.get('assigned_to'):
+            raise HTTPException(status_code=400, detail=f"Work order is already assigned to {wo['assigned_to']}")
+        await db.work_orders.update_one({'id': wo_id}, {'$set': {'status': 'ASSIGNED', 'assigned_to': user['username'], 'claimed_at': now_iso()}})
+        await create_notification('work_order', f"WO Claimed: {wo['machine_name']}",
+                                  f"{wo['wo_number']} claimed by {user['username']}", severity='info',
+                                  machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
+        await create_timeline_event('wo_assigned', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                    title=f"{wo['wo_number']} claimed by {user['username']}", user=user['username'],
+                                    reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
+        return {'ok': True, 'status': 'ASSIGNED', 'assigned_to': user['username']}
+
     if req.action == 'start':
         updates = {'status': 'IN_PROGRESS', 'started_at': now_iso()}
         if not wo.get('assigned_to'):
@@ -497,8 +526,12 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
         return {'ok': True, 'status': 'IN_PROGRESS'}
 
     if req.action in ('complete', 'close'):
-        if req.action == 'close' and user.get('role') != 'admin':
-            raise HTTPException(status_code=403, detail='Only an Admin can close a work order (final closure requires admin review)')
+        # Closure governance branches by WO TYPE:
+        #   • Corrective / Inspection / Predictive (AWS) — technician closes DIRECTLY (no admin gate)
+        #   • Preventive (PM) / RCA — complete → PENDING_ADMIN_CLOSURE → admin closes
+        needs_admin_closure = wo.get('wo_type') in ADMIN_CLOSURE_TYPES
+        if req.action == 'close' and needs_admin_closure and user.get('role') != 'admin':
+            raise HTTPException(status_code=403, detail=f"Only an Admin can close a {wo.get('wo_type')} work order (final closure requires admin review)")
         # RCA governance: an RCA work order cannot be completed/closed without a full 5-Why submission
         if wo.get('wo_type') == 'RCA':
             rca = wo.get('rca') or {}
@@ -520,8 +553,13 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
         duration = req.duration_minutes
         if duration is None and s_dt and e_dt:
             duration = round((e_dt - s_dt).total_seconds() / 60.0, 1)
-        # Lifecycle: tech completion parks the WO at PENDING_ADMIN_CLOSURE; only admin can CLOSE
-        new_status = 'PENDING_ADMIN_CLOSURE' if req.action == 'complete' else 'CLOSED'
+        # Type-conditional lifecycle:
+        #   admin-gated types: complete → PENDING_ADMIN_CLOSURE, only admin can CLOSE
+        #   all other types:   complete → CLOSED directly (technician closure)
+        if req.action == 'complete':
+            new_status = 'PENDING_ADMIN_CLOSURE' if needs_admin_closure else 'CLOSED'
+        else:
+            new_status = 'CLOSED'
         updates = {
             'status': new_status, 'completed_at': ended,
             'root_cause': req.root_cause or wo.get('root_cause'),
@@ -530,9 +568,11 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
         }
         if req.started_at:
             updates['started_at'] = req.started_at
-        if req.action == 'close':
+        if new_status == 'CLOSED':
             updates['closed_at'] = now_iso()
             updates['closed_by'] = user['username']
+        if not wo.get('assigned_to'):
+            updates['assigned_to'] = user['username']
         if spares:
             updates['spare_parts'] = (wo.get('spare_parts') or []) + spares
         if req.checklist_results:
@@ -546,8 +586,8 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                                         title=f"PM completed: {wo['title']}", user=user['username'],
                                         reference_id=wo['pm_task_id'], reference_type='pm_task', department=wo.get('department'), line=wo.get('line'))
 
-        # warning-sourced WO fully closed by admin -> resolve warning, restore machine from watch
-        if req.action == 'close' and wo.get('source_warning_id'):
+        # warning-sourced WO fully closed -> resolve warning, restore machine from watch
+        if new_status == 'CLOSED' and wo.get('source_warning_id'):
             await db.warnings.update_one({'id': wo['source_warning_id']}, {'$set': {'status': 'CLOSED', 'closed_at': now_iso()}})
             machine = await db.machines.find_one({'id': wo['machine_id']}, {'_id': 0})
             if machine and machine.get('status') == 'watch':
@@ -555,9 +595,20 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                 machine['status'] = 'running'
                 await broadcast_machine_update(machine)
 
-        # SYNC: WO admin-closure is the single closure point — auto-close the linked breakdown.
-        # (The redundant breakdown-level "Final Close" has been removed from the UI.)
-        if req.action == 'close' and wo.get('source_breakdown_id') and wo.get('wo_type') != 'RCA':
+        # AWS RESET: closing a Predictive WO resets that machine-category health pool to 0%
+        if new_status == 'CLOSED' and wo.get('wo_type') == 'Predictive' and wo.get('aws_category'):
+            await db.machines.update_one({'id': wo['machine_id']}, {'$set': {
+                f"aws_resets.{wo['aws_category']}": now_iso(), 'inspection_recommended': False,
+            }})
+            from reliability import recompute_machine_reliability
+            await recompute_machine_reliability(wo['machine_id'], trigger='predictive_wo_closed')
+            await create_timeline_event('aws_pool_reset', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                        title=f"AWS {wo['aws_category']} health pool reset (WO {wo['wo_number']} closed)",
+                                        user=user['username'], reference_id=wo_id, reference_type='work_order',
+                                        department=wo.get('department'), line=wo.get('line'))
+
+        # SYNC: closing a breakdown-sourced WO auto-closes the linked breakdown
+        if new_status == 'CLOSED' and wo.get('source_breakdown_id') and wo.get('wo_type') != 'RCA':
             origin_bd = await db.breakdowns.find_one({'id': wo['source_breakdown_id']}, {'_id': 0})
             if origin_bd and origin_bd.get('status') != 'CLOSED':
                 bd_updates = {'status': 'CLOSED'}
@@ -574,7 +625,7 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                     machine['status'] = 'running'
                     await broadcast_machine_update(machine)
                 await create_timeline_event('breakdown_closed', machine_id=origin_bd['machine_id'], machine_name=origin_bd['machine_name'],
-                                            title=f"Breakdown {origin_bd['ticket_number']} closed (via WO {wo['wo_number']} admin closure)",
+                                            title=f"Breakdown {origin_bd['ticket_number']} closed (via WO {wo['wo_number']} closure)",
                                             user=user['username'], reference_id=origin_bd['id'], reference_type='breakdown',
                                             department=origin_bd.get('department'), line=origin_bd.get('line'))
 
@@ -600,17 +651,17 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                         await db.breakdowns.update_one({'id': wo['source_breakdown_id']}, {'$set': {'rca_task_id': rca_wo['id']}})
 
         await create_timeline_event('wo_completed', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
-                                    title=f"WO {wo['wo_number']} {'completed — awaiting admin closure' if req.action == 'complete' else 'closed'}",
+                                    title=f"WO {wo['wo_number']} {'completed — awaiting admin closure' if new_status == 'PENDING_ADMIN_CLOSURE' else 'closed'}",
                                     description=req.action_taken or '', user=user['username'],
                                     reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
-        if req.action == 'complete':
+        if new_status == 'PENDING_ADMIN_CLOSURE':
             await create_notification('work_order', f"Admin Review Required: {wo['machine_name']}",
-                                      f"{wo['wo_number']} — {wo['title']} completed by {user['username']}. Admin closure required.",
+                                      f"{wo['wo_number']} — {wo['title']} ({wo.get('wo_type')}) completed by {user['username']}. Admin closure required.",
                                       severity='warning', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
                                       reference_id=wo_id, reference_type='work_order', target_role='admin')
         else:
             await create_notification('work_order', f"WO Closed: {wo['machine_name']}",
-                                      f"{wo['wo_number']} — {wo['title']} closed by admin {user['username']}", severity='success',
+                                      f"{wo['wo_number']} — {wo['title']} closed by {user['username']}", severity='success',
                                       machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
         return {'ok': True, 'status': new_status}
 
@@ -1109,7 +1160,7 @@ async def pm_task_pdf(task_id: str, completion_id: Optional[str] = None, date: O
 
 
 class WarningWOGenerate(BaseModel):
-    assigned_to: str
+    assigned_to: Optional[str] = None  # OPTIONAL — generated WO starts UNASSIGNED when omitted
     wo_type: str = 'Inspection'  # Inspection | Corrective
 
 
@@ -1133,7 +1184,7 @@ async def generate_warning_wo(warning_id: str, req: WarningWOGenerate, user: dic
         'description': f"Generated from warning {warning['tag_number']} [{warning.get('warning_type', 'MECHANICAL')}]: {warning['description']}",
         'machine_id': warning['machine_id'], 'machine_name': warning['machine_name'],
         'department': warning.get('department'), 'line': warning.get('line'),
-        'assigned_to': assigned_to, 'priority': 'medium', 'status': 'ASSIGNED',
+        'assigned_to': assigned_to, 'priority': 'medium', 'status': 'ASSIGNED' if assigned_to else 'OPEN',
         'root_cause': None, 'action_taken': None, 'spare_parts': [],
         'duration_minutes': None, 'source': 'warning_manual', 'source_warning_id': warning_id,
         'auto_generated': False, 'created_at': now_iso(),
@@ -1141,11 +1192,11 @@ async def generate_warning_wo(warning_id: str, req: WarningWOGenerate, user: dic
     await db.work_orders.insert_one(dict(wo))
     await db.warnings.update_one({'id': warning_id}, {'$set': {'work_order_id': wo['id'], 'work_order_number': wo_num}})
     await create_timeline_event('wo_created', machine_id=warning['machine_id'], machine_name=warning['machine_name'],
-                                title=f"WO {wo_num} generated from warning {warning['tag_number']} \u2192 {assigned_to}",
+                                title=f"WO {wo_num} generated from warning {warning['tag_number']} \u2192 {assigned_to or 'UNASSIGNED'}",
                                 user=user['username'], reference_id=wo['id'], reference_type='work_order',
                                 department=warning.get('department'), line=warning.get('line'))
     await create_notification('work_order', f"Work Order Dispatched: {warning['machine_name']}",
-                              f"{wo_num} generated from {warning['tag_number']} \u2014 assigned to {assigned_to}",
+                              f"{wo_num} generated from {warning['tag_number']} \u2014 {('assigned to ' + assigned_to) if assigned_to else 'unassigned (claimable)'}",
                               severity='warning', machine_id=warning['machine_id'], machine_name=warning['machine_name'],
                               reference_id=wo['id'], reference_type='work_order')
     wo.pop('_id', None)
@@ -1155,11 +1206,12 @@ async def generate_warning_wo(warning_id: str, req: WarningWOGenerate, user: dic
 # ============ PUBLIC (NO-LOGIN) BREAKDOWN REPORTING ============
 @router.get('/public/report-context')
 async def public_report_context():
-    """Minimal hierarchy + machine list + technicians for the public kiosk report form. No auth."""
-    lines = await db.lines.find({}, {'_id': 0, 'name': 1, 'department': 1, 'order': 1}).sort('order', 1).to_list(1000)
+    """Minimal Line-first hierarchy + machine list + technicians for the public kiosk report form. No auth."""
+    lines = await db.lines.find({}, {'_id': 0, 'id': 1, 'name': 1, 'order': 1}).sort('order', 1).to_list(1000)
+    departments = await db.departments.find({}, {'_id': 0, 'id': 1, 'name': 1, 'line': 1, 'line_id': 1, 'order': 1}).sort([('line', 1), ('order', 1)]).to_list(10000)
     machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'name': 1, 'code': 1, 'line': 1, 'department': 1, 'process_group': 1}).to_list(100000)
     technicians = await db.users.find({'role': 'technician', 'active': True}, {'_id': 0, 'username': 1, 'name': 1}).to_list(1000)
-    return {'lines': lines, 'machines': machines, 'technicians': technicians}
+    return {'lines': lines, 'departments': departments, 'machines': machines, 'technicians': technicians}
 
 
 class PublicBreakdownCreate(BaseModel):
@@ -1167,7 +1219,7 @@ class PublicBreakdownCreate(BaseModel):
     description: str
     breakdown_type: str = 'MECHANICAL'
     reporter_name: str
-    assigned_to: Optional[str] = None  # REQUIRED (validated) — technician who will attend
+    assigned_to: Optional[str] = None  # OPTIONAL — WO starts UNASSIGNED when omitted
     start_time: Optional[str] = None   # editable actual start (calendar picker on the form)
 
 
@@ -1229,8 +1281,8 @@ async def _create_warning_internal(machine_id: str, description: str, warning_ty
                               machine_id=machine['id'], machine_name=machine['name'],
                               reference_id=warning['id'], reference_type='warning')
 
-    # ALWAYS create the work order — assigned to the submitter-selected technician (fallback: least-loaded)
-    assigned = assigned_to or await _pick_technician()
+    # ALWAYS create the work order — assigned if a technician was selected, else UNASSIGNED (claimable)
+    assigned = assigned_to
     wo_num = await next_counter('work_orders', 'WO')
     wo = {
         'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': wo_type,
@@ -1262,7 +1314,7 @@ class WarningCreate(BaseModel):
     warning_type: str = 'MECHANICAL'
     reporter_name: Optional[str] = None
     wo_type: str = 'Inspection'  # Inspection | Corrective
-    assigned_to: Optional[str] = None  # REQUIRED (validated) — technician who will attend
+    assigned_to: Optional[str] = None  # OPTIONAL — WO starts UNASSIGNED when omitted
 
 
 @router.post('/warnings')
@@ -1297,7 +1349,7 @@ class PublicWarningCreate(BaseModel):
     warning_type: str = 'MECHANICAL'
     reporter_name: str
     wo_type: str = 'Inspection'
-    assigned_to: Optional[str] = None  # REQUIRED (validated) — technician who will attend
+    assigned_to: Optional[str] = None  # OPTIONAL — WO starts UNASSIGNED when omitted
 
 
 @router.post('/public/warnings')

@@ -35,10 +35,12 @@ async def me(user: dict = Depends(get_current_user)):
 # ---------------- HIERARCHY (read; admin CRUD lives in admin router) ----------------
 @router.get('/hierarchy')
 async def get_hierarchy(user: dict = Depends(get_current_user)):
-    departments = await db.departments.find({}, {'_id': 0}).sort('order', 1).to_list(1000)
+    """Line-first hierarchy: Line → Department → Process Group → Machine.
+    Lines are top-level; departments are per-line sub-records (line/line_id on each)."""
     lines = await db.lines.find({}, {'_id': 0}).sort('order', 1).to_list(10000)
+    departments = await db.departments.find({}, {'_id': 0}).sort([('line', 1), ('order', 1)]).to_list(10000)
     process_groups = await db.process_groups.find({}, {'_id': 0}).sort('order', 1).to_list(100000)
-    return {'departments': departments, 'lines': lines, 'process_groups': process_groups}
+    return {'lines': lines, 'departments': departments, 'process_groups': process_groups}
 
 
 # ---------------- MACHINES ----------------
@@ -298,119 +300,55 @@ async def control_room_summary(user: dict = Depends(get_current_user)):
     today = now_iso()[:10]
     overdue_pm = await db.pm_tasks.count_documents({'active': True, 'status': {'$ne': 'suggested'}, 'next_due_date': {'$lt': today}})
     watchlist = await db.machines.count_documents({'health': {'$in': ['watch', 'inspection_due', 'overdue']}})
-    # plant availability
-    agg = await db.runtime_logs.aggregate([{'$group': {'_id': None, 'run': {'$sum': '$run_hours'}, 'cal': {'$sum': '$calendar_hours'}}}]).to_list(1)
-    availability = round(agg[0]['run'] / agg[0]['cal'] * 100, 1) if agg and agg[0]['cal'] else None
+    # plant availability — same single runtime source of truth as line KPIs (last 24h window)
+    try:
+        kpis = await control_room_line_kpis(hours=24, date_from=None, date_to=None, user=user)
+        availability = kpis.get('plant_availability')
+    except Exception:
+        availability = None
     return {'total_machines': total, 'by_status': by_status, 'open_breakdowns': open_breakdowns,
             'open_work_orders': open_wos, 'overdue_pm': overdue_pm, 'watchlist': watchlist, 'availability': availability}
 
 
 # ---------------- CONTROL ROOM LINE / SECTION KPIS ----------------
-def _parse_iso(s):
-    from datetime import datetime
-    try:
-        return datetime.fromisoformat(s.replace('Z', '+00:00'))
-    except Exception:
-        return None
-
-
 @router.get('/control-room/line-kpis')
-async def control_room_line_kpis(hours: float = Query(24, gt=0, le=168), user: dict = Depends(get_current_user)):
-    """Availability + total downtime per Line and per Process Group (section) over a
-    configurable trailing window (default: last 24h / current day).
+async def control_room_line_kpis(hours: float = Query(24, gt=0, le=8760),
+                                 date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                 user: dict = Depends(get_current_user)):
+    """Availability + total downtime per Line and per Section (process group).
 
-    Downtime = merged (union) overlap of breakdown open-time with the window, capped at
-    the window length. Availability = (Window − Downtime) ÷ Window × 100 — the line is
-    either up or down; a full-window outage shows 0% regardless of machine count.
+    Window: presets Shift=8h / Day=24h / Week=168h via `hours`, OR a custom range via
+    `date_from`/`date_to` (YYYY-MM-DD, inclusive).
+
+    Uses the shared KPI engine (kpi_engine.py) — the SINGLE runtime source of truth:
+    logged line-runtime days are authoritative; un-logged periods assume 24/7 live
+    operation with breakdown-interval downtime.
     """
     from datetime import datetime, timezone, timedelta
+    from kpi_engine import compute_line_kpis
     now = datetime.now(timezone.utc)
-    since = now - timedelta(hours=hours)
-    window_min = hours * 60.0
-
-    # group machines by line / section
-    machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'line': 1, 'process_group': 1, 'department': 1, 'status': 1}).to_list(100000)
-    lines = {}
-    for m in machines:
-        ln = lines.setdefault(m['line'], {
-            'line': m['line'], 'department': m.get('department'), 'machines': 0,
-            'running': 0, 'failed': 0, 'intervals': [], 'sections': {},
-        })
-        ln['machines'] += 1
-        if m['status'] == 'running':
-            ln['running'] += 1
-        elif m['status'] == 'failed':
-            ln['failed'] += 1
-        pg = ln['sections'].setdefault(m.get('process_group') or '—', {
-            'process_group': m.get('process_group') or '—', 'machines': 0, 'intervals': [],
-        })
-        pg['machines'] += 1
-
-    # breakdowns overlapping window: end_time missing (still open) OR end_time >= since
-    since_iso = since.isoformat()
-    q = {'$or': [{'end_time': None}, {'end_time': {'$gte': since_iso}}]}
-    async for bd in db.breakdowns.find(q, {'_id': 0, 'line': 1, 'process_group': 1, 'start_time': 1, 'end_time': 1}):
-        start = _parse_iso(bd.get('start_time') or '') or since
-        end = _parse_iso(bd.get('end_time') or '') or now
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        if end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
-        s, e = max(start, since), min(end, now)
-        if (e - s).total_seconds() <= 0:
-            continue
-        ln = lines.get(bd.get('line'))
-        if not ln:
-            continue
-        ln['intervals'].append((s, e))
-        pg = ln['sections'].get(bd.get('process_group') or '—')
-        if pg:
-            pg['intervals'].append((s, e))
-
-    def merged_minutes(intervals):
-        """Union of intervals in minutes — concurrent breakdowns don't double count."""
-        if not intervals:
-            return 0.0
-        total = 0.0
-        cur_s, cur_e = None, None
-        for s, e in sorted(intervals):
-            if cur_e is None or s > cur_e:
-                if cur_e is not None:
-                    total += (cur_e - cur_s).total_seconds() / 60.0
-                cur_s, cur_e = s, e
-            elif e > cur_e:
-                cur_e = e
-        total += (cur_e - cur_s).total_seconds() / 60.0
-        return total
-
-    def avail(downtime_min):
-        # Availability = (Window − Downtime) / Window × 100, downtime capped at window
-        dt = min(downtime_min, window_min)
-        return round(max(0.0, (window_min - dt) / window_min) * 100, 1)
-
-    # deterministic line ordering: known process lines first, then by department
-    order = {'PC21': 0, 'PC32': 1, 'PC36': 2, 'KKR': 3, 'TWZ': 4, 'BCP': 5}
-    out = []
-    for ln in lines.values():
-        sections = []
-        for pg in ln['sections'].values():
-            pg_down = min(merged_minutes(pg['intervals']), window_min)
-            sections.append({
-                'process_group': pg['process_group'], 'machines': pg['machines'],
-                'downtime_minutes': round(pg_down, 1),
-                'availability': avail(pg_down),
-            })
-        sections.sort(key=lambda s: (-(s['downtime_minutes']), s['process_group']))
-        ln_down = min(merged_minutes(ln['intervals']), window_min)
-        out.append({
-            'line': ln['line'], 'department': ln['department'], 'machines': ln['machines'],
-            'running': ln['running'], 'failed': ln['failed'],
-            'downtime_minutes': round(ln_down, 1),
-            'availability': avail(ln_down),
-            'sections': sections,
-        })
-    out.sort(key=lambda x: (order.get(x['line'], 99), x['department'] or '', x['line']))
-    return {'window_hours': hours, 'since': since_iso, 'generated_at': now.isoformat(), 'lines': out}
+    if date_from:
+        try:
+            since = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid date_from (YYYY-MM-DD)')
+        if date_to:
+            try:
+                until = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
+            except ValueError:
+                raise HTTPException(status_code=400, detail='Invalid date_to (YYYY-MM-DD)')
+        else:
+            until = now
+        until = min(until, now)
+        if until <= since:
+            raise HTTPException(status_code=400, detail='date_to must be after date_from')
+    else:
+        until = now
+        since = now - timedelta(hours=hours)
+    result = await compute_line_kpis(since, until)
+    return {'window_hours': round(result['window_minutes'] / 60.0, 2), 'since': result['since'],
+            'until': result['until'], 'generated_at': now.isoformat(),
+            'plant_availability': result['plant_availability'], 'lines': result['lines']}
 
 
 # ---------------- USER UI PREFERENCES (sidebar order + icon colors) ----------------

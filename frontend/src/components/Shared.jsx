@@ -171,17 +171,18 @@ export function SpareRows({ rows, setRows }) {
   );
 }
 
-export function TechnicianSelect({ value, onChange, testId = 'technician-select' }) {
+export function TechnicianSelect({ value, onChange, testId = 'technician-select', allowNone = false }) {
   const [techs, setTechs] = useState([]);
   useEffect(() => {
     api.get('/users/technicians').then((r) => setTechs((r.data || []).filter((t) => t.role === 'technician'))).catch(() => {});
   }, []);
   return (
-    <Select value={value || ''} onValueChange={onChange}>
+    <Select value={value || (allowNone ? 'none' : '')} onValueChange={(v) => onChange(allowNone && v === 'none' ? '' : v)}>
       <SelectTrigger className="bg-[hsl(var(--panel-2))]" data-testid={testId}>
-        <SelectValue placeholder="Select technician" />
+        <SelectValue placeholder={allowNone ? 'Unassigned — any technician can claim' : 'Select technician'} />
       </SelectTrigger>
       <SelectContent>
+        {allowNone && <SelectItem value="none">Unassigned — any technician can claim</SelectItem>}
         {techs.map((t) => (
           <SelectItem key={t.id} value={t.username}>{t.name} ({t.username})</SelectItem>
         ))}

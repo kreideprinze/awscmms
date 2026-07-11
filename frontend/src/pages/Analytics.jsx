@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, AreaChart, Area, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts';
-import { ShieldCheck, Trophy } from 'lucide-react';
+import { ShieldCheck, Trophy, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Input } from '@/components/ui/input';
@@ -81,7 +81,7 @@ function TechnicianAnalytics({ hierarchy }) {
           <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Department</Label>
           <Select value={filters.department} onValueChange={(v) => setFilters({ ...filters, department: v })}>
             <SelectTrigger data-testid="tech-filter-department" className="w-44 bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="all">All Departments</SelectItem>{hierarchy.departments.map((d) => <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>)}</SelectContent>
+            <SelectContent><SelectItem value="all">All Departments</SelectItem>{[...new Set(hierarchy.departments.map((d) => d.name))].map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div>
@@ -149,6 +149,8 @@ export default function Analytics() {
   const { openMachine, isAdmin } = useApp();
   const [level, setLevel] = useState('plant');
   const [value, setValue] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [hierarchy, setHierarchy] = useState({ departments: [], lines: [], process_groups: [] });
   const [kpis, setKpis] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -160,10 +162,13 @@ export default function Analytics() {
     setLoading(true);
     const params = new URLSearchParams({ level });
     if (value) params.set('value', value);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
     api.get(`/analytics/kpis?${params}`).then((r) => setKpis(r.data)).finally(() => setLoading(false));
-  }, [level, value]);
+  }, [level, value, dateFrom, dateTo]);
 
-  const options = level === 'department' ? hierarchy.departments.map((d) => d.name)
+  // Departments repeat per line in the Line-first hierarchy — dedupe names
+  const options = level === 'department' ? [...new Set(hierarchy.departments.map((d) => d.name))]
     : level === 'line' ? hierarchy.lines.map((l) => l.name)
     : level === 'process_group' ? [...new Set(hierarchy.process_groups.map((p) => p.name))] : [];
 
@@ -190,6 +195,27 @@ export default function Analytics() {
         {level === 'machine' && (
           <div className="w-80"><MachineSelect value={value} onChange={(id) => setValue(id)} testId="analytics-machine-select" /></div>
         )}
+        {/* Global date range slicer — slices EVERY KPI and chart on this page */}
+        <div className="ml-auto flex items-end gap-2" data-testid="analytics-date-slicer">
+          <div>
+            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">From</Label>
+            <Input type="date" data-testid="analytics-date-from" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
+              className="h-8 w-36 cursor-pointer bg-[hsl(var(--panel-2))] font-mono text-xs" />
+          </div>
+          <div>
+            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">To</Label>
+            <Input type="date" data-testid="analytics-date-to" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
+              className="h-8 w-36 cursor-pointer bg-[hsl(var(--panel-2))] font-mono text-xs" />
+          </div>
+          {(dateFrom || dateTo) && (
+            <button data-testid="analytics-date-clear" onClick={() => { setDateFrom(''); setDateTo(''); }} title="Clear date range"
+              className="cyber-chamfer-sm mb-0.5 border border-border p-1.5 text-muted-foreground transition-colors hover:border-[#ff2e63]/60 hover:text-[#ff2e63]">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {loading && <div className="py-10 text-center text-muted-foreground">Computing KPIs…</div>}
@@ -197,12 +223,15 @@ export default function Analytics() {
 
       {!loading && kpis && (
         <>
-          <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-7">
+          <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
             <KpiCard testId="analytics-kpi-mtbf" label="MTBF" value={kpis.mtbf_hours != null ? `${kpis.mtbf_hours}h` : '—'} />
             <KpiCard testId="analytics-kpi-mttr" label="MTTR" value={kpis.mttr_hours != null ? `${kpis.mttr_hours}h` : '—'} />
             <KpiCard testId="analytics-kpi-availability" label="Availability" value={kpis.availability != null ? `${kpis.availability}%` : '—'} accent="text-[hsl(var(--primary))]" />
             <KpiCard testId="analytics-kpi-failure-rate" label="Failure Rate" value={kpis.failure_rate_per_1000h != null ? kpis.failure_rate_per_1000h : '—'} sub="per 1000 run-h" />
             <KpiCard testId="analytics-kpi-pm-compliance" label="PM Compliance" value={kpis.pm_compliance != null ? `${kpis.pm_compliance}%` : '—'} />
+            <KpiCard testId="analytics-kpi-closure-rate" label="Closure Rate" value={kpis.closure_rate != null ? `${kpis.closure_rate}%` : '—'}
+              accent={kpis.closure_rate != null ? (kpis.closure_rate >= 80 ? 'text-[#05ffa1]' : kpis.closure_rate >= 50 ? 'text-[#f9f871]' : 'text-[#ff2e63]') : ''}
+              sub={`${kpis.breakdowns_closed ?? 0}/${kpis.breakdowns_reported ?? 0} closed`} />
             <KpiCard testId="analytics-kpi-failures" label="Failures" value={kpis.failures_total} accent={kpis.failures_total ? 'text-[#ff2e63]' : ''} />
             <KpiCard testId="analytics-kpi-downtime" label="Downtime" value={`${kpis.downtime_hours_total}h`} />
           </div>
@@ -264,18 +293,21 @@ export default function Analytics() {
               )}
             </div>
             <div className="cyber-panel p-4 xl:col-span-2">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Failure Modes Distribution</div>
-              {kpis.failure_modes.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No failures recorded</div> : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={kpis.failure_modes} layout="vertical">
-                    <CartesianGrid stroke={chartTheme.grid} horizontal={false} />
-                    <XAxis type="number" tick={chartTheme.tick} allowDecimals={false} />
-                    <YAxis type="category" dataKey="mode" tick={chartTheme.tick} width={160} />
-                    <RTooltip contentStyle={chartTheme.tooltip} />
-                    <Bar dataKey="count" fill="#00fff5" radius={[0, 3, 3, 0]} />
-                  </BarChart>
+              <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Failure Modes — Pareto (count + cumulative %)</div>
+              {(kpis.pareto || []).length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No failures recorded</div> : (
+                <ResponsiveContainer width="100%" height={260}>
+                  <ComposedChart data={kpis.pareto} data-testid="analytics-pareto-chart">
+                    <CartesianGrid stroke={chartTheme.grid} vertical={false} />
+                    <XAxis dataKey="mode" tick={{ ...chartTheme.tick, fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={50} />
+                    <YAxis yAxisId="count" tick={chartTheme.tick} width={35} allowDecimals={false} />
+                    <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={chartTheme.tick} width={40} unit="%" />
+                    <RTooltip contentStyle={chartTheme.tooltip} formatter={(v, name) => name === 'cumulative_pct' ? [`${v}%`, 'Cumulative'] : [v, name === 'count' ? 'Failures' : name]} />
+                    <Bar yAxisId="count" dataKey="count" fill="#00fff5" radius={[3, 3, 0, 0]} maxBarSize={42} />
+                    <Line yAxisId="pct" type="monotone" dataKey="cumulative_pct" stroke="#ff9e1c" strokeWidth={2} dot={{ r: 3 }} />
+                  </ComposedChart>
                 </ResponsiveContainer>
               )}
+              <p className="mt-1 text-[10px] text-muted-foreground">80/20 view — bars are failure counts per mode (sorted), the line is the cumulative share of all failures.</p>
             </div>
           </div>
         </>

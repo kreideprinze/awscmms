@@ -12,13 +12,42 @@ import { KpiCard } from '@/components/Shared';
 
 const HEALTH_FILTERS = ['all', 'healthy', 'watch', 'inspection_due', 'overdue'];
 const CATEGORY_FILTERS = [
-  { key: 'all', label: 'All Categories' },
+  { key: 'all', label: 'All Pools' },
   { key: 'MECHANICAL', label: 'Mechanical' },
   { key: 'ELECTRICAL', label: 'Electrical' },
   { key: 'CONTROL_PLC', label: 'PLC / Control' },
 ];
 const CAT_COLOR = { MECHANICAL: '#00fff5', ELECTRICAL: '#f9f871', CONTROL_PLC: '#ff2e63' };
 const CAT_SHORT = { MECHANICAL: 'MEC', ELECTRICAL: 'ELE', CONTROL_PLC: 'PLC' };
+const POOL_ORDER = ['MECHANICAL', 'ELECTRICAL', 'CONTROL_PLC'];
+
+const lifeBarColor = (pct) => (pct >= 100 ? 'bg-[#ff2e63]' : pct >= 80 ? 'bg-[#ff9e1c]' : pct >= 70 ? 'bg-[#f9f871]' : 'bg-[#05ffa1]');
+
+// Three independent health pools per machine — Mechanical / Electrical / PLC.
+// Each pool has its own MTBF, predicted life and life %; the DRIVING pool (▲) is the riskiest.
+function PoolBars({ m }) {
+  const cats = m.categories || {};
+  const present = POOL_ORDER.filter((c) => cats[c]);
+  if (!present.length) return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <div className="min-w-[180px] space-y-1" data-testid={`aws-pools-${m.machine_id}`}>
+      {present.map((c) => {
+        const p = cats[c];
+        const driving = m.driving_category === c;
+        return (
+          <div key={c} className={`flex items-center gap-1.5 ${driving ? '' : 'opacity-60'}`} title={`${p.label}: ${p.life_pct}% of ${p.predicted_failure_life}h predicted life · MTBF ${p.mtbf}h · ${p.health.replace('_', ' ')}`}>
+            <span className="w-7 font-mono text-[9px] font-semibold" style={{ color: CAT_COLOR[c] }}>{CAT_SHORT[c]}</span>
+            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[hsl(var(--panel-3))]">
+              <div className={`h-full ${lifeBarColor(p.life_pct)}`} style={{ width: `${Math.min(p.life_pct, 100)}%` }} />
+            </div>
+            <span className="w-10 tabular-nums text-right text-[10px]">{p.life_pct}%</span>
+            {driving && <span className="font-mono text-[9px] text-[#ff9e1c]" title="Driving pool (riskiest)">▲</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function AWSPage() {
   const { openMachine, isAdmin } = useApp();
@@ -49,7 +78,7 @@ export default function AWSPage() {
     setSavingSettings(true);
     try {
       const payload = {};
-      ['healthy_threshold_pct', 'watch_threshold_pct', 'inspection_threshold_pct', 'alert_trigger_pct', 'level2_min_failures', 'level3_min_failures', 'rolling_window', 'root_cause_downtime_minutes'].forEach((k) => {
+      ['predictive_trigger_pct', 'healthy_threshold_pct', 'watch_threshold_pct', 'inspection_threshold_pct', 'alert_trigger_pct', 'level2_min_failures', 'level3_min_failures', 'rolling_window', 'root_cause_downtime_minutes'].forEach((k) => {
         if (settings[k] !== undefined && settings[k] !== null && settings[k] !== '') payload[k] = parseFloat(settings[k]);
       });
       await api.put('/reliability/settings', payload);
@@ -69,7 +98,7 @@ export default function AWSPage() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Siren className="h-6 w-6 text-[#ff9e1c]" /> AWS — Advance Warning System</h1>
-          <p className="text-sm text-muted-foreground">Statistical reliability engineering (MTBF → Weighted MTBF → Weibull) — not AI. Calculations begin after the first breakdown.</p>
+          <p className="text-sm text-muted-foreground">3 independent health pools per machine (Mechanical · Electrical · PLC) — statistical reliability, not AI. A Predictive WO fires when any pool crosses {settings?.predictive_trigger_pct ?? 80}%.</p>
         </div>
         {isAdmin && (
           <Button variant="outline" onClick={recompute} data-testid="aws-recompute-button" className="border-border bg-[hsl(var(--panel-2))]">
@@ -107,15 +136,14 @@ export default function AWSPage() {
           <TableHeader>
             <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
               <TableHead className="text-xs uppercase">Machine</TableHead>
+              <TableHead className="text-xs uppercase">Health Pools (life %)</TableHead>
               <TableHead className="text-xs uppercase">Level</TableHead>
               <TableHead className="text-xs uppercase">Tier</TableHead>
-              <TableHead className="text-xs uppercase">Failure Category</TableHead>
-              <TableHead className="text-xs uppercase">MTBF</TableHead>
-              <TableHead className="text-xs uppercase">Predicted Life</TableHead>
-              <TableHead className="text-xs uppercase">Hours Since Failure</TableHead>
-              <TableHead className="text-xs uppercase">Life %</TableHead>
+              <TableHead className="text-xs uppercase">MTBF ▲</TableHead>
+              <TableHead className="text-xs uppercase">Predicted Life ▲</TableHead>
+              <TableHead className="text-xs uppercase">Hours Since Failure ▲</TableHead>
               <TableHead className="text-xs uppercase">Health</TableHead>
-              <TableHead className="text-xs uppercase">Weibull β/η</TableHead>
+              <TableHead className="text-xs uppercase">Weibull β/η ▲</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -128,32 +156,12 @@ export default function AWSPage() {
                   <button className="text-sm font-medium hover:text-[hsl(var(--primary))]" onClick={() => openMachine(m.machine_id)}>{m.machine_name}</button>
                   <div className="text-[10px] text-muted-foreground">{m.line} / {m.process_group}</div>
                 </TableCell>
+                <TableCell><PoolBars m={m} /></TableCell>
                 <TableCell className="text-sm">L{m.level} <span className="text-[10px] text-muted-foreground">({m.failures_count}f)</span></TableCell>
                 <TableCell className="text-xs capitalize">{m.tier}</TableCell>
-                <TableCell data-testid={`aws-category-${m.machine_id}`}>
-                  {m.dominant_category ? (
-                    <div className="flex flex-wrap items-center gap-1">
-                      {Object.entries(m.failure_categories || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => (
-                        <span key={c} title={`${c}: ${n} failure(s)`}
-                          className={`border px-1 py-px font-mono text-[9px] uppercase tracking-wide ${c === m.dominant_category ? 'font-semibold' : 'opacity-50'}`}
-                          style={{ borderColor: `${CAT_COLOR[c] || '#888'}66`, color: CAT_COLOR[c] || '#888' }}>
-                          {CAT_SHORT[c] || c} {n}
-                        </span>
-                      ))}
-                    </div>
-                  ) : <span className="text-xs text-muted-foreground">—</span>}
-                </TableCell>
                 <TableCell className="tabular-nums text-sm">{m.mtbf}h</TableCell>
                 <TableCell className="tabular-nums text-sm">{m.predicted_failure_life}h</TableCell>
                 <TableCell className="tabular-nums text-sm">{m.hours_since_last_failure}h</TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[hsl(var(--panel-3))]">
-                      <div className={`h-full ${m.life_pct >= 100 ? 'bg-[#ff2e63]' : m.life_pct >= 80 ? 'bg-[#ff9e1c]' : m.life_pct >= 70 ? 'bg-[#f9f871]' : 'bg-[#05ffa1]'}`} style={{ width: `${Math.min(m.life_pct, 100)}%` }} />
-                    </div>
-                    <span className="tabular-nums text-xs">{m.life_pct}%</span>
-                  </div>
-                </TableCell>
                 <TableCell><HealthBadge health={m.health} /></TableCell>
                 <TableCell className="font-mono text-xs">{m.weibull ? `${m.weibull.beta} / ${m.weibull.eta}h` : '—'}</TableCell>
               </TableRow>
@@ -166,7 +174,7 @@ export default function AWSPage() {
         <div className="mt-6 cyber-panel p-4" data-testid="aws-settings-panel">
           <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Reliability Rules (Admin)</div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[['healthy_threshold_pct', 'Healthy < %'], ['watch_threshold_pct', 'Watch < %'], ['alert_trigger_pct', 'Alert Trigger %'], ['root_cause_downtime_minutes', 'Root Cause > min'],
+            {[['predictive_trigger_pct', 'Predictive WO Trigger %'], ['healthy_threshold_pct', 'Healthy < %'], ['watch_threshold_pct', 'Watch < %'], ['root_cause_downtime_minutes', 'Root Cause > min'],
               ['level2_min_failures', 'Level 2 min failures'], ['level3_min_failures', 'Level 3 min failures'], ['rolling_window', 'Rolling MTBF window']].map(([k, label]) => (
               <div key={k}>
                 <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</Label>
@@ -174,6 +182,7 @@ export default function AWSPage() {
               </div>
             ))}
           </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">Predictive WO Trigger — a pool crossing this % of predicted failure life auto-dispatches one UNASSIGNED Predictive work order per cycle (default 80%). Applies independently to the Mechanical, Electrical and PLC pools.</p>
           <Button onClick={saveSettings} disabled={savingSettings} data-testid="aws-settings-save" className="mt-3 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">Save Rules</Button>
         </div>
       )}

@@ -1,15 +1,27 @@
 """Reliability Engine (AWS - Advance Warning System) + Predictive Maintenance Engine.
 Statistical reliability engineering - NOT AI/ML.
-Calculations begin immediately after the first recorded breakdown.
 
-Maturity model:
+PER-CATEGORY HEALTH POOLS — each machine tracks THREE independent reliability pools,
+aligned with the Breakdown Type field, so each maintenance discipline monitors its own
+failure category without cross-contamination:
+    • MECHANICAL
+    • ELECTRICAL
+    • CONTROL_PLC
+
+Maturity model (per category):
   Level 1 (1 failure)   -> MTBF + operating hours since failure
   Level 2 (2-4 failures)-> Rolling MTBF, Weighted MTBF, Failure Trend
   Level 3 (5+ failures) -> Weibull, Hazard Rate, Reliability Curve, Failure Probability
 
 Prediction tiers: Initial=MTBF, Intermediate=Weighted MTBF, Advanced=Weibull mean life.
 Health: Healthy 0-70%, Watch 70-80%, Inspection Due 80-100%, Overdue 100%+.
-At >=80%: Inspection Recommended flag + Notification + Suggested PM Task.
+
+PREDICTIVE WORK ORDERS (admin-configurable threshold, default 80%):
+  At >= predictive_trigger_pct of predicted life a category auto-creates ONE
+  'Predictive' work order (UNASSIGNED — any technician can claim it).
+  • Closing that Predictive WO resets the category pool to 0% (aws_resets anchor).
+  • A breakdown in the category while the Predictive WO is outstanding cancels it
+    (handled in routers_maintenance) and the pool restarts from the new failure.
 """
 import logging
 import math
@@ -17,9 +29,13 @@ import uuid
 from datetime import datetime, timezone
 
 from database import db
-from events import create_notification, create_timeline_event, broadcast_machine_update, now_iso
+from events import create_notification, create_timeline_event, broadcast_machine_update, next_counter, now_iso
 
 logger = logging.getLogger(__name__)
+
+CATEGORIES = ['MECHANICAL', 'ELECTRICAL', 'CONTROL_PLC']
+CATEGORY_LABELS = {'MECHANICAL': 'Mechanical', 'ELECTRICAL': 'Electrical', 'CONTROL_PLC': 'PLC / Control'}
+HEALTH_RANK = {'healthy': 0, 'watch': 1, 'inspection_due': 2, 'overdue': 3}
 
 PM_SUGGESTIONS = {
     'Bearing Failure': 'Inspect Bearings',
@@ -33,8 +49,16 @@ PM_SUGGESTIONS = {
     'Overheating': 'Check Cooling & Temperature',
     'Lubrication Failure': 'Verify Lubrication Schedule',
     'Coupling Failure': 'Inspect Couplings',
+    'Electrical Fault': 'Inspect Panel & Connections',
+    'Sensor Failure': 'Test & Calibrate Sensors',
+    'VFD / Drive Fault': 'Check Drive Parameters & Cooling',
+    'Instrumentation Fault': 'Verify Instrument Loop',
 }
-DEFAULT_SUGGESTIONS = ['Inspect Bearings', 'Check Gearbox', 'Lubricate Chain', 'Verify Alignment', 'Check Vibration']
+DEFAULT_SUGGESTIONS = {
+    'MECHANICAL': ['Inspect Bearings', 'Check Gearbox', 'Lubricate Chain', 'Verify Alignment'],
+    'ELECTRICAL': ['Thermal-scan Panel', 'Check Motor Current', 'Inspect Cable Glands'],
+    'CONTROL_PLC': ['Test Sensors & I/O', 'Verify PLC Battery & Backups', 'Check Comms / Network'],
+}
 
 
 def parse_dt(iso):
@@ -49,10 +73,10 @@ def parse_dt(iso):
         return None
 
 
-async def run_hours_between(machine_id, start_dt, end_dt):
+async def run_hours_between(machine_id, start_dt, end_dt, logs=None):
     """Operating hours between two datetimes from runtime_logs; fallback to calendar hours."""
-    q = {'machine_id': machine_id}
-    logs = await db.runtime_logs.find(q, {'_id': 0}).to_list(100000)
+    if logs is None:
+        logs = await db.runtime_logs.find({'machine_id': machine_id}, {'_id': 0}).to_list(100000)
     if logs:
         total = 0.0
         for lg in logs:
@@ -80,58 +104,33 @@ def weibull_fit(tbfs):
         return None
 
 
-async def recompute_machine_reliability(machine_id, trigger='manual'):
-    """Full recompute of reliability metrics + predictive health for one machine."""
-    machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
-    if not machine:
-        return None
-
-    settings = await db.settings.find_one({'id': 'reliability_settings'}, {'_id': 0}) or {}
-    alert_pct = settings.get('alert_trigger_pct', 80)
-
-    # failures = breakdowns that reached COMPLETED/CLOSED (repairs done) plus open FAILED ones count as events too
-    failures = await db.breakdowns.find(
-        {'machine_id': machine_id}, {'_id': 0}
-    ).sort('start_time', 1).to_list(10000)
-
-    n = len(failures)
-    now = datetime.now(timezone.utc)
-
-    if n == 0:
-        await db.reliability_metrics.delete_many({'machine_id': machine_id})
-        await db.machines.update_one({'id': machine_id}, {'$set': {'reliability_state': 'no_data', 'health': 'healthy', 'inspection_recommended': False}})
-        return None
-
+async def _compute_category(machine, cat, failures, settings, runtime_logs, now):
+    """Compute one category's reliability pool. Returns dict or None."""
+    machine_id = machine['id']
     commissioned = parse_dt(machine.get('commissioned_at')) or parse_dt(machine.get('created_at'))
 
-    # Time Between Failures list (operating hours)
     tbfs = []
     prev = commissioned
     for f in failures:
         f_start = parse_dt(f.get('start_time'))
         if not f_start:
             continue
-        hours = await run_hours_between(machine_id, prev, f_start)
+        hours = await run_hours_between(machine_id, prev, f_start, logs=runtime_logs)
         tbfs.append(max(hours, 0.1))
         prev = parse_dt(f.get('end_time')) or f_start
-
     if not tbfs:
         return None
 
-    # MTTR from closed breakdowns
+    n = len(failures)
     repaired = [f for f in failures if f.get('downtime_minutes') is not None]
     mttr_hours = round(sum(f['downtime_minutes'] for f in repaired) / len(repaired) / 60.0, 2) if repaired else None
-
     mtbf = round(sum(tbfs) / len(tbfs), 2)
 
-    # maturity level
     l2 = settings.get('level2_min_failures', 2)
     l3 = settings.get('level3_min_failures', 5)
     level = 1 if n < l2 else (2 if n < l3 else 3)
 
-    rolling_mtbf = None
-    weighted_mtbf = None
-    trend = None
+    rolling_mtbf = weighted_mtbf = trend = None
     if level >= 2:
         window = settings.get('rolling_window', 3)
         rolling_mtbf = round(sum(tbfs[-window:]) / len(tbfs[-window:]), 2)
@@ -144,9 +143,6 @@ async def recompute_machine_reliability(machine_id, trigger='manual'):
             trend = 'improving' if ratio > 1.15 else ('degrading' if ratio < 0.85 else 'stable')
 
     weibull = None
-    hazard_rate = None
-    reliability_now = None
-    failure_probability = None
     if level >= 3:
         fit = weibull_fit(tbfs)
         if fit:
@@ -156,28 +152,28 @@ async def recompute_machine_reliability(machine_id, trigger='manual'):
             weibull = {'beta': beta, 'eta': eta, 'mean_life': mean_life, 'b10_life': b10}
             await db.weibull_models.insert_one({
                 'id': str(uuid.uuid4()), 'machine_id': machine_id, 'machine_name': machine['name'],
-                'beta': beta, 'eta': eta, 'mean_life': mean_life, 'b10_life': b10,
+                'category': cat, 'beta': beta, 'eta': eta, 'mean_life': mean_life, 'b10_life': b10,
                 'failures_used': n, 'fitted_at': now_iso(),
             })
 
-    # hours since last failure (operating hours)
+    # ---- Pool anchor: last failure end OR AWS reset (Predictive WO closed), whichever is later
     last_failure = failures[-1]
     last_end = parse_dt(last_failure.get('end_time')) or parse_dt(last_failure.get('start_time'))
-    hours_since = await run_hours_between(machine_id, last_end, now)
+    reset_iso = (machine.get('aws_resets') or {}).get(cat)
+    reset_at = parse_dt(reset_iso)
+    anchor = max([d for d in (last_end, reset_at) if d], default=None)
+    hours_since = await run_hours_between(machine_id, anchor, now, logs=runtime_logs)
 
-    # prediction tier
     if weibull:
-        predicted_life = weibull['mean_life']
-        tier = 'advanced'
+        predicted_life, tier = weibull['mean_life'], 'advanced'
     elif weighted_mtbf:
-        predicted_life = weighted_mtbf
-        tier = 'intermediate'
+        predicted_life, tier = weighted_mtbf, 'intermediate'
     else:
-        predicted_life = mtbf
-        tier = 'initial'
+        predicted_life, tier = mtbf, 'initial'
 
     life_pct = round(hours_since / predicted_life * 100, 1) if predicted_life and predicted_life > 0 else 0
 
+    reliability_now = failure_probability = hazard_rate = None
     if weibull and predicted_life:
         t = max(hours_since, 0.1)
         beta, eta = weibull['beta'], weibull['eta']
@@ -185,7 +181,6 @@ async def recompute_machine_reliability(machine_id, trigger='manual'):
         failure_probability = round(1 - reliability_now, 4)
         hazard_rate = round((beta / eta) * ((t / eta) ** (beta - 1)), 6)
 
-    # health state
     if life_pct < settings.get('healthy_threshold_pct', 70):
         health = 'healthy'
     elif life_pct < settings.get('watch_threshold_pct', 80):
@@ -195,9 +190,128 @@ async def recompute_machine_reliability(machine_id, trigger='manual'):
     else:
         health = 'overdue'
 
-    alert_cycle = f"{last_failure['id']}"  # one alert per failure cycle
+    # cycle key: one predictive alert per (last failure, reset anchor) cycle
+    cycle_key = f"{last_failure['id']}:{reset_iso or ''}"
+
+    # suggestions from this category's failure history
+    mode_counts = {}
+    for f in failures:
+        fm = f.get('failure_mode')
+        if fm:
+            mode_counts[fm] = mode_counts.get(fm, 0) + 1
+    top_modes = sorted(mode_counts, key=mode_counts.get, reverse=True)[:3]
+    suggestions = [PM_SUGGESTIONS[m] for m in top_modes if m in PM_SUGGESTIONS]
+    if not suggestions:
+        suggestions = DEFAULT_SUGGESTIONS.get(cat, [])[:3]
+
+    return {
+        'category': cat, 'label': CATEGORY_LABELS.get(cat, cat),
+        'failures_count': n, 'level': level, 'tier': tier,
+        'mtbf': mtbf, 'mttr_hours': mttr_hours,
+        'rolling_mtbf': rolling_mtbf, 'weighted_mtbf': weighted_mtbf, 'trend': trend,
+        'weibull': weibull, 'hazard_rate': hazard_rate,
+        'reliability_now': reliability_now, 'failure_probability': failure_probability,
+        'predicted_failure_life': predicted_life,
+        'hours_since_last_failure': round(hours_since, 2),
+        'life_pct': life_pct, 'health': health,
+        'tbf_history': [round(t, 2) for t in tbfs],
+        'reset_at': reset_iso, 'cycle_key': cycle_key, 'suggestions': suggestions,
+    }
+
+
+async def _ensure_predictive_wo(machine, cat_metrics, trigger_pct, existing_metric):
+    """Create ONE Predictive WO per category cycle when the pool crosses the threshold.
+    Returns the outstanding predictive WO id (existing or new) or None."""
+    cat = cat_metrics['category']
+    # outstanding predictive WO for this machine+category?
+    open_wo = await db.work_orders.find_one(
+        {'machine_id': machine['id'], 'wo_type': 'Predictive', 'aws_category': cat,
+         'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE']}},
+        {'_id': 0, 'id': 1, 'wo_number': 1})
+    if open_wo:
+        return open_wo['id']
+    if cat_metrics['life_pct'] < trigger_pct:
+        return None
+    sent_cycles = (existing_metric or {}).get('alert_cycles') or {}
+    if sent_cycles.get(cat) == cat_metrics['cycle_key']:
+        return None  # already alerted this cycle (WO may have been cancelled by a breakdown)
+
+    life_pct = cat_metrics['life_pct']
+    predicted_life = cat_metrics['predicted_failure_life']
+    tier = cat_metrics['tier']
+    suggestions = cat_metrics['suggestions']
+    wo_num = await next_counter('work_orders', 'WO')
+    wo = {
+        'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Predictive',
+        'title': f"Predictive \u2014 {machine['name']} [{CATEGORY_LABELS.get(cat, cat)}]",
+        'description': (f"AWS auto-generated: {CATEGORY_LABELS.get(cat, cat)} pool at {life_pct}% of predicted "
+                        f"failure life ({predicted_life:.0f}h, {tier} tier, threshold {trigger_pct:.0f}%). "
+                        f"Suggested: {', '.join(suggestions) or 'inspection'}."),
+        'machine_id': machine['id'], 'machine_name': machine['name'],
+        'department': machine.get('department'), 'line': machine.get('line'),
+        'assigned_to': None, 'priority': 'high', 'status': 'OPEN',
+        'aws_category': cat, 'aws_life_pct': life_pct,
+        'root_cause': None, 'action_taken': None, 'spare_parts': [],
+        'duration_minutes': None, 'source': 'aws_predictive', 'auto_generated': True,
+        'created_at': now_iso(),
+    }
+    await db.work_orders.insert_one(dict(wo))
+    await db.reliability_metrics.update_one({'machine_id': machine['id']},
+                                            {'$set': {f'alert_cycles.{cat}': cat_metrics['cycle_key']}}, upsert=True)
+    await create_notification('inspection_recommended', f"Predictive WO: {machine['name']} [{CATEGORY_LABELS.get(cat, cat)}]",
+                              f"{wo_num} \u2014 {CATEGORY_LABELS.get(cat, cat)} pool at {life_pct}% of predicted life ({predicted_life:.0f}h). "
+                              f"Suggested: {', '.join(suggestions)}",
+                              severity='warning', machine_id=machine['id'], machine_name=machine['name'],
+                              reference_id=wo['id'], reference_type='work_order')
+    await create_timeline_event('reliability_alert', machine_id=machine['id'], machine_name=machine['name'],
+                                title=f"AWS alert [{CATEGORY_LABELS.get(cat, cat)}]: {life_pct}% \u2014 Predictive WO {wo_num} created",
+                                description=f"Predicted failure life {predicted_life:.0f}h ({tier} tier). Unassigned \u2014 claimable by any technician.",
+                                user='system', reference_id=wo['id'], reference_type='work_order',
+                                department=machine.get('department'), line=machine.get('line'))
+    return wo['id']
+
+
+async def recompute_machine_reliability(machine_id, trigger='manual'):
+    """Full recompute of per-category reliability pools + predictive triggers for one machine."""
+    machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
+    if not machine:
+        return None
+
+    settings = await db.settings.find_one({'id': 'reliability_settings'}, {'_id': 0}) or {}
+    trigger_pct = settings.get('predictive_trigger_pct', settings.get('alert_trigger_pct', 80))
+
+    all_failures = await db.breakdowns.find({'machine_id': machine_id}, {'_id': 0}).sort('start_time', 1).to_list(10000)
+    now = datetime.now(timezone.utc)
+
+    if not all_failures:
+        await db.reliability_metrics.delete_many({'machine_id': machine_id})
+        await db.machines.update_one({'id': machine_id}, {'$set': {'reliability_state': 'no_data', 'health': 'healthy', 'inspection_recommended': False}})
+        return None
+
+    runtime_logs = await db.runtime_logs.find({'machine_id': machine_id}, {'_id': 0}).to_list(100000)
     existing = await db.reliability_metrics.find_one({'machine_id': machine_id}, {'_id': 0})
-    alert_already_sent = existing and existing.get('alert_cycle_sent') == alert_cycle
+
+    categories = {}
+    for cat in CATEGORIES:
+        failures = [f for f in all_failures if (f.get('breakdown_type') or 'MECHANICAL') == cat]
+        if not failures:
+            continue
+        c = await _compute_category(machine, cat, failures, settings, runtime_logs, now)
+        if c:
+            categories[cat] = c
+
+    if not categories:
+        return None
+
+    # Predictive WO management per category
+    for cat, c in categories.items():
+        c['predictive_wo_id'] = await _ensure_predictive_wo(machine, c, trigger_pct, existing)
+
+    # driving category = riskiest pool (highest life %)
+    driving_cat = max(categories, key=lambda c: categories[c]['life_pct'])
+    d = categories[driving_cat]
+    worst_health = max((c['health'] for c in categories.values()), key=lambda h: HEALTH_RANK.get(h, 0))
+    max_level = max(c['level'] for c in categories.values())
 
     metrics = {
         'machine_id': machine_id,
@@ -206,86 +320,45 @@ async def recompute_machine_reliability(machine_id, trigger='manual'):
         'line': machine.get('line'),
         'process_group': machine.get('process_group'),
         'criticality': machine.get('criticality'),
-        'failures_count': n,
-        'level': level,
-        'tier': tier,
-        'mtbf': mtbf,
-        'mttr_hours': mttr_hours,
-        'rolling_mtbf': rolling_mtbf,
-        'weighted_mtbf': weighted_mtbf,
-        'trend': trend,
-        'weibull': weibull,
-        'hazard_rate': hazard_rate,
-        'reliability_now': reliability_now,
-        'failure_probability': failure_probability,
-        'predicted_failure_life': predicted_life,
-        'hours_since_last_failure': round(hours_since, 2),
-        'life_pct': life_pct,
-        'health': health,
-        'tbf_history': [round(t, 2) for t in tbfs],
-        'alert_cycle_sent': existing.get('alert_cycle_sent') if existing else None,
+        # top-level fields mirror the DRIVING (riskiest) category for at-a-glance sorting
+        'driving_category': driving_cat,
+        'failures_count': len(all_failures),
+        'level': max_level,
+        'tier': d['tier'],
+        'mtbf': d['mtbf'],
+        'mttr_hours': d['mttr_hours'],
+        'rolling_mtbf': d['rolling_mtbf'],
+        'weighted_mtbf': d['weighted_mtbf'],
+        'trend': d['trend'],
+        'weibull': d['weibull'],
+        'hazard_rate': d['hazard_rate'],
+        'reliability_now': d['reliability_now'],
+        'failure_probability': d['failure_probability'],
+        'predicted_failure_life': d['predicted_failure_life'],
+        'hours_since_last_failure': d['hours_since_last_failure'],
+        'life_pct': d['life_pct'],
+        'health': worst_health,
+        'tbf_history': d['tbf_history'],
+        'categories': {k: {kk: vv for kk, vv in v.items() if kk not in ('cycle_key',)} for k, v in categories.items()},
+        'predictive_trigger_pct': trigger_pct,
         'last_computed': now_iso(),
         'last_trigger': trigger,
     }
-
     await db.reliability_metrics.update_one({'machine_id': machine_id}, {'$set': metrics}, upsert=True)
 
-    # update machine derived fields
-    update = {'health': health, 'reliability_state': f'level_{level}'}
-    # only shift operational status for health if machine is in a normal state
+    # update machine derived fields — overall health is the WORST category pool
+    update = {'health': worst_health, 'reliability_state': f'level_{max_level}',
+              'inspection_recommended': any(c['life_pct'] >= trigger_pct for c in categories.values())}
     if machine.get('status') in ('running', 'watch', 'inspection_due'):
-        if health == 'watch':
+        if worst_health == 'watch':
             update['status'] = 'watch'
-        elif health in ('inspection_due', 'overdue'):
+        elif worst_health in ('inspection_due', 'overdue'):
             update['status'] = 'inspection_due'
-        elif health == 'healthy' and machine.get('status') in ('watch', 'inspection_due'):
+        elif worst_health == 'healthy' and machine.get('status') in ('watch', 'inspection_due'):
             update['status'] = 'running'
     await db.machines.update_one({'id': machine_id}, {'$set': update})
     machine.update(update)
     await broadcast_machine_update(machine)
-
-    # ---------- Predictive alerts at >= alert_pct ----------
-    if life_pct >= alert_pct and not alert_already_sent:
-        await db.reliability_metrics.update_one({'machine_id': machine_id}, {'$set': {'alert_cycle_sent': alert_cycle}})
-        await db.machines.update_one({'id': machine_id}, {'$set': {'inspection_recommended': True}})
-
-        # suggested actions from failure history
-        mode_counts = {}
-        for f in failures:
-            fm = f.get('failure_mode')
-            if fm:
-                mode_counts[fm] = mode_counts.get(fm, 0) + 1
-        top_modes = sorted(mode_counts, key=mode_counts.get, reverse=True)[:3]
-        suggestions = [PM_SUGGESTIONS.get(m) for m in top_modes if PM_SUGGESTIONS.get(m)]
-        if not suggestions:
-            suggestions = DEFAULT_SUGGESTIONS[:3]
-
-        # Suggested PM task
-        pm_task = {
-            'id': str(uuid.uuid4()),
-            'task_name': f"Predictive Inspection \u2014 {machine['name']}",
-            'description': f"Auto-generated: machine at {life_pct}% of predicted failure life ({predicted_life}h {tier} tier). Suggested: {', '.join(suggestions)}.",
-            'priority': 'high',
-            'machine_id': machine_id, 'machine_name': machine['name'],
-            'department': machine.get('department'), 'line': machine.get('line'),
-            'assigned_to': None, 'frequency': 'once',
-            'checklist': suggestions,
-            'reminder_offset_days': 0,
-            'status': 'suggested', 'source': 'predictive', 'auto_generated': True,
-            'active': True, 'next_due_date': now_iso()[:10],
-            'created_at': now_iso(),
-        }
-        await db.pm_tasks.insert_one(dict(pm_task))
-
-        await create_notification('inspection_recommended', f"Inspection Recommended: {machine['name']}",
-                                  f"{machine['name']} ({machine.get('line')}) is at {life_pct}% of predicted failure life ({predicted_life:.0f}h). Suggested: {', '.join(suggestions)}",
-                                  severity='warning', machine_id=machine_id, machine_name=machine['name'],
-                                  reference_id=pm_task['id'], reference_type='pm_task')
-        await create_timeline_event('reliability_alert', machine_id=machine_id, machine_name=machine['name'],
-                                    title=f"Reliability alert: {life_pct}% of predicted life",
-                                    description=f"Predicted failure life {predicted_life:.0f}h ({tier} tier). Suggested PM task created.",
-                                    user='system', reference_id=pm_task['id'], reference_type='pm_task',
-                                    department=machine.get('department'), line=machine.get('line'))
     return metrics
 
 

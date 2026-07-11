@@ -298,6 +298,7 @@ RELIABILITY_SETTINGS = {
     'watch_threshold_pct': 80,
     'inspection_threshold_pct': 100,
     'alert_trigger_pct': 80,
+    'predictive_trigger_pct': 80,
     'level2_min_failures': 2,
     'level3_min_failures': 5,
     'rolling_window': 3,
@@ -332,37 +333,45 @@ async def seed_all():
         await db.users.insert_many([dict(u) for u in new_users])
     summary['users'] = {'created': len(new_users), 'total': await db.users.count_documents({})}
 
-    # ---------- Departments ----------
-    dept_map = {d['name']: d for d in await db.departments.find({}, {'_id': 0}).to_list(100)}
-    created = 0
-    for i, dname in enumerate(['PROCESS', 'PACKAGING', 'UTILITIES']):
-        if dname not in dept_map:
-            doc = {'id': nid(), 'name': dname, 'order': i, 'created_at': ts}
-            await db.departments.insert_one(dict(doc))
-            dept_map[dname] = doc
-            created += 1
-    summary['departments'] = {'created': created, 'total': await db.departments.count_documents({})}
-
-    # ---------- Lines ----------
-    line_defs = [(name, 'PROCESS') for name in APPENDIX_A] + [(name, 'PACKAGING') for name in PACKAGING_LINES] + [('Utilities', 'UTILITIES')]
+    # ---------- Lines (TOP-LEVEL — hierarchy is Line → Department → Process Group → Machine) ----------
+    line_names = list(APPENDIX_A) + ['Palletizing', 'Utilities']
     line_map = {l['name']: l for l in await db.lines.find({}, {'_id': 0}).to_list(1000)}
     created = 0
-    for order, (name, dept) in enumerate(line_defs):
+    for order, name in enumerate(line_names):
         if name not in line_map:
-            doc = {'id': nid(), 'name': name, 'department': dept, 'department_id': dept_map[dept]['id'], 'order': order, 'created_at': ts}
+            doc = {'id': nid(), 'name': name, 'order': order, 'created_at': ts}
             await db.lines.insert_one(dict(doc))
             line_map[name] = doc
             created += 1
     summary['lines'] = {'created': created, 'total': await db.lines.count_documents({})}
 
-    # ---------- Process Groups ----------
+    # ---------- Departments (PER-LINE sub-records) ----------
+    dept_defs = []  # (line, dept_name, order)
+    for line_name in APPENDIX_A:
+        dept_defs.append((line_name, 'PROCESS', 0))
+        dept_defs.append((line_name, 'PACKAGING', 1))
+    dept_defs.append(('Palletizing', 'PACKAGING', 1))
+    dept_defs.append(('Utilities', 'UTILITIES', 2))
+    dept_map = {(d['line'], d['name']): d for d in await db.departments.find({}, {'_id': 0}).to_list(1000)}
+    created = 0
+    for line_name, dname, order in dept_defs:
+        if (line_name, dname) not in dept_map and line_name in line_map:
+            doc = {'id': nid(), 'name': dname, 'line': line_name, 'line_id': line_map[line_name]['id'],
+                   'order': order, 'created_at': ts}
+            await db.departments.insert_one(dict(doc))
+            dept_map[(line_name, dname)] = doc
+            created += 1
+    summary['departments'] = {'created': created, 'total': await db.departments.count_documents({})}
+
+    # ---------- Process Groups (under each line's PROCESS department) ----------
     pg_map = {(p['line'], p['name']): p for p in await db.process_groups.find({}, {'_id': 0}).to_list(10000)}
     created = 0
     for line_name, pgs in APPENDIX_A.items():
+        proc_dept = dept_map[(line_name, 'PROCESS')]
         for pg_order, pg_name in enumerate(pgs):
             if (line_name, pg_name) not in pg_map:
                 doc = {'id': nid(), 'name': pg_name, 'line': line_name, 'line_id': line_map[line_name]['id'],
-                       'department': 'PROCESS', 'department_id': dept_map['PROCESS']['id'], 'order': pg_order, 'created_at': ts}
+                       'department': 'PROCESS', 'department_id': proc_dept['id'], 'order': pg_order, 'created_at': ts}
                 await db.process_groups.insert_one(dict(doc))
                 pg_map[(line_name, pg_name)] = doc
                 created += 1
@@ -383,7 +392,7 @@ async def seed_all():
                 if code not in existing_codes:
                     new_machines.append({
                         'id': nid(), 'name': mname, 'code': code, 'sap_code': str(sap_seq),
-                        'department': 'PROCESS', 'department_id': dept_map['PROCESS']['id'],
+                        'department': 'PROCESS', 'department_id': dept_map[(line_name, 'PROCESS')]['id'],
                         'line': line_name, 'line_id': line_map[line_name]['id'],
                         'process_group': pg_name, 'process_group_id': pg['id'],
                         'machine_type': infer_type(mname), 'criticality': infer_criticality(mname),
@@ -454,6 +463,9 @@ async def seed_all():
     if not await db.settings.find_one({'id': 'reliability_settings'}):
         await db.settings.insert_one({**RELIABILITY_SETTINGS, 'updated_at': ts})
         created_settings += 1
+    else:  # back-fill new keys added over time (never overwrite user-tuned values)
+        await db.settings.update_one({'id': 'reliability_settings', 'predictive_trigger_pct': {'$exists': False}},
+                                     {'$set': {'predictive_trigger_pct': 80}})
     if not await db.settings.find_one({'id': 'system_settings'}):
         await db.settings.insert_one({'id': 'system_settings', 'plant_name': 'Factory Operations Platform', 'timezone': 'UTC', 'updated_at': ts})
         created_settings += 1

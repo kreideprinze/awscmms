@@ -30,9 +30,9 @@ function HierarchyTab() {
   const [h, setH] = useState({ departments: [], lines: [], process_groups: [] });
   const [machines, setMachines] = useState([]);
   const [selLine, setSelLine] = useState('');
-  const [newDept, setNewDept] = useState('');
-  const [newLine, setNewLine] = useState({ name: '', department_id: '' });
-  const [newPG, setNewPG] = useState({ name: '', line_id: '' });
+  const [newLine, setNewLine] = useState('');
+  const [newDept, setNewDept] = useState({ name: '', line_id: '' });
+  const [newPG, setNewPG] = useState({ name: '', department_id: '' });
   const [newMachine, setNewMachine] = useState({ name: '', code: '', process_group_id: '', criticality: 'medium' });
   const [posEdit, setPosEdit] = useState(null);
 
@@ -51,55 +51,57 @@ function HierarchyTab() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Section title="Departments">
-          {h.departments.map((d) => (
-            <div key={d.id} className="flex items-center justify-between border-b border-border/50 py-1.5 text-sm">
-              {d.name}
-              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => call(() => api.delete(`/departments/${d.id}`), 'Department deleted')}><Trash2 className="h-3 w-3" /></Button>
-            </div>
-          ))}
-          <div className="mt-2 flex gap-2">
-            <Input value={newDept} onChange={(e) => setNewDept(e.target.value)} placeholder="New department" className="bg-[hsl(var(--panel-2))]" data-testid="admin-new-dept-input" />
-            <Button size="sm" data-testid="admin-new-dept-add" onClick={() => newDept && call(() => api.post('/departments', { name: newDept }).then(() => setNewDept('')), 'Department created')}><Plus className="h-4 w-4" /></Button>
-          </div>
-        </Section>
-        <Section title="Lines">
+        <Section title="Lines (top level)">
           <div className="max-h-56 overflow-y-auto">
             {h.lines.map((l) => (
               <div key={l.id} className="flex items-center justify-between border-b border-border/50 py-1.5 text-sm">
-                <span>{l.name} <span className="text-[10px] text-muted-foreground">({l.department})</span></span>
+                <span>{l.name}</span>
                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => call(() => api.delete(`/lines/${l.id}`), 'Line deleted')}><Trash2 className="h-3 w-3" /></Button>
               </div>
             ))}
           </div>
+          <div className="mt-2 flex gap-2">
+            <Input value={newLine} onChange={(e) => setNewLine(e.target.value)} placeholder="New line (e.g. PC40)" className="bg-[hsl(var(--panel-2))]" data-testid="admin-new-line-input" />
+            <Button size="sm" data-testid="admin-new-line-add" onClick={() => newLine && call(() => api.post('/lines', { name: newLine }).then(() => setNewLine('')), 'Line created')}><Plus className="h-4 w-4" /></Button>
+          </div>
+        </Section>
+        <Section title="Departments (per line)">
+          <div className="max-h-56 overflow-y-auto">
+            {h.departments.map((d) => (
+              <div key={d.id} className="flex items-center justify-between border-b border-border/50 py-1.5 text-sm">
+                <span>{d.name} <span className="text-[10px] text-muted-foreground">({d.line})</span></span>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => call(() => api.delete(`/departments/${d.id}`), 'Department deleted')}><Trash2 className="h-3 w-3" /></Button>
+              </div>
+            ))}
+          </div>
           <div className="mt-2 space-y-2">
-            <Select value={newLine.department_id} onValueChange={(v) => setNewLine({ ...newLine, department_id: v })}>
-              <SelectTrigger className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Department" /></SelectTrigger>
-              <SelectContent>{h.departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
+            <Select value={newDept.line_id} onValueChange={(v) => setNewDept({ ...newDept, line_id: v })}>
+              <SelectTrigger className="bg-[hsl(var(--panel-2))]" data-testid="admin-new-dept-line"><SelectValue placeholder="Line" /></SelectTrigger>
+              <SelectContent>{h.lines.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
             </Select>
             <div className="flex gap-2">
-              <Input value={newLine.name} onChange={(e) => setNewLine({ ...newLine, name: e.target.value })} placeholder="New line" className="bg-[hsl(var(--panel-2))]" />
-              <Button size="sm" onClick={() => newLine.name && newLine.department_id && call(() => api.post('/lines', newLine).then(() => setNewLine({ name: '', department_id: '' })), 'Line created')}><Plus className="h-4 w-4" /></Button>
+              <Input value={newDept.name} onChange={(e) => setNewDept({ ...newDept, name: e.target.value })} placeholder="New department" className="bg-[hsl(var(--panel-2))]" data-testid="admin-new-dept-input" />
+              <Button size="sm" data-testid="admin-new-dept-add" onClick={() => newDept.name && newDept.line_id && call(() => api.post('/departments', newDept).then(() => setNewDept({ name: '', line_id: '' })), 'Department created')}><Plus className="h-4 w-4" /></Button>
             </div>
           </div>
         </Section>
-        <Section title="Process Groups">
+        <Section title="Process Groups (per department)">
           <div className="max-h-56 overflow-y-auto">
             {h.process_groups.slice(0, 60).map((p) => (
               <div key={p.id} className="flex items-center justify-between border-b border-border/50 py-1.5 text-sm">
-                <span>{p.name} <span className="text-[10px] text-muted-foreground">({p.line})</span></span>
+                <span>{p.name} <span className="text-[10px] text-muted-foreground">({p.line} / {p.department})</span></span>
                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => call(() => api.delete(`/process-groups/${p.id}`), 'Process group deleted')}><Trash2 className="h-3 w-3" /></Button>
               </div>
             ))}
           </div>
           <div className="mt-2 space-y-2">
-            <Select value={newPG.line_id} onValueChange={(v) => setNewPG({ ...newPG, line_id: v })}>
-              <SelectTrigger className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Line" /></SelectTrigger>
-              <SelectContent>{h.lines.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+            <Select value={newPG.department_id} onValueChange={(v) => setNewPG({ ...newPG, department_id: v })}>
+              <SelectTrigger className="bg-[hsl(var(--panel-2))]" data-testid="admin-new-pg-dept"><SelectValue placeholder="Line / Department" /></SelectTrigger>
+              <SelectContent>{h.departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.line} / {d.name}</SelectItem>)}</SelectContent>
             </Select>
             <div className="flex gap-2">
-              <Input value={newPG.name} onChange={(e) => setNewPG({ ...newPG, name: e.target.value })} placeholder="New process group" className="bg-[hsl(var(--panel-2))]" />
-              <Button size="sm" onClick={() => newPG.name && newPG.line_id && call(() => api.post('/process-groups', newPG).then(() => setNewPG({ name: '', line_id: '' })), 'Process group created')}><Plus className="h-4 w-4" /></Button>
+              <Input value={newPG.name} onChange={(e) => setNewPG({ ...newPG, name: e.target.value })} placeholder="New process group" className="bg-[hsl(var(--panel-2))]" data-testid="admin-new-pg-input" />
+              <Button size="sm" data-testid="admin-new-pg-add" onClick={() => newPG.name && newPG.department_id && call(() => api.post('/process-groups', newPG).then(() => setNewPG({ name: '', department_id: '' })), 'Process group created')}><Plus className="h-4 w-4" /></Button>
             </div>
           </div>
         </Section>
@@ -415,7 +417,74 @@ function SystemTab() {
           ))}
         </div>
       </Section>
+      <div className="lg:col-span-2"><DataManagement onDone={load} /></div>
     </div>
+  );
+}
+
+// Admin-only Data Management: seed demo data / purge operational data (machines & config kept)
+function DataManagement({ onDone }) {
+  const [seeding, setSeeding] = useState(false);
+  const [purgeInput, setPurgeInput] = useState('');
+  const [purging, setPurging] = useState(false);
+
+  const seed = async () => {
+    setSeeding(true);
+    try {
+      const r = await api.post('/data/seed-sample');
+      const c = r.data.seeded;
+      toast.success(`Sample data seeded: ${c.work_orders} WOs (incl. ${c.rca_work_orders} RCA), ${c.breakdowns} breakdowns, ${c.warnings} warnings, ${c.pm_tasks} PM task, ${c.line_runtime_days} days of line runtime`);
+      onDone && onDone();
+    } catch (e) { toast.error(errMsg(e)); }
+    setSeeding(false);
+  };
+
+  const purge = async () => {
+    setPurging(true);
+    try {
+      const r = await api.post('/data/purge-operational', { confirm: purgeInput });
+      const rm = r.data.removed;
+      const total = Object.values(rm).reduce((n, x) => n + x, 0);
+      toast.success(`Purged ${total} records (WOs: ${rm.work_orders}, breakdowns: ${rm.breakdowns}, runtime: ${rm.runtime_logs + rm.line_runtime_logs}, timeline: ${rm.timeline_events}). Machines & configuration kept.`);
+      setPurgeInput('');
+      onDone && onDone();
+    } catch (e) { toast.error(errMsg(e)); }
+    setPurging(false);
+  };
+
+  return (
+    <Section title="Data Management">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="admin-data-management">
+        <div className="space-y-2 border border-[hsl(var(--primary))]/30 p-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[hsl(var(--primary))]">Seed Sample Data</div>
+          <p className="text-xs text-muted-foreground">
+            Generates realistic demo data against your <b>existing machines</b>: work orders in every Kanban stage,
+            closed breakdowns with varied downtimes (including RCA-triggering ones), warnings, a sample PM task
+            with completion, and 7 days of line runtime. All records are tagged <span className="font-mono">sample</span>.
+          </p>
+          <Button onClick={seed} disabled={seeding} data-testid="admin-seed-sample"
+            className="border border-[hsl(var(--primary))]/60 bg-transparent text-xs text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10">
+            {seeding ? 'Seeding…' : 'Seed Sample Data'}
+          </Button>
+        </div>
+        <div className="space-y-2 border border-[#ff2e63]/40 bg-[#ff2e63]/[0.03] p-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#ff2e63]">Purge Operational Data</div>
+          <p className="text-xs text-muted-foreground">
+            <b>Destructive.</b> Removes ALL work orders, breakdowns, warnings, PM completions, runtime logs
+            (machine + line), timeline, notifications, repair history, spare transactions and reliability metrics.
+            <b> Machines, hierarchy, users, spares catalog, PM definitions and branding are kept.</b> Ticket counters reset.
+          </p>
+          <div className="flex gap-2">
+            <Input value={purgeInput} onChange={(e) => setPurgeInput(e.target.value)} placeholder='Type PURGE to confirm'
+              data-testid="admin-purge-confirm-input" className="w-44 bg-[hsl(var(--panel-2))] font-mono text-xs" />
+            <Button onClick={purge} disabled={purgeInput !== 'PURGE' || purging} data-testid="admin-purge-button"
+              className="border border-[#ff2e63]/60 bg-transparent text-xs text-[#ff2e63] hover:bg-[#ff2e63]/10 disabled:opacity-40">
+              {purging ? 'Purging…' : 'Purge Data'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Section>
   );
 }
 

@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Plus, LayoutGrid, Rows3 } from 'lucide-react';
+import { Plus, LayoutGrid, Rows3, Hand, UserRound } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -13,191 +13,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
-import { MachineSelect, TechnicianSelect, SpareRows, DateTimeField } from '@/components/Shared';
+import { MachineSelect, TechnicianSelect, SpareRows, DateTimeField, toLocalInput, toIsoUtc } from '@/components/Shared';
+import { needsAdminClosure } from '@/components/WorkOrderModal';
 
-// Lifecycle: ASSIGNED -> IN_PROGRESS -> (tech completes) PENDING_ADMIN_CLOSURE -> (admin) CLOSED
-// (OPEN column removed — every WO is born assigned; rare legacy OPEN records merge into ASSIGNED)
-const LIFE = ['ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSED'];
-const colStatuses = (col) => (col === 'ASSIGNED' ? ['OPEN', 'ASSIGNED'] : [col]);
+// Kanban lifecycle: UNASSIGNED (claimable) -> ASSIGNED -> IN_PROGRESS -> [type-gated] -> CLOSED
+const COLUMNS = ['UNASSIGNED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE', 'CLOSED'];
 const COL_LABEL = { PENDING_ADMIN_CLOSURE: 'ADMIN CLOSURE' };
-const TYPES = ['all', 'Corrective', 'Preventive', 'Inspection', 'RCA'];
+const TYPES = ['all', 'Corrective', 'Preventive', 'Inspection', 'Predictive', 'RCA'];
 
-// ISO <-> datetime-local input helpers (local timezone aware)
-const toLocalInput = (iso) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const inColumn = (wo, col) => {
+  if (col === 'UNASSIGNED') return !wo.assigned_to && ['OPEN', 'ASSIGNED'].includes(wo.status);
+  if (col === 'ASSIGNED') return !!wo.assigned_to && ['OPEN', 'ASSIGNED'].includes(wo.status);
+  return wo.status === col;
 };
-const toIso = (local) => (local ? new Date(local).toISOString() : '');
 
-// Kanban card detail popout — full WO inspection + editable Start/End times.
-// Times editable by Admins or the assigned Technician (enforced server-side too).
-function WODetailModal({ wo, open, setOpen, onDone, onAct, onStartComplete }) {
-  const { user, isAdmin } = useApp();
-  const navigate = useNavigate();
-  const [startT, setStartT] = useState('');
-  const [endT, setEndT] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (wo) { setStartT(toLocalInput(wo.started_at)); setEndT(toLocalInput(wo.completed_at)); }
-  }, [wo]);
-
-  if (!wo) return null;
-  const canEditTimes = isAdmin || wo.assigned_to === user?.username;
-  const dirty = startT !== toLocalInput(wo.started_at) || endT !== toLocalInput(wo.completed_at);
-
-  const saveTimes = async () => {
-    setSaving(true);
-    try {
-      await api.put(`/work-orders/${wo.id}`, { action: 'update', started_at: toIso(startT), completed_at: toIso(endT) });
-      toast.success(`${wo.wo_number} times updated`);
-      onDone();
-    } catch (e) { toast.error(errMsg(e)); }
-    setSaving(false);
-  };
-
-  const Row = ({ label, value, testId }) => (
-    <div>
-      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="font-mono text-xs text-foreground" data-testid={testId}>{value || '—'}</div>
-    </div>
-  );
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent data-testid="wo-detail-modal" className="max-h-[88vh] max-w-lg overflow-y-auto border-border bg-[hsl(var(--panel-1))]">
-        <DialogHeader>
-          <DialogTitle className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-sm text-[hsl(var(--primary))]" data-testid="wo-detail-number">{wo.wo_number}</span>
-            <LifecycleBadge status={wo.status} />
-            <CritBadge level={wo.priority} />
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="text-sm font-medium leading-snug" data-testid="wo-detail-title">{wo.title}</div>
-
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3">
-            <Row label="Machine" value={wo.machine_name} testId="wo-detail-machine" />
-            <Row label="Type" value={`${wo.wo_type}${wo.auto_generated ? ' (auto)' : ''}`} testId="wo-detail-type" />
-            <Row label="Assigned To" value={wo.assigned_to} testId="wo-detail-assigned" />
-            <Row label="Created" value={fmtDate(wo.created_at)} testId="wo-detail-created" />
-            <Row label="Duration" value={wo.duration_minutes != null ? `${wo.duration_minutes} min` : null} testId="wo-detail-duration" />
-            <Row label="Closed By" value={wo.closed_by} testId="wo-detail-closed-by" />
-          </div>
-
-          {wo.description && (
-            <div>
-              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Description</Label>
-              <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90" data-testid="wo-detail-description">{wo.description}</p>
-            </div>
-          )}
-          {wo.root_cause && (
-            <div>
-              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Root Cause</Label>
-              <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90" data-testid="wo-detail-root-cause">{wo.root_cause}</p>
-            </div>
-          )}
-          {wo.action_taken && (
-            <div>
-              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Action Taken</Label>
-              <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90" data-testid="wo-detail-action-taken">{wo.action_taken}</p>
-            </div>
-          )}
-          {(wo.spare_parts || []).length > 0 && (
-            <div>
-              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Spare Parts Consumed</Label>
-              <div className="mt-1 space-y-0.5">
-                {wo.spare_parts.map((s, i) => (
-                  <div key={i} className="font-mono text-[11px] text-foreground/80">{s.sap_code} × {s.quantity}{s.name ? ` — ${s.name}` : ''}</div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 5-Why RCA summary (RCA work orders with a submitted analysis) */}
-          {wo.wo_type === 'RCA' && wo.rca && (
-            <div className="rounded-md border border-[#ff2e63]/40 bg-[hsl(var(--panel-2))] p-3" data-testid="wo-detail-rca-summary">
-              <Label className="text-[10px] uppercase tracking-widest text-[#ff2e63]">5-Why Analysis</Label>
-              <ol className="mt-1.5 space-y-1">
-                {(wo.rca.whys || []).map((w, i) => (
-                  <li key={i} className="flex gap-2 text-xs text-foreground/90">
-                    <span className="font-mono text-[10px] text-[#ff2e63]">W{i + 1}</span>{w}
-                  </li>
-                ))}
-              </ol>
-              <div className="mt-2 text-xs"><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Root Cause: </span>{wo.rca.root_cause}</div>
-              <div className="mt-1 text-xs"><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Corrective Action: </span>{wo.rca.corrective_action}</div>
-              <div className="mt-1 text-[10px] text-muted-foreground">Submitted by {wo.rca.submitted_by} · {fmtDate(wo.rca.submitted_at)}</div>
-            </div>
-          )}
-
-          {/* Editable Start / End times */}
-          <div className="rounded-md border border-[hsl(var(--primary))]/30 bg-[hsl(var(--panel-2))] p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <Label className="text-[10px] uppercase tracking-widest text-[hsl(var(--primary))]">Execution Times</Label>
-              {!canEditTimes && <span className="text-[9px] text-muted-foreground">read-only (admin / assignee)</span>}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-[10px] text-muted-foreground">Start Time</Label>
-                <Input type="datetime-local" data-testid="wo-detail-start-time" value={startT} disabled={!canEditTimes}
-                  onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
-                  onChange={(e) => setStartT(e.target.value)} className="mt-0.5 bg-[hsl(var(--panel-1))] font-mono text-xs" />
-              </div>
-              <div>
-                <Label className="text-[10px] text-muted-foreground">End Time</Label>
-                <Input type="datetime-local" data-testid="wo-detail-end-time" value={endT} disabled={!canEditTimes}
-                  onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
-                  onChange={(e) => setEndT(e.target.value)} className="mt-0.5 bg-[hsl(var(--panel-1))] font-mono text-xs" />
-              </div>
-            </div>
-            {canEditTimes && (
-              <Button size="sm" onClick={saveTimes} disabled={!dirty || saving} data-testid="wo-detail-save-times"
-                className="mt-3 w-full border border-[hsl(var(--primary))]/60 bg-transparent text-xs text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 disabled:opacity-40">
-                {saving ? 'Saving…' : 'Save Times'}
-              </Button>
-            )}
-          </div>
-
-          {/* Workflow actions */}
-          <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-            {['OPEN', 'ASSIGNED'].includes(wo.status) && (
-              <Button size="sm" variant="outline" data-testid="wo-detail-start-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
-                onClick={() => { onAct(wo, 'start'); setOpen(false); }}>Start</Button>
-            )}
-            {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && (
-              <Button size="sm" data-testid="wo-detail-complete-btn" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10"
-                onClick={() => { setOpen(false); onStartComplete(wo); }}>Complete</Button>
-            )}
-            {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
-              <Button size="sm" data-testid="wo-detail-admin-close-btn" className="h-7 border border-[#ff9e1c]/60 bg-transparent text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/10"
-                onClick={() => { onAct(wo, 'close'); setOpen(false); }}>Admin Close</Button>
-            ) : (
-              <span className="self-center text-[10px] text-[#ff9e1c]">awaiting admin closure</span>
-            ))}
-            {(wo.breakdown_id || wo.source_breakdown_id) && wo.status !== 'CLOSED' && (
-              <Button size="sm" variant="outline" data-testid="wo-detail-repair-page-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
-                onClick={() => navigate(`/breakdowns/repair/${wo.breakdown_id || wo.source_breakdown_id}`)}>Open Repair Page</Button>
-            )}
-            {wo.wo_type === 'Preventive' && wo.pm_task_id && wo.status !== 'CLOSED' && (
-              <Button size="sm" variant="outline" data-testid="wo-detail-pm-page-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
-                onClick={() => navigate(`/preventive-maintenance/close/${wo.pm_task_id}`)}>PM Closeout Page</Button>
-            )}
-            {wo.wo_type === 'RCA' && (
-              <Button size="sm" data-testid="wo-detail-rca-form-btn" className="h-7 border border-[#ff2e63]/60 bg-transparent text-xs text-[#ff2e63] hover:bg-[#ff2e63]/10"
-                onClick={() => navigate(`/work-orders/rca/${wo.id}`)}>Open 5-Why RCA Form</Button>
-            )}
-            {wo.rca_task_id && (
-              <Button size="sm" variant="outline" data-testid="wo-detail-view-rca-btn" className="h-7 border-[#ff2e63]/40 bg-[hsl(var(--panel-2))] text-xs text-[#ff2e63]"
-                onClick={() => navigate(`/work-orders/rca/${wo.rca_task_id}`)}>View Linked RCA</Button>
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+function TypeChip({ wo }) {
+  if (wo.wo_type === 'RCA') return <span className="border border-[#ff2e63]/60 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-[#ff2e63]">RCA</span>;
+  if (wo.wo_type === 'Predictive') return <span className="border border-[#ff9e1c]/60 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-[#ff9e1c]" title={`AWS Predictive — ${wo.aws_category || ''}`}>AWS</span>;
+  return null;
 }
 
 function CompleteDialog({ wo, open, setOpen, onDone }) {
@@ -221,12 +54,12 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
     try {
       await api.put(`/work-orders/${wo.id}`, {
         action: 'complete', action_taken: actionTaken || undefined,
-        started_at: startT ? toIso(startT) : undefined,
-        completed_at: endT ? toIso(endT) : undefined,
+        started_at: startT ? toIsoUtc(startT) : undefined,
+        completed_at: endT ? toIsoUtc(endT) : undefined,
         spare_parts: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
         checklist_results: Object.keys(checklist).length ? checklist : undefined,
       });
-      toast.success(`${wo.wo_number} completed — awaiting admin closure`);
+      toast.success(`${wo.wo_number} ${needsAdminClosure(wo.wo_type) ? 'completed — awaiting admin closure' : 'completed & closed'}`);
       setOpen(false); onDone();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -254,7 +87,9 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
           </div>
           <div><Label className="text-xs">Action Taken</Label><Textarea data-testid="wo-complete-action-taken" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
           <SpareRows rows={spares} setRows={setSpares} />
-          <Button onClick={submit} data-testid="wo-complete-confirm" className="w-full border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10">Complete Work Order</Button>
+          <Button onClick={submit} data-testid="wo-complete-confirm" className="w-full border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10">
+            {needsAdminClosure(wo.wo_type) ? 'Complete → Admin Closure' : 'Complete & Close'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -262,33 +97,39 @@ function CompleteDialog({ wo, open, setOpen, onDone }) {
 }
 
 export default function WorkOrders() {
-  const { isAdmin } = useApp();
+  const { user, isAdmin, openWorkOrder, woVersion } = useApp();
   const navigate = useNavigate();
+  const isTechRole = user?.role === 'technician';
   const [data, setData] = useState({ items: [], total: 0 });
   const [view, setView] = useState('kanban'); // kanban is the default view
   const [status, setStatus] = useState('all');
   const [woType, setWoType] = useState('all');
+  const [myTasks, setMyTasks] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [completeWo, setCompleteWo] = useState(null);
   const [completeOpen, setCompleteOpen] = useState(false);
-  const [detailWo, setDetailWo] = useState(null);
-  const [detailOpen, setDetailOpen] = useState(false);
   const [form, setForm] = useState({ machine_id: '', title: '', description: '', wo_type: 'Corrective', priority: 'medium', assigned_to: '' });
 
   const load = useCallback(() => {
     const params = new URLSearchParams();
-    if (status !== 'all') params.set('status', status);
     if (woType !== 'all') params.set('wo_type', woType);
     api.get(`/work-orders?${params}`).then((r) => setData(r.data));
-  }, [status, woType]);
-  useEffect(() => { load(); }, [load]);
+  }, [woType]);
+  useEffect(() => { load(); }, [load, woVersion]);
+
+  // Client-side status + My Tasks filtering (UNASSIGNED is a derived state)
+  const items = useMemo(() => {
+    let list = data.items;
+    if (myTasks) list = list.filter((w) => w.assigned_to === user?.username);
+    if (status !== 'all') list = list.filter((w) => inColumn(w, status));
+    return list;
+  }, [data.items, myTasks, status, user]);
 
   const create = async () => {
     if (!form.machine_id || !form.title) { toast.error('Machine and title are required'); return; }
-    if (!form.assigned_to) { toast.error('Assigned technician is required'); return; }
     try {
-      const res = await api.post('/work-orders', { ...form });
-      toast.success(`${res.data.wo_number} created — assigned to ${form.assigned_to}`);
+      const res = await api.post('/work-orders', { ...form, assigned_to: form.assigned_to || undefined });
+      toast.success(`${res.data.wo_number} created — ${form.assigned_to ? `assigned to ${form.assigned_to}` : 'UNASSIGNED (any technician can claim)'}`);
       setCreateOpen(false);
       setForm({ machine_id: '', title: '', description: '', wo_type: 'Corrective', priority: 'medium', assigned_to: '' });
       load();
@@ -298,7 +139,7 @@ export default function WorkOrders() {
   const act = async (wo, action, extra = {}) => {
     try {
       await api.put(`/work-orders/${wo.id}`, { action, ...extra });
-      toast.success(`${wo.wo_number} ${action}ed`);
+      toast.success(`${wo.wo_number} ${action === 'claim' ? `claimed by ${user.username}` : `${action}ed`}`);
       load();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -317,8 +158,6 @@ export default function WorkOrders() {
     setCompleteOpen(true);
   };
 
-  const openDetail = (wo) => { setDetailWo(wo); setDetailOpen(true); };
-
   const clearClosed = async () => {
     try {
       const r = await api.post('/work-orders/clear-closed');
@@ -327,27 +166,17 @@ export default function WorkOrders() {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
-  // Refresh the board AND the WO currently open in the detail modal (after time edits)
-  const refreshDetail = useCallback(async () => {
-    load();
-    if (detailWo) {
-      try {
-        const r = await api.get(`/work-orders?search=${encodeURIComponent(detailWo.wo_number)}`);
-        const fresh = (r.data.items || []).find((w) => w.id === detailWo.id);
-        if (fresh) setDetailWo(fresh);
-      } catch {}
-    }
-  }, [load, detailWo]);
+  const isUnassigned = (wo) => !wo.assigned_to && ['OPEN', 'ASSIGNED'].includes(wo.status);
 
-  // Compact kanban card — click anywhere on the card to open the detail popout
+  // Compact kanban card — click anywhere on the card to open the universal detail popout
   const WOCard = ({ wo }) => (
-    <div role="button" tabIndex={0} onClick={() => openDetail(wo)} onKeyDown={(e) => e.key === 'Enter' && openDetail(wo)}
-      className="cursor-pointer border border-border bg-[hsl(var(--panel-1))] p-2 transition-colors hover:border-[hsl(var(--primary))]/60 hover:shadow-[0_0_8px_rgba(var(--accent-rgb),0.15)]"
+    <div role="button" tabIndex={0} onClick={() => openWorkOrder(wo.id)} onKeyDown={(e) => e.key === 'Enter' && openWorkOrder(wo.id)}
+      className={`cursor-pointer border bg-[hsl(var(--panel-1))] p-2 transition-colors hover:border-[hsl(var(--primary))]/60 hover:shadow-[0_0_8px_rgba(var(--accent-rgb),0.15)] ${isUnassigned(wo) ? 'border-[#f9f871]/40' : 'border-border'}`}
       data-testid={`wo-card-${wo.wo_number}`}>
       <div className="flex items-center justify-between gap-1">
         <span className="font-mono text-[10px] text-[hsl(var(--primary))]">{wo.wo_number}</span>
         <div className="flex items-center gap-1">
-          {wo.wo_type === 'RCA' && <span className="border border-[#ff2e63]/60 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-[#ff2e63]">RCA</span>}
+          <TypeChip wo={wo} />
           <CritBadge level={wo.priority} />
         </div>
       </div>
@@ -355,8 +184,18 @@ export default function WorkOrders() {
       <div className="mt-0.5 truncate text-[10px] text-muted-foreground" data-testid={`wo-card-machine-${wo.wo_number}`}>{wo.machine_name}</div>
       <div className="text-[9px] text-muted-foreground">{wo.wo_type} · {wo.assigned_to || 'unassigned'} · {fmtDate(wo.created_at)}</div>
       <div className="mt-1.5 flex flex-wrap gap-1">
-        {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-5 border-border bg-[hsl(var(--panel-2))] px-1.5 text-[9px]" onClick={(e) => { e.stopPropagation(); act(wo, 'start'); }}>Start</Button>}
-        {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-5 border border-[#05ffa1]/60 bg-transparent px-1.5 text-[9px] text-[#05ffa1] hover:bg-[#05ffa1]/10" onClick={(e) => { e.stopPropagation(); startComplete(wo); }}>Complete</Button>}
+        {isUnassigned(wo) ? (
+          <Button size="sm" data-testid={`wo-claim-${wo.wo_number}`}
+            className="h-5 border border-[#f9f871]/60 bg-transparent px-1.5 text-[9px] text-[#f9f871] hover:bg-[#f9f871]/10"
+            onClick={(e) => { e.stopPropagation(); act(wo, 'claim'); }}>
+            <Hand className="mr-0.5 h-2.5 w-2.5" /> Claim
+          </Button>
+        ) : (
+          <>
+            {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-5 border-border bg-[hsl(var(--panel-2))] px-1.5 text-[9px]" onClick={(e) => { e.stopPropagation(); act(wo, 'start'); }}>Start</Button>}
+            {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-5 border border-[#05ffa1]/60 bg-transparent px-1.5 text-[9px] text-[#05ffa1] hover:bg-[#05ffa1]/10" onClick={(e) => { e.stopPropagation(); startComplete(wo); }}>Complete</Button>}
+          </>
+        )}
         {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
           <Button size="sm" className="h-5 border border-[#ff9e1c]/60 bg-transparent px-1.5 text-[9px] text-[#ff9e1c] hover:bg-[#ff9e1c]/10" data-testid={`wo-admin-close-${wo.wo_number}`} onClick={(e) => { e.stopPropagation(); act(wo, 'close'); }}>Admin Close</Button>
         ) : (
@@ -371,7 +210,7 @@ export default function WorkOrders() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Work Orders</h1>
-          <p className="text-sm text-muted-foreground">{data.total} total · Corrective / Preventive / Inspection</p>
+          <p className="text-sm text-muted-foreground">{data.total} total · Corrective / Preventive / Inspection / AWS-Predictive / RCA</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" data-testid="work-orders-view-toggle" onClick={() => setView(view === 'table' ? 'kanban' : 'table')} className="border-border bg-[hsl(var(--panel-2))]">
@@ -383,29 +222,38 @@ export default function WorkOrders() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {['all', ...LIFE].map((s) => (
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {isTechRole && (
+          <button
+            data-testid="wo-my-tasks-toggle"
+            onClick={() => setMyTasks(!myTasks)}
+            className={`cyber-chamfer-sm flex items-center gap-1 border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${myTasks ? 'power-on border-[#05ffa1] bg-transparent text-[#05ffa1] shadow-[0_0_8px_rgba(5,255,161,0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            <UserRound className="h-3 w-3" /> My Tasks
+          </button>
+        )}
+        {isTechRole && <span className="mx-1 text-border">|</span>}
+        {['all', ...COLUMNS].map((s) => (
           <button key={s} onClick={() => setStatus(s)} data-testid={`wo-filter-${s}`}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${status === s ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-            {s === 'all' ? 'All' : s}
+            {s === 'all' ? 'All' : (COL_LABEL[s] || s)}
           </button>
         ))}
         <span className="mx-1 text-border">|</span>
         {TYPES.map((t) => (
           <button key={t} onClick={() => setWoType(t)} data-testid={`wo-type-filter-${t}`}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${woType === t ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-            {t === 'all' ? 'All Types' : t}
+            {t === 'all' ? 'All Types' : t === 'Predictive' ? 'AWS / Predictive' : t}
           </button>
         ))}
       </div>
 
       {view === 'kanban' ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="work-orders-kanban">
-          {LIFE.map((col) => {
-            const colItems = data.items.filter((w) => colStatuses(col).includes(w.status) && !w.kanban_cleared);
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5" data-testid="work-orders-kanban">
+          {COLUMNS.map((col) => {
+            const colItems = items.filter((w) => inColumn(w, col) && !w.kanban_cleared);
             return (
-              <div key={col} className="rounded-lg border border-border bg-[hsl(var(--panel-1))]/50">
-                <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <div key={col} className={`rounded-lg border bg-[hsl(var(--panel-1))]/50 ${col === 'UNASSIGNED' ? 'border-[#f9f871]/30' : 'border-border'}`} data-testid={`wo-kanban-col-${col}`}>
+                <div className={`flex items-center justify-between border-b px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest ${col === 'UNASSIGNED' ? 'border-[#f9f871]/30 text-[#f9f871]' : 'border-border text-muted-foreground'}`}>
                   <span>{COL_LABEL[col] || col} <span className="ml-1 text-[hsl(var(--primary))]">{colItems.length}</span></span>
                   {col === 'CLOSED' && colItems.length > 0 && (
                     <button data-testid="wo-clear-closed" onClick={clearClosed}
@@ -440,20 +288,33 @@ export default function WorkOrders() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.items.length === 0 && <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No work orders match filters</TableCell></TableRow>}
-              {data.items.map((wo) => (
+              {items.length === 0 && <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No work orders match filters</TableCell></TableRow>}
+              {items.map((wo) => (
                 <TableRow key={wo.id} data-testid={`wo-row-${wo.wo_number}`} className="border-border hover:bg-white/[0.03]">
-                  <TableCell className="font-mono text-xs text-[hsl(var(--primary))]">{wo.wo_number}</TableCell>
-                  <TableCell className="text-xs">{wo.wo_type}{wo.auto_generated && <span className="ml-1 text-[9px] text-muted-foreground">(auto)</span>}</TableCell>
+                  <TableCell>
+                    <button className="font-mono text-xs text-[hsl(var(--primary))] hover:underline" data-testid={`wo-open-${wo.wo_number}`} onClick={() => openWorkOrder(wo.id)}>
+                      {wo.wo_number}
+                    </button>
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {wo.wo_type === 'Predictive' ? <span className="text-[#ff9e1c]">AWS / Predictive</span> : wo.wo_type}
+                    {wo.auto_generated && <span className="ml-1 text-[9px] text-muted-foreground">(auto)</span>}
+                  </TableCell>
                   <TableCell className="max-w-64 truncate text-sm">{wo.title}</TableCell>
                   <TableCell className="text-sm" data-testid={`wo-machine-${wo.wo_number}`}>{wo.machine_name}</TableCell>
                   <TableCell><CritBadge level={wo.priority} /></TableCell>
-                  <TableCell><LifecycleBadge status={wo.status} /></TableCell>
+                  <TableCell>{isUnassigned(wo) ? <span className="border border-[#f9f871]/50 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-[#f9f871]">Unassigned</span> : <LifecycleBadge status={wo.status} />}</TableCell>
                   <TableCell className="text-sm">{wo.assigned_to || '—'}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" data-testid={`wo-start-${wo.wo_number}`} onClick={() => act(wo, 'start')}>Start</Button>}
-                      {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 border border-[#05ffa1]/60 bg-transparent text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`wo-complete-${wo.wo_number}`} onClick={() => startComplete(wo)}>Complete</Button>}
+                      {isUnassigned(wo) ? (
+                        <Button size="sm" className="h-6 border border-[#f9f871]/60 bg-transparent text-[10px] text-[#f9f871] hover:bg-[#f9f871]/10" data-testid={`wo-claim-${wo.wo_number}`} onClick={() => act(wo, 'claim')}>Claim</Button>
+                      ) : (
+                        <>
+                          {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" data-testid={`wo-start-${wo.wo_number}`} onClick={() => act(wo, 'start')}>Start</Button>}
+                          {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && <Button size="sm" className="h-6 border border-[#05ffa1]/60 bg-transparent text-[10px] text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`wo-complete-${wo.wo_number}`} onClick={() => startComplete(wo)}>Complete</Button>}
+                        </>
+                      )}
                       {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
                         <Button size="sm" className="h-6 border border-[#ff9e1c]/60 bg-transparent text-[10px] text-[#ff9e1c] hover:bg-[#ff9e1c]/10" data-testid={`wo-close-${wo.wo_number}`} onClick={() => act(wo, 'close')}>Admin Close</Button>
                       ) : (
@@ -481,7 +342,7 @@ export default function WorkOrders() {
                 <Label className="text-xs">Type</Label>
                 <Select value={form.wo_type} onValueChange={(v) => setForm({ ...form, wo_type: v })}>
                   <SelectTrigger data-testid="wo-create-type" className="bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
-                  <SelectContent>{['Corrective', 'Preventive', 'Inspection'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                  <SelectContent>{['Corrective', 'Preventive', 'Inspection', 'Predictive'].map((t) => <SelectItem key={t} value={t}>{t === 'Predictive' ? 'AWS / Predictive' : t}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
@@ -492,14 +353,17 @@ export default function WorkOrders() {
                 </Select>
               </div>
             </div>
-            <div><Label className="text-xs">Assign Technician *</Label><TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="wo-create-technician" /></div>
+            <div>
+              <Label className="text-xs">Assign Technician (optional)</Label>
+              <TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="wo-create-technician" allowNone />
+              <p className="mt-1 text-[11px] text-muted-foreground">Leave empty to create an UNASSIGNED work order that any technician can claim from the board.</p>
+            </div>
             <Button onClick={create} data-testid="wo-create-submit" className="w-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">Create Work Order</Button>
           </div>
         </DialogContent>
       </Dialog>
 
       <CompleteDialog wo={completeWo} open={completeOpen} setOpen={setCompleteOpen} onDone={load} />
-      <WODetailModal wo={detailWo} open={detailOpen} setOpen={setDetailOpen} onDone={refreshDetail} onAct={act} onStartComplete={startComplete} />
     </div>
   );
 }

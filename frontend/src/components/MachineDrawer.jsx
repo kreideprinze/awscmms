@@ -252,25 +252,26 @@ function BreakdownsTab({ machineId, machine }) {
 
 /* ---------------- Work Orders ---------------- */
 function WorkOrdersTab({ machineId }) {
-  const { isTech } = useApp();
+  const { isTech, openWorkOrder, woVersion } = useApp();
   const [items, setItems] = useState([]);
   const load = useCallback(() => {
     if (!isTech) return;
     api.get(`/work-orders?machine_id=${machineId}`).then((r) => setItems(r.data.items)).catch(() => {});
   }, [machineId, isTech]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, woVersion]);
   if (!isTech) return <Empty text="Work orders are visible to maintenance staff only" />;
   return (
     <div className="space-y-3">
       {items.length === 0 ? <Empty text="No work orders" /> : items.map((wo) => (
-        <div key={wo.id} className="rounded-md border border-border bg-[hsl(var(--panel-1))] p-3">
+        <button key={wo.id} data-testid={`drawer-wo-${wo.wo_number}`} onClick={() => openWorkOrder(wo.id)}
+          className="block w-full rounded-md border border-border bg-[hsl(var(--panel-1))] p-3 text-left transition-colors hover:border-[hsl(var(--primary))]/60">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs text-[hsl(var(--primary))]">{wo.wo_number} · {wo.wo_type}</span>
             <LifecycleBadge status={wo.status} />
           </div>
           <div className="mt-1 text-sm">{wo.title}</div>
           <div className="mt-1 text-[11px] text-muted-foreground">{wo.assigned_to || 'Unassigned'} · {fmtDate(wo.created_at)}</div>
-        </div>
+        </button>
       ))}
     </div>
   );

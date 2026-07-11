@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Gauge } from 'lucide-react';
+import { ChevronDown, ChevronRight, Gauge, CalendarRange, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { Input } from '@/components/ui/input';
 
 const WINDOWS = [
   { key: 8, label: 'Shift (8h)' },
@@ -30,19 +31,40 @@ function availGlow(a) {
   return { textShadow: '0 0 8px rgba(255,46,99,0.5)' };
 }
 
+// Live HH:MM:SS ticking timer for an active breakdown on a line
+function BreakdownTimer({ since }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const secs = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
+  const h = String(Math.floor(secs / 3600)).padStart(2, '0');
+  const m = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+  const s = String(secs % 60).padStart(2, '0');
+  return <span className="font-mono tabular-nums">{h}:{m}:{s}</span>;
+}
+
 // Primary Control Room ribbon: availability + downtime per Line, expandable to
-// per-Section (process group) breakdown. This is the primary at-a-glance info.
+// per-Section (process group) breakdown. KPIs only — no narrative text.
 export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
   const [data, setData] = useState(null);
   const [windowH, setWindowH] = useState(24);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customRange, setCustomRange] = useState(null); // {from, to} applied
+  const [draftFrom, setDraftFrom] = useState('');
+  const [draftTo, setDraftTo] = useState('');
   const [expandedLine, setExpandedLine] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await api.get(`/control-room/line-kpis?hours=${windowH}`);
+      const params = customRange
+        ? `date_from=${customRange.from}${customRange.to ? `&date_to=${customRange.to}` : ''}`
+        : `hours=${windowH}`;
+      const res = await api.get(`/control-room/line-kpis?${params}`);
       setData(res.data);
     } catch {}
-  }, [windowH]);
+  }, [windowH, customRange]);
 
   useEffect(() => {
     load();
@@ -55,20 +77,31 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
     [data, expandedLine],
   );
 
+  const applyCustom = () => {
+    if (!draftFrom) return;
+    setCustomRange({ from: draftFrom, to: draftTo || '' });
+  };
+  const clearCustom = () => {
+    setCustomRange(null);
+    setCustomOpen(false);
+    setDraftFrom('');
+    setDraftTo('');
+  };
+
   return (
     <div data-testid="line-kpi-ribbon">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.25em] text-muted-foreground">
           <Gauge className="h-3.5 w-3.5 text-[hsl(var(--primary))]" /> Line Availability · Downtime
         </span>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex flex-wrap items-center gap-1">
           {WINDOWS.map((w) => (
             <button
               key={w.key}
               data-testid={`kpi-window-${w.key}`}
-              onClick={() => setWindowH(w.key)}
+              onClick={() => { setWindowH(w.key); setCustomRange(null); setCustomOpen(false); }}
               className={`cyber-chamfer-sm border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wide transition-colors ${
-                windowH === w.key
+                !customRange && windowH === w.key
                   ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]'
                   : 'border-border bg-transparent text-muted-foreground hover:border-muted-foreground hover:text-foreground'
               }`}
@@ -76,8 +109,52 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
               {w.label}
             </button>
           ))}
+          <button
+            data-testid="kpi-window-custom"
+            onClick={() => setCustomOpen(!customOpen)}
+            className={`cyber-chamfer-sm flex items-center gap-1 border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wide transition-colors ${
+              customRange
+                ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]'
+                : 'border-border bg-transparent text-muted-foreground hover:border-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <CalendarRange className="h-3 w-3" />
+            {customRange ? `${customRange.from} → ${customRange.to || 'now'}` : 'Custom'}
+          </button>
+          {customRange && (
+            <button data-testid="kpi-window-custom-clear" onClick={clearCustom} title="Clear custom range"
+              className="cyber-chamfer-sm border border-border px-1.5 py-0.5 text-muted-foreground transition-colors hover:border-[#ff2e63]/60 hover:text-[#ff2e63]">
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Custom date range slicer */}
+      {customOpen && (
+        <div className="mb-2 flex flex-wrap items-end gap-2 border border-[hsl(var(--primary))]/30 bg-transparent p-2" data-testid="kpi-custom-range-panel">
+          <div>
+            <div className="mb-0.5 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">From</div>
+            <Input type="date" data-testid="kpi-custom-from" value={draftFrom} onChange={(e) => setDraftFrom(e.target.value)}
+              onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
+              className="h-7 w-36 cursor-pointer bg-[hsl(var(--panel-2))] font-mono text-xs" />
+          </div>
+          <div>
+            <div className="mb-0.5 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">To (optional)</div>
+            <Input type="date" data-testid="kpi-custom-to" value={draftTo} onChange={(e) => setDraftTo(e.target.value)}
+              onClick={(e) => { try { e.currentTarget.showPicker && e.currentTarget.showPicker(); } catch {} }}
+              className="h-7 w-36 cursor-pointer bg-[hsl(var(--panel-2))] font-mono text-xs" />
+          </div>
+          <button
+            data-testid="kpi-custom-apply"
+            onClick={applyCustom}
+            disabled={!draftFrom}
+            className="cyber-chamfer-sm border border-[hsl(var(--primary))]/60 px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10 disabled:opacity-40"
+          >
+            Apply Range
+          </button>
+        </div>
+      )}
 
       {/* Line cards */}
       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -85,6 +162,7 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
         {data?.lines?.map((l) => {
           const isOpen = expandedLine === l.line;
           const isSelected = selectedLine === l.line;
+          const hasActiveBd = !!l.active_breakdown_since;
           return (
             <button
               key={l.line}
@@ -99,10 +177,12 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
                   onSelectLine && onSelectLine(l.line);
                 }
               }}
-              className={`cyber-chamfer-sm min-w-[170px] shrink-0 border bg-transparent px-3 py-2 text-left transition-all duration-150 hover:-translate-y-0.5 ${
+              className={`cyber-chamfer-sm min-w-[170px] shrink-0 border bg-transparent px-3 pt-2 text-left transition-all duration-150 hover:-translate-y-0.5 ${hasActiveBd ? 'pb-0' : 'pb-2'} ${
                 isSelected || isOpen
                   ? 'border-[hsl(var(--primary))] shadow-[0_0_12px_rgba(var(--accent-rgb),0.2)]'
-                  : 'border-border hover:border-[hsl(var(--primary))]/60'
+                  : hasActiveBd
+                    ? 'border-[#ff2e63]/50 hover:border-[#ff2e63]'
+                    : 'border-border hover:border-[hsl(var(--primary))]/60'
               }`}
             >
               <div className="flex items-center justify-between gap-2">
@@ -120,9 +200,20 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
                   {fmtDowntime(l.downtime_minutes)} down
                 </span>
               </div>
-              <div className="mt-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-                {l.department} · {l.machines} mach · {l.running} run
-              </div>
+              {/* Live breakdown ribbon — HH:MM:SS ticking since the earliest open breakdown */}
+              {hasActiveBd && (
+                <div
+                  data-testid={`line-bd-timer-${l.line.replace(/\s+/g, '-')}`}
+                  className="-mx-3 mt-1.5 flex items-center justify-between gap-2 border-t border-[#ff2e63]/50 bg-[#ff2e63]/10 px-3 py-1"
+                >
+                  <span className="flex items-center gap-1 font-mono text-[8px] uppercase tracking-[0.2em] text-[#ff2e63]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#ff2e63] alarm-pulse" style={{ boxShadow: '0 0 6px #ff2e63' }} /> Down
+                  </span>
+                  <span className="text-[11px] text-[#ff2e63]" style={{ textShadow: '0 0 8px rgba(255,46,99,0.5)' }}>
+                    <BreakdownTimer since={l.active_breakdown_since} />
+                  </span>
+                </div>
+              )}
             </button>
           );
         })}

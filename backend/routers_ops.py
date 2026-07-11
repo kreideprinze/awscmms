@@ -254,27 +254,86 @@ def scope_query(level: str, value: Optional[str]):
 
 
 @router.get('/analytics/kpis')
-async def analytics_kpis(level: str = 'plant', value: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
+                         date_from: Optional[str] = None, date_to: Optional[str] = None,
+                         user: dict = Depends(get_current_user)):
+    """Multi-level KPIs. `date_from`/`date_to` (YYYY-MM-DD, inclusive) slice ALL
+    charts/KPIs on the page. Availability uses the shared KPI engine — the same
+    single runtime source of truth as the Control Room (logged line days override,
+    otherwise live 24/7 assumption)."""
     q = scope_query(level, value)
 
-    breakdowns = await db.breakdowns.find(q, {'_id': 0}).to_list(100000)
+    def in_range_date(d):
+        if not d:
+            return False
+        d = str(d)[:10]
+        if date_from and d < date_from:
+            return False
+        if date_to and d > date_to:
+            return False
+        return True
+
+    bd_q = dict(q)
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            rng['$gte'] = date_from
+        if date_to:
+            rng['$lte'] = date_to + 'T23:59:59.999999+00:00'
+        bd_q['start_time'] = rng
+
+    breakdowns = await db.breakdowns.find(bd_q, {'_id': 0}).to_list(100000)
     closed = [b for b in breakdowns if b.get('downtime_minutes') is not None]
     failures = len(breakdowns)
     total_downtime_min = sum(b['downtime_minutes'] for b in closed)
     mttr_hours = round(total_downtime_min / len(closed) / 60, 2) if closed else None
 
+    # ---- Closure rate within the selected range: reported vs closed ----
+    closed_in_range = len([b for b in breakdowns if b.get('status') in ('COMPLETED', 'CLOSED')])
+    closure_rate = round(closed_in_range / failures * 100, 1) if failures else None
+
+    # ---- Runtime (single source of truth) ----
+    rt_q = dict(q)
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            rng['$gte'] = date_from
+        if date_to:
+            rng['$lte'] = date_to
+        rt_q['date'] = rng
     rt = await db.runtime_logs.aggregate([
-        {'$match': q}, {'$group': {'_id': None, 'run': {'$sum': '$run_hours'}, 'cal': {'$sum': '$calendar_hours'}}},
+        {'$match': rt_q}, {'$group': {'_id': None, 'run': {'$sum': '$run_hours'}, 'cal': {'$sum': '$calendar_hours'}}},
     ]).to_list(1)
     run_hours = round(rt[0]['run'], 1) if rt else 0
     cal_hours = round(rt[0]['cal'], 1) if rt else 0
-    availability = round(run_hours / cal_hours * 100, 1) if cal_hours else None
+
+    # availability: plant/line scopes use the SHARED KPI ENGINE (identical to Control Room)
+    availability = None
+    if level in ('plant', 'line'):
+        from datetime import datetime, timezone, timedelta
+        from kpi_engine import compute_line_kpis
+        now = datetime.now(timezone.utc)
+        since = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else now - timedelta(hours=24)
+        until = (datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)) if date_to else now
+        until = min(until, now)
+        if until > since:
+            engine = await compute_line_kpis(since, until)
+            if level == 'plant':
+                availability = engine['plant_availability']
+            else:
+                row = next((l for l in engine['lines'] if l['line'] == value), None)
+                availability = row['availability'] if row else None
+    if availability is None and cal_hours:
+        availability = round(run_hours / cal_hours * 100, 1)
+
     mtbf = round(run_hours / failures, 1) if failures and run_hours else None
     failure_rate = round(failures / run_hours * 1000, 3) if run_hours else None  # failures per 1000 run-hours
 
     # PM compliance
     pm_q = dict(q)
     completions = await db.pm_completions.find(pm_q, {'_id': 0}).to_list(100000)
+    if date_from or date_to:
+        completions = [c for c in completions if in_range_date(c.get('completed_at'))]
     on_time = len([c for c in completions if c.get('on_time')])
     today = now_iso()[:10]
     overdue_now = await db.pm_tasks.count_documents({**q, 'active': True, 'next_due_date': {'$lt': today}})
@@ -294,37 +353,54 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None, user
     downtime_trend = [{'month': m, 'downtime_hours': round(downtime_by_month.get(m, 0) / 60, 1)} for m in months]
     failure_trend = [{'month': m, 'failures': failures_by_month.get(m, 0)} for m in months]
 
-    # availability trend by month
+    # availability trend by month (respects date slice)
     avail_agg = await db.runtime_logs.aggregate([
-        {'$match': q},
+        {'$match': rt_q},
         {'$group': {'_id': {'$substr': ['$date', 0, 7]}, 'run': {'$sum': '$run_hours'}, 'cal': {'$sum': '$calendar_hours'}}},
         {'$sort': {'_id': 1}},
     ]).to_list(100)
     availability_trend = [{'month': a['_id'], 'availability': round(a['run'] / a['cal'] * 100, 1) if a['cal'] else 0} for a in avail_agg][-12:]
 
-    # top failing machines in scope
-    top_agg = await db.breakdowns.aggregate([
-        {'$match': q},
-        {'$group': {'_id': {'id': '$machine_id', 'name': '$machine_name'}, 'failures': {'$sum': 1}, 'downtime': {'$sum': {'$ifNull': ['$downtime_minutes', 0]}}}},
-        {'$sort': {'failures': -1}}, {'$limit': 10},
-    ]).to_list(10)
-    top_failing = [{'machine_id': t['_id']['id'], 'machine_name': t['_id']['name'], 'failures': t['failures'], 'downtime_hours': round(t['downtime'] / 60, 1)} for t in top_agg]
+    # top failing machines in scope (respects date slice)
+    top_map = defaultdict(lambda: {'failures': 0, 'downtime': 0.0, 'name': ''})
+    for b in breakdowns:
+        t = top_map[b['machine_id']]
+        t['failures'] += 1
+        t['downtime'] += b.get('downtime_minutes') or 0
+        t['name'] = b.get('machine_name') or t['name']
+    top_failing = [{'machine_id': mid, 'machine_name': t['name'], 'failures': t['failures'],
+                    'downtime_hours': round(t['downtime'] / 60, 1)}
+                   for mid, t in sorted(top_map.items(), key=lambda kv: -kv[1]['failures'])[:10]]
 
-    # failure modes distribution
-    fm_agg = await db.breakdowns.aggregate([
-        {'$match': q}, {'$group': {'_id': '$failure_mode', 'count': {'$sum': 1}}}, {'$sort': {'count': -1}}, {'$limit': 10},
-    ]).to_list(10)
-    failure_modes = [{'mode': f['_id'] or 'Unknown', 'count': f['count']} for f in fm_agg]
+    # failure modes distribution (respects date slice)
+    fm_map = defaultdict(lambda: {'count': 0, 'downtime': 0.0})
+    for b in breakdowns:
+        fm = fm_map[b.get('failure_mode') or 'Unknown']
+        fm['count'] += 1
+        fm['downtime'] += b.get('downtime_minutes') or 0
+    failure_modes = [{'mode': m, 'count': v['count']} for m, v in sorted(fm_map.items(), key=lambda kv: -kv[1]['count'])[:10]]
+
+    # ---- Pareto analysis: failure modes desc by frequency + cumulative % overlay ----
+    pareto_rows = sorted(fm_map.items(), key=lambda kv: (-kv[1]['count'], -kv[1]['downtime']))
+    total_count = sum(v['count'] for _, v in pareto_rows) or 1
+    cum = 0
+    pareto = []
+    for mode, v in pareto_rows[:15]:
+        cum += v['count']
+        pareto.append({'mode': mode, 'count': v['count'],
+                       'downtime_hours': round(v['downtime'] / 60, 1),
+                       'cumulative_pct': round(cum / total_count * 100, 1)})
 
     return {
-        'level': level, 'value': value,
+        'level': level, 'value': value, 'date_from': date_from, 'date_to': date_to,
         'mtbf_hours': mtbf, 'mttr_hours': mttr_hours, 'availability': availability,
         'failure_rate_per_1000h': failure_rate, 'pm_compliance': pm_compliance,
         'failures_total': failures, 'downtime_hours_total': round(total_downtime_min / 60, 1),
+        'breakdowns_reported': failures, 'breakdowns_closed': closed_in_range, 'closure_rate': closure_rate,
         'run_hours': run_hours, 'calendar_hours': cal_hours,
         'downtime_trend': downtime_trend, 'failure_trend': failure_trend,
         'availability_trend': availability_trend, 'top_failing_machines': top_failing,
-        'failure_modes': failure_modes,
+        'failure_modes': failure_modes, 'pareto': pareto,
     }
 
 
@@ -434,7 +510,7 @@ async def reliability_metrics(health: Optional[str] = None, line: Optional[str] 
     if line:
         q['line'] = line
     items = await db.reliability_metrics.find(q, {'_id': 0}).sort('life_pct', -1).limit(limit).to_list(limit)
-    # Failure category distribution (MECHANICAL / ELECTRICAL / CONTROL_PLC) per machine
+    # Failure category counts per machine (MECHANICAL / ELECTRICAL / CONTROL_PLC)
     agg = await db.breakdowns.aggregate([
         {'$group': {'_id': {'m': '$machine_id', 'c': {'$ifNull': ['$breakdown_type', 'MECHANICAL']}}, 'n': {'$sum': 1}}},
     ]).to_list(100000)
@@ -446,7 +522,8 @@ async def reliability_metrics(health: Optional[str] = None, line: Optional[str] 
         m['failure_categories'] = cats
         m['dominant_category'] = max(sorted(cats), key=lambda c: cats[c]) if cats else None
     if category:
-        items = [m for m in items if m.get('dominant_category') == category]
+        # category filter matches machines with an ACTIVE pool for that category
+        items = [m for m in items if category in (m.get('categories') or {}) or m.get('dominant_category') == category]
     return items
 
 
@@ -487,6 +564,7 @@ class ReliabilitySettings(BaseModel):
     watch_threshold_pct: Optional[float] = None
     inspection_threshold_pct: Optional[float] = None
     alert_trigger_pct: Optional[float] = None
+    predictive_trigger_pct: Optional[float] = None  # AWS Predictive WO trigger (admin-configurable, default 80)
     level2_min_failures: Optional[int] = None
     level3_min_failures: Optional[int] = None
     rolling_window: Optional[int] = None

@@ -1,5 +1,5 @@
-import React, { useMemo, useState, useRef } from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { NavLink, useSearchParams } from 'react-router-dom';
 import {
   Radar, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, Siren,
   Bell, LogOut, Pin, PinOff, Factory, Paintbrush, GripVertical, Check,
@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { fmtDate, CrackedGear } from '@/components/StatusBits';
 import { MachineDrawer } from '@/components/MachineDrawer';
+import { WorkOrderModal } from '@/components/WorkOrderModal';
 
 const MODULES = [
   { key: 'control-room', path: '/', label: 'Control Room', icon: Radar, roles: ['admin', 'technician', 'operator'] },
@@ -31,12 +32,24 @@ const SEVERITY_CLS = {
 };
 
 export function Layout({ children }) {
-  const { user, logout, unreadCount, notifications, markAllRead, branding, openMachine, uiPrefs, saveUiPrefs } = useApp();
+  const { user, logout, unreadCount, notifications, markAllRead, branding, openMachine, openWorkOrder, isTech, uiPrefs, saveUiPrefs } = useApp();
   const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [customizing, setCustomizing] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const dragKey = useRef(null);
   const expanded = pinned || hovered || customizing;
+
+  // Universal deep-link: any URL carrying ?wo=<id> opens the exact Work Order popout
+  useEffect(() => {
+    const woId = searchParams.get('wo');
+    if (woId && isTech) {
+      openWorkOrder(woId);
+      const next = new URLSearchParams(searchParams);
+      next.delete('wo');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, isTech, openWorkOrder, setSearchParams]);
 
   // Apply per-user order, then append any modules not in the saved order
   const ordered = useMemo(() => {
@@ -185,8 +198,13 @@ export function Layout({ children }) {
                   {notifications.map((n) => (
                     <button
                       key={n.id}
+                      data-testid={`notification-item-${n.id}`}
                       className={`block w-full border-b border-border/50 border-l-2 px-3 py-2 text-left hover:bg-white/5 ${SEVERITY_CLS[n.severity] || SEVERITY_CLS.info}`}
-                      onClick={() => n.machine_id && openMachine(n.machine_id)}
+                      onClick={() => {
+                        // WO notifications deep-link straight into the exact Work Order popout
+                        if (n.reference_type === 'work_order' && n.reference_id && isTech) openWorkOrder(n.reference_id);
+                        else if (n.machine_id) openMachine(n.machine_id);
+                      }}
                     >
                       <div className="text-xs font-semibold">{n.title}</div>
                       <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.message}</div>
@@ -210,6 +228,8 @@ export function Layout({ children }) {
 
       {/* Global machine drawer */}
       <MachineDrawer />
+      {/* Universal work-order popout (deep-linkable from anywhere via ?wo=<id>) */}
+      <WorkOrderModal />
     </div>
   );
 }

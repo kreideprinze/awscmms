@@ -1,58 +1,26 @@
 [
   {
-    "content": "B1: Breakdown↔WO bidirectional status sync",
+    "content": "Phase T complete: hierarchy sync, filter ribbon, date slicer, timers, fuzzy search, admin CRUD",
     "status": "completed"
   },
   {
-    "content": "B2: Editable start/end times drive downtime/duration + RCA trigger, root_cause no longer mandatory",
+    "content": "Phase U complete: UNASSIGNED column, claim, Predictive, My Tasks, universal WO popout + ?wo= deep-links",
     "status": "completed"
   },
   {
-    "content": "B3: open_total + warnings generate-wo + public start_time",
-    "status": "completed"
+    "content": "Analytics: date range slicer, Closure Rate KPI, Failure Modes Pareto, dedup dept filter",
+    "status": "in_progress"
   },
   {
-    "content": "B4: Line availability formula fix (union intervals, window-based)",
-    "status": "completed"
+    "content": "AWS page: 3 health pools (MEC/ELE/PLC) + admin threshold config",
+    "status": "pending"
   },
   {
-    "content": "B5: PM PDF - embedded logo, outlined checkboxes, editable date",
-    "status": "completed"
+    "content": "Compile + screenshot verify Phase V",
+    "status": "pending"
   },
   {
-    "content": "F1: Fuzzy SAP spare search",
-    "status": "completed"
-  },
-  {
-    "content": "F2: Repair page - no root cause, time pickers",
-    "status": "completed"
-  },
-  {
-    "content": "F3: WO complete/detail time pickers with calendar",
-    "status": "completed"
-  },
-  {
-    "content": "F4: FINAL CLOSE removed from MachineDrawer",
-    "status": "completed"
-  },
-  {
-    "content": "F5: Breakdowns open-count subtitle + warning click dialog",
-    "status": "completed"
-  },
-  {
-    "content": "F6: Line KPI card click filters Digital Twin",
-    "status": "completed"
-  },
-  {
-    "content": "F7: Report form Start Time picker",
-    "status": "completed"
-  },
-  {
-    "content": "F8: ClosePMTask editable Date",
-    "status": "completed"
-  },
-  {
-    "content": "Build + smoke tests + testing agent",
-    "status": "completed"
+    "content": "Full testing agent run (frontend) across all phases",
+    "status": "pending"
   }
 ]

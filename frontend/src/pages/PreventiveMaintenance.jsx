@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Plus, CheckCircle2, FileDown } from 'lucide-react';
+import { Plus, CheckCircle2, FileDown, UserRound } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -19,10 +19,12 @@ const FREQS = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'];
 const EMPTY_FORM = { task_name: '', description: '', priority: 'medium', machine_id: '', assigned_to: '', frequency: 'monthly', location: '', reminder_offset_days: 1, next_due_date: '' };
 
 export default function PreventiveMaintenance() {
-  const { openMachine, isAdmin } = useApp();
+  const { openMachine, isAdmin, user } = useApp();
   const navigate = useNavigate();
+  const isTechRole = user?.role === 'technician';
   const [data, setData] = useState({ items: [], total: 0 });
   const [filter, setFilter] = useState('all');
+  const [myTasks, setMyTasks] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -33,6 +35,8 @@ export default function PreventiveMaintenance() {
     api.get(`/pm-tasks${q}`).then((r) => setData(r.data));
   }, [filter]);
   useEffect(() => { load(); api.get('/pm-templates').then((r) => setTemplates(r.data)); }, [load]);
+
+  const items = myTasks ? data.items.filter((t) => t.assigned_to === user?.username) : data.items;
 
   const applyTemplate = (tid) => {
     const t = templates.find((x) => x.id === tid);
@@ -90,6 +94,14 @@ export default function PreventiveMaintenance() {
       </div>
 
       <div className="mb-4 flex gap-2">
+        {isTechRole && (
+          <button
+            data-testid="pm-my-tasks-toggle"
+            onClick={() => setMyTasks(!myTasks)}
+            className={`cyber-chamfer-sm flex items-center gap-1 border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${myTasks ? 'power-on border-[#05ffa1] bg-transparent text-[#05ffa1] shadow-[0_0_8px_rgba(5,255,161,0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            <UserRound className="h-3 w-3" /> My Tasks
+          </button>
+        )}
         {['all', 'overdue'].map((f) => (
           <button key={f} onClick={() => setFilter(f)} data-testid={`pm-filter-${f}`}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors capitalize ${filter === f ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
@@ -112,8 +124,8 @@ export default function PreventiveMaintenance() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.items.length === 0 && <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No PM tasks yet. Create one to start the schedule.</TableCell></TableRow>}
-            {data.items.map((t) => {
+            {items.length === 0 && <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No PM tasks match filters. Create one to start the schedule.</TableCell></TableRow>}
+            {items.map((t) => {
               const rowCount = t.checklist_groups?.length ? t.checklist_groups.reduce((n, g) => n + g.items.length, 0) : (t.checklist?.length || 0);
               return (
                 <TableRow key={t.id} data-testid={`pm-row-${t.id}`} className="border-border hover:bg-white/[0.03]">

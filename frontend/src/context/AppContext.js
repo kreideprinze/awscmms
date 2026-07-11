@@ -44,6 +44,8 @@ export function AppProvider({ children }) {
   const [machineUpdates, setMachineUpdates] = useState({});
   const [liveFeed, setLiveFeed] = useState([]);
   const [drawerMachineId, setDrawerMachineId] = useState(null);
+  const [woModalId, setWoModalId] = useState(null); // universal work-order popout (deep-linkable)
+  const [woVersion, setWoVersion] = useState(0);    // bumped after any WO mutation so lists refresh
   const [branding, setBranding] = useState({ app_name: 'ForgeOps', plant_name: '' });
   const [uiPrefs, setUiPrefs] = useState({});
   const wsRef = useRef(null);
@@ -150,6 +152,8 @@ export function AppProvider({ children }) {
       machineUpdates, liveFeed, branding, refreshBranding,
       uiPrefs, saveUiPrefs,
       drawerMachineId, openMachine: setDrawerMachineId, closeMachine: () => setDrawerMachineId(null),
+      woModalId, openWorkOrder: setWoModalId, closeWorkOrder: () => setWoModalId(null),
+      woVersion, bumpWoVersion: () => setWoVersion((v) => v + 1),
     }}>
       {children}
     </AppContext.Provider>

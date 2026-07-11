@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, AlertTriangle, GitBranch } from 'lucide-react';
+import { Plus, Search, AlertTriangle, GitBranch, UserRound } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -17,9 +17,9 @@ import { errMsg } from '@/lib/api';
 
 const STATUSES = ['all', 'OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CLOSED'];
 
-// Warning detail popout: linked WO jump, or generate a WO with explicit technician assignment
+// Warning detail popout: linked WO jump, or generate a WO (assignment optional — unassigned WOs are claimable)
 function WarningDialog({ warning, open, setOpen, onDone }) {
-  const navigate = useNavigate();
+  const { openWorkOrder, isTech } = useApp();
   const [technicians, setTechnicians] = useState([]);
   const [tech, setTech] = useState('');
   const [woType, setWoType] = useState('Inspection');
@@ -36,11 +36,10 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
   const hasOpenWo = !!warning.work_order_number && warning.status !== 'CLOSED';
 
   const generate = async () => {
-    if (!tech) { toast.error('Select a technician to assign'); return; }
     setBusy(true);
     try {
-      const r = await api.post(`/warnings/${warning.id}/generate-wo`, { assigned_to: tech, wo_type: woType });
-      toast.success(`${r.data.wo_number} generated — assigned to ${tech}`);
+      const r = await api.post(`/warnings/${warning.id}/generate-wo`, { assigned_to: tech || undefined, wo_type: woType });
+      toast.success(`${r.data.wo_number} generated — ${tech ? `assigned to ${tech}` : 'UNASSIGNED (any technician can claim)'}`);
       setOpen(false); onDone();
     } catch (e) { toast.error(errMsg(e)); }
     setBusy(false);
@@ -71,8 +70,10 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
                 <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Linked Work Order</div>
                 <div className="font-mono text-sm text-[hsl(var(--primary))]">{warning.work_order_number}</div>
               </div>
-              <Button size="sm" variant="outline" data-testid="warning-open-wo" className="h-7 border-border bg-transparent text-xs"
-                onClick={() => navigate('/work-orders')}>View on Board</Button>
+              {warning.work_order_id && isTech && (
+                <Button size="sm" variant="outline" data-testid="warning-open-wo" className="h-7 border-border bg-transparent text-xs"
+                  onClick={() => { setOpen(false); openWorkOrder(warning.work_order_id); }}>Open Work Order</Button>
+              )}
             </div>
           ) : null}
 
@@ -80,16 +81,19 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
             <div className="space-y-2 border border-[#f9f871]/30 bg-[#f9f871]/[0.03] p-3">
               <Label className="text-[10px] uppercase tracking-widest text-[#f9f871]">Generate Work Order</Label>
               <div className="grid grid-cols-2 gap-2">
-                <Select value={tech} onValueChange={setTech}>
-                  <SelectTrigger data-testid="warning-wo-technician" className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Assign technician" /></SelectTrigger>
-                  <SelectContent>{technicians.map((t) => <SelectItem key={t.username} value={t.username}>{t.name} ({t.username})</SelectItem>)}</SelectContent>
+                <Select value={tech || 'none'} onValueChange={(v) => setTech(v === 'none' ? '' : v)}>
+                  <SelectTrigger data-testid="warning-wo-technician" className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Unassigned — claimable" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned — any technician can claim</SelectItem>
+                    {technicians.map((t) => <SelectItem key={t.username} value={t.username}>{t.name} ({t.username})</SelectItem>)}
+                  </SelectContent>
                 </Select>
                 <Select value={woType} onValueChange={setWoType}>
                   <SelectTrigger data-testid="warning-wo-type" className="bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="Inspection">Inspection</SelectItem><SelectItem value="Corrective">Corrective</SelectItem></SelectContent>
                 </Select>
               </div>
-              <Button onClick={generate} disabled={busy || !tech} data-testid="warning-generate-wo"
+              <Button onClick={generate} disabled={busy} data-testid="warning-generate-wo"
                 className="w-full border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40">
                 {busy ? 'Generating…' : 'Generate Work Order'}
               </Button>
@@ -157,11 +161,13 @@ function WarningsView() {
 }
 
 export default function Breakdowns() {
-  const { openMachine, liveFeed, isTech } = useApp();
+  const { openMachine, openWorkOrder, liveFeed, isTech, user } = useApp();
   const navigate = useNavigate();
+  const isTechRole = user?.role === 'technician';
   const [data, setData] = useState({ items: [], total: 0 });
   const [status, setStatus] = useState('all');
   const [search, setSearch] = useState('');
+  const [myTasks, setMyTasks] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [warningOpen, setWarningOpen] = useState(false);
   const [view, setView] = useState('breakdowns'); // breakdowns | warnings
@@ -176,6 +182,8 @@ export default function Breakdowns() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { load(); }, [liveFeed.length]); // refresh on live events
+
+  const items = myTasks ? data.items.filter((bd) => bd.assigned_to === user?.username) : data.items;
 
   return (
     <div className="p-6" data-testid="breakdowns-page">
@@ -212,6 +220,14 @@ export default function Breakdowns() {
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input data-testid="breakdowns-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search ticket / machine / description" className="w-72 bg-[hsl(var(--panel-2))] pl-8" />
         </div>
+        {isTechRole && (
+          <button
+            data-testid="bd-my-tasks-toggle"
+            onClick={() => setMyTasks(!myTasks)}
+            className={`cyber-chamfer-sm flex items-center gap-1 border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${myTasks ? 'power-on border-[#05ffa1] bg-transparent text-[#05ffa1] shadow-[0_0_8px_rgba(5,255,161,0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            <UserRound className="h-3 w-3" /> My Tasks
+          </button>
+        )}
         {STATUSES.map((s) => (
           <button key={s} data-testid={`breakdowns-filter-${s}`} onClick={() => setStatus(s)}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${status === s ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
@@ -235,10 +251,10 @@ export default function Breakdowns() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.items.length === 0 && (
+            {items.length === 0 && (
               <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No breakdowns match filters</TableCell></TableRow>
             )}
-            {data.items.map((bd) => (
+            {items.map((bd) => (
               <React.Fragment key={bd.id}>
                 <TableRow data-testid={`breakdowns-row-${bd.ticket_number}`} onClick={() => setExpanded(expanded === bd.id ? null : bd.id)}
                   className="cursor-pointer border-border hover:bg-white/[0.03]">
@@ -265,7 +281,18 @@ export default function Breakdowns() {
                   <TableRow className="border-border bg-[hsl(var(--panel-1))]/60 hover:bg-[hsl(var(--panel-1))]/60">
                     <TableCell colSpan={8} className="p-4">
                       <div className="text-sm">{bd.description}</div>
-                      <div className="mt-1 text-[11px] text-muted-foreground">Reported by {bd.reporter}{bd.work_order_number ? ` · auto WO: ${bd.work_order_number}` : ''}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span>Reported by {bd.reporter}</span>
+                        {bd.work_order_number && (
+                          <button
+                            data-testid={`breakdown-wo-link-${bd.ticket_number}`}
+                            onClick={(e) => { e.stopPropagation(); if (bd.work_order_id && isTech) openWorkOrder(bd.work_order_id); }}
+                            className="flex items-center gap-1 border border-[hsl(var(--primary))]/50 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10"
+                            title="Open the linked work order">
+                            WO {bd.work_order_number} ↗
+                          </button>
+                        )}
+                      </div>
                       {bd.root_cause && <div className="mt-1 text-xs"><span className="text-muted-foreground">Root cause:</span> {bd.root_cause}</div>}
                       {bd.action_taken && <div className="mt-1 text-xs"><span className="text-muted-foreground">Action taken:</span> {bd.action_taken}</div>}
                       {bd.rca_task_id && isTech && (

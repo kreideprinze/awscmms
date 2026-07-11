@@ -52,7 +52,7 @@ export default function ControlRoom() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
   const [lineFilter, setLineFilter] = useState('all');
-  const [groupMode, setGroupMode] = useState('hierarchy'); // hierarchy | line
+  const [groupMode, setGroupMode] = useState('hierarchy'); // hierarchy (Line → Dept → PG) | line (flat)
   const [showFeed, setShowFeed] = useState(true);
   const [showPlantTotals, setShowPlantTotals] = useState(false);
   const [feed, setFeed] = useState([]);
@@ -97,6 +97,15 @@ export default function ControlRoom() {
     });
   }, [hierarchy.lines]);
 
+  // Departments repeat per line in the Line-first hierarchy — dedupe names for the filter row
+  const deptNames = useMemo(() => {
+    const orderMap = {};
+    for (const d of hierarchy.departments) {
+      if (!(d.name in orderMap) || d.order < orderMap[d.name]) orderMap[d.name] = d.order ?? 99;
+    }
+    return Object.keys(orderMap).sort((a, b) => orderMap[a] - orderMap[b] || a.localeCompare(b));
+  }, [hierarchy.departments]);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return machines.filter((m) => {
@@ -108,10 +117,12 @@ export default function ControlRoom() {
     });
   }, [machines, search, statusFilter, deptFilter, lineFilter]);
 
-  // ---- Twin layout: grouped by full hierarchy OR flat sections per line ----
+  // ---- Twin layout: Line-first hierarchy (Line → Department → Process Group) OR flat per line ----
   const twin = useMemo(() => {
-    const deptOrder = hierarchy.departments.map((d) => d.name);
     const pgOrder = hierarchy.process_groups.reduce((acc, pg) => { acc[`${pg.line}::${pg.name}`] = pg.order; return acc; }, {});
+    const deptOrder = {};
+    for (const d of hierarchy.departments) deptOrder[`${d.line}::${d.name}`] = d.order ?? 99;
+
     if (groupMode === 'line') {
       const byLine = {};
       for (const m of filtered) {
@@ -121,9 +132,9 @@ export default function ControlRoom() {
       return Object.entries(byLine)
         .sort((a, b) => lineNames.indexOf(a[0]) - lineNames.indexOf(b[0]))
         .map(([line, ms]) => ({
-          dept: null,
-          lines: [{
-            line,
+          line,
+          depts: [{
+            dept: null,
             pgs: [{
               pg: null,
               machines: ms.sort((x, y) => (pgOrder[`${line}::${x.process_group}`] ?? 99) - (pgOrder[`${line}::${y.process_group}`] ?? 99) || (x.position_x || 0) - (y.position_x || 0)),
@@ -131,21 +142,22 @@ export default function ControlRoom() {
           }],
         }));
     }
-    const byDept = {};
+
+    const byLine = {};
     for (const m of filtered) {
-      byDept[m.department] = byDept[m.department] || {};
-      byDept[m.department][m.line] = byDept[m.department][m.line] || {};
-      byDept[m.department][m.line][m.process_group] = byDept[m.department][m.line][m.process_group] || [];
-      byDept[m.department][m.line][m.process_group].push(m);
+      byLine[m.line] = byLine[m.line] || {};
+      byLine[m.line][m.department] = byLine[m.line][m.department] || {};
+      byLine[m.line][m.department][m.process_group] = byLine[m.line][m.department][m.process_group] || [];
+      byLine[m.line][m.department][m.process_group].push(m);
     }
-    return Object.entries(byDept)
-      .sort((a, b) => deptOrder.indexOf(a[0]) - deptOrder.indexOf(b[0]))
-      .map(([dept, linesObj]) => ({
-        dept,
-        lines: Object.entries(linesObj)
-          .sort((a, b) => lineNames.indexOf(a[0]) - lineNames.indexOf(b[0]))
-          .map(([line, pgsObj]) => ({
-            line,
+    return Object.entries(byLine)
+      .sort((a, b) => lineNames.indexOf(a[0]) - lineNames.indexOf(b[0]))
+      .map(([line, deptsObj]) => ({
+        line,
+        depts: Object.entries(deptsObj)
+          .sort((a, b) => (deptOrder[`${line}::${a[0]}`] ?? 99) - (deptOrder[`${line}::${b[0]}`] ?? 99) || a[0].localeCompare(b[0]))
+          .map(([dept, pgsObj]) => ({
+            dept,
             pgs: Object.entries(pgsObj)
               .sort((a, b) => (pgOrder[`${line}::${a[0]}`] ?? 99) - (pgOrder[`${line}::${b[0]}`] ?? 99))
               .map(([pg, ms]) => ({ pg, machines: ms.sort((x, y) => (x.position_x || 0) - (y.position_x || 0)) })),
@@ -155,44 +167,12 @@ export default function ControlRoom() {
 
   return (
     <div className="flex h-full flex-col" data-testid="control-room-page">
-      {/* KPI ribbon — primary: line/section availability + downtime */}
       <div
         className="border-b border-border px-4 py-3"
         style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(var(--accent-rgb),0.05), transparent 60%), radial-gradient(700px 400px at 85% 0%, rgba(255,46,99,0.04), transparent 55%)' }}
       >
-        <LineKpiRibbon
-          refreshSignal={machineUpdates}
-          selectedLine={lineFilter}
-          onSelectLine={(line) => { setLineFilter(line); setDeptFilter('all'); }}
-        />
-
-        {/* Secondary: plant-wide totals, collapsible */}
-        <button
-          data-testid="plant-totals-toggle"
-          onClick={() => setShowPlantTotals(!showPlantTotals)}
-          className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {showPlantTotals ? '▾' : '▸'} Plant totals
-          {!showPlantTotals && summary && (
-            <span className="ml-2 normal-case tracking-normal">
-              {summary.total_machines} machines · {summary.by_status?.running || 0} running · {summary.open_breakdowns} open BD · {summary.open_work_orders} open WO
-            </span>
-          )}
-        </button>
-        {showPlantTotals && (
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8" data-testid="plant-totals-strip">
-            <KpiCard testId="kpi-total-machines" label="Machines" value={summary?.total_machines} />
-            <KpiCard testId="kpi-running" label="Running" value={summary?.by_status?.running || 0} accent="text-[#05ffa1]" />
-            <KpiCard testId="kpi-failed" label="Failed" value={summary?.by_status?.failed || 0} accent={summary?.by_status?.failed ? 'text-[#ff2e63]' : ''} />
-            <KpiCard testId="kpi-repair" label="In Repair" value={summary?.by_status?.repair || 0} accent="text-[hsl(var(--primary))]" />
-            <KpiCard testId="kpi-open-breakdowns" label="Open Breakdowns" value={summary?.open_breakdowns} accent={summary?.open_breakdowns ? 'text-[#ff2e63]' : ''} />
-            <KpiCard testId="kpi-open-wos" label="Open WOs" value={summary?.open_work_orders} />
-            <KpiCard testId="kpi-watchlist" label="Watchlist" value={summary?.watchlist} accent={summary?.watchlist ? 'text-[#f9f871]' : ''} />
-            <KpiCard testId="kpi-availability" label="Availability" value={summary?.availability != null ? `${summary.availability}%` : '—'} />
-          </div>
-        )}
-        {/* Filters */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        {/* Filters — positioned ABOVE the line group cards */}
+        <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="control-room-filter-ribbon">
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -215,11 +195,11 @@ export default function ControlRoom() {
               {s === 'all' ? 'All' : (STATUS_META[s]?.label || s)}
             </button>
           ))}
-          {['all', ...hierarchy.departments.map((d) => d.name)].map((d) => (
+          {['all', ...deptNames].map((d) => (
             <button
               key={d}
               data-testid={`dept-filter-${d}`}
-              onClick={() => { setDeptFilter(d); setLineFilter('all'); }}
+              onClick={() => setDeptFilter(d)}
               className={`cyber-chamfer-sm border px-3 py-1 text-[11px] uppercase tracking-wide transition-colors ${
                 deptFilter === d ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'
               }`}
@@ -253,6 +233,34 @@ export default function ControlRoom() {
             </Button>
           </div>
         </div>
+
+        {/* KPI ribbon — primary: line availability + downtime + live breakdown timers */}
+        <LineKpiRibbon
+          refreshSignal={machineUpdates}
+          selectedLine={lineFilter}
+          onSelectLine={(line) => { setLineFilter(line); setDeptFilter('all'); }}
+        />
+
+        {/* Secondary: plant-wide totals, collapsible — KPIs only */}
+        <button
+          data-testid="plant-totals-toggle"
+          onClick={() => setShowPlantTotals(!showPlantTotals)}
+          className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {showPlantTotals ? '▾' : '▸'} Plant totals
+        </button>
+        {showPlantTotals && (
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8" data-testid="plant-totals-strip">
+            <KpiCard testId="kpi-total-machines" label="Machines" value={summary?.total_machines} />
+            <KpiCard testId="kpi-running" label="Running" value={summary?.by_status?.running || 0} accent="text-[#05ffa1]" />
+            <KpiCard testId="kpi-failed" label="Failed" value={summary?.by_status?.failed || 0} accent={summary?.by_status?.failed ? 'text-[#ff2e63]' : ''} />
+            <KpiCard testId="kpi-repair" label="In Repair" value={summary?.by_status?.repair || 0} accent="text-[hsl(var(--primary))]" />
+            <KpiCard testId="kpi-open-breakdowns" label="Open Breakdowns" value={summary?.open_breakdowns} accent={summary?.open_breakdowns ? 'text-[#ff2e63]' : ''} />
+            <KpiCard testId="kpi-open-wos" label="Open WOs" value={summary?.open_work_orders} />
+            <KpiCard testId="kpi-watchlist" label="Watchlist" value={summary?.watchlist} accent={summary?.watchlist ? 'text-[#f9f871]' : ''} />
+            <KpiCard testId="kpi-availability" label="Availability" value={summary?.availability != null ? `${summary.availability}%` : '—'} />
+          </div>
+        )}
       </div>
 
       {/* Twin canvas + feed */}
@@ -281,16 +289,23 @@ export default function ControlRoom() {
               <div className="h-full overflow-y-auto overflow-x-hidden p-6 pb-20" data-testid="digital-twin-scroll">
                 <div className="space-y-8">
                   {twin.length === 0 && <div className="p-10 text-muted-foreground">No machines match filters</div>}
-                  {twin.map(({ dept, lines }) => (
-                    <section key={dept || lines[0]?.line}>
-                      {dept && <h2 className="mb-3 text-lg font-bold uppercase tracking-[0.25em] text-[hsl(var(--primary))]" style={{ textShadow: '0 0 12px rgba(var(--accent-rgb),0.35)' }}>{dept}</h2>}
+                  {twin.map(({ line, depts }) => (
+                    <section key={line} data-testid={`twin-line-${line.replace(/\s+/g, '-')}`}>
+                      <h2 className="mb-3 flex items-center gap-2 text-lg font-bold uppercase tracking-[0.25em] text-[hsl(var(--primary))]" style={{ textShadow: '0 0 12px rgba(var(--accent-rgb),0.35)' }}>
+                        <Activity className="h-4 w-4" /> {line}
+                        <span className="font-mono text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+                          {depts.reduce((n, d) => n + d.pgs.reduce((k, p) => k + p.machines.length, 0), 0)} machines
+                        </span>
+                      </h2>
                       <div className="space-y-6">
-                        {lines.map(({ line, pgs }) => (
-                          <div key={line} className="cyber-panel p-4" data-testid={`twin-line-${line.replace(/\s+/g, '-')}`}>
-                            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em]">
-                              <Activity className="h-4 w-4 text-[hsl(var(--primary))]" /> {line}
-                              <span className="font-mono text-[10px] font-normal normal-case tracking-normal text-muted-foreground">{pgs.reduce((n, p) => n + p.machines.length, 0)} machines</span>
-                            </h3>
+                        {depts.map(({ dept, pgs }) => (
+                          <div key={dept || 'flat'} className="cyber-panel p-4" data-testid={dept ? `twin-dept-${line.replace(/\s+/g, '-')}-${dept.replace(/\s+/g, '-')}` : undefined}>
+                            {dept && (
+                              <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em]">
+                                {dept}
+                                <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-muted-foreground">{pgs.reduce((n, p) => n + p.machines.length, 0)} machines</span>
+                              </h3>
+                            )}
                             <div className="space-y-4">
                               {pgs.map(({ pg, machines: ms }) => (
                                 <div key={pg || 'flat'}>

@@ -189,6 +189,12 @@ async def runtime_clock_loop():
 @app.on_event('startup')
 async def startup():
     try:
+        from migrations import migrate_hierarchy_line_first
+        result = await migrate_hierarchy_line_first()
+        logger.info(f'Hierarchy migration: {result}')
+    except Exception as e:
+        logger.error(f'Hierarchy migration error: {e}')
+    try:
         await seed_all()
     except Exception as e:
         logger.error(f'Seed error: {e}')

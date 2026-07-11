@@ -11,7 +11,7 @@
   - Display **current actual wall-clock time** (date + HH:MM:SS ticking every second) so users can cross-reference Breakdown/WO timestamps.
 - Deliver a coherent, app-wide **Cyberpunk HUD aesthetic** across *every* module and component.
 - Provide **shift-lead command-center intelligence** at the point of use:
-  - Availability + downtime **per Line** and **per Section/Process Group**, configurable window.
+  - Availability + downtime **per Line** and **per Department/Process Group**, configurable window.
   - Keep plant-wide totals accessible but demoted.
 - Enable **deep personalization and white-labeling**:
   - Per-user sidebar ordering and icon colors.
@@ -19,83 +19,41 @@
 - Standardize UI interaction language:
   - All buttons/icons/pills follow **outlined hairline border styling**.
   - Background theme is **pure black** (no deep-blue undertone), while maintaining readable contrast.
-- Ensure maintenance execution is **audit-ready and printable**:
-  - PM execution is driven by **structured checklists** (component → sub-item rows) with per-row OK/NOT OK + per-row remarks.
-  - Every PM task supports **PDF export** for blank templates and completed instances, formatted like the real checklist sheet.
-- Remove friction for shop-floor reporting:
-  - Provide **public kiosk reporting** entry points (no login required) capturing Reporter Name and flagging submissions as public.
-  - Ensure reporting is **dispatch-ready**: every Breakdown/Warning submission must explicitly **assign a technician** and must **auto-create a WO** (no opt-out).
-- Ensure reliability analytics are **verifiable with seeded data**:
-  - Provide deterministic, labeled demo datasets to validate **Weibull** fit outputs (beta/eta/mean life/B10) and AWS UI behavior.
-- **Differentiate downtime vs non-downtime events** clearly:
-  - Add **Warning** observations that **do not affect** Availability/MTBF/MTTR but **do auto-dispatch** a WO and visually appear yellow across the HUD.
-- Ensure execution governance in CMMS:
-  - Work order completion requires **Admin closure** before final CLOSED — applies to **Corrective AND PM-generated Work Orders**.
-- Improve Kanban operational UX:
-  - Kanban cards open a **detail popout modal** for fast inspection and quick edits.
-  - Work Orders support **editable Start/End times** (all roles who action WOs/Bds) with validation and audit trail.
-- Runtime governance:
-  - Runtime is **line-level** as the source of truth for availability.
-  - Machines **inherit** their line runtime via fan-out to preserve per-machine reliability/Weibull calculations.
-  - A **calendar view** must make missing line-days obvious and support admin CRUD.
-  - **Plant Runtime Clock per-machine auto accumulation remains enabled alongside line logging** (per user choice).
-- Data integrity + audit correctness:
-  - Breakdown and Work Order lifecycle must remain **synchronized** (no stale Kanban cards).
-  - Downtime/RCA triggers must respect **corrected/edited** times, not only raw timers.
-  - Root Cause capture must be **governed exclusively** through the RCA 5‑Why module.
-- Kanban hygiene (new):
-  - Remove redundant lifecycle columns.
-  - Allow clearing closed WOs off Kanban while retaining them in Table view.
-  - Ensure no new Work Order can be created unassigned (no new OPEN status).
 
-### Phase L (delivered) objectives
-- Enforce standardized **Root Cause Analysis (5-Why)** governance:
-  - Auto-trigger RCA when downtime/duration exceeds threshold (default 30 min; admin-configurable).
-  - RCA requires structured 5-Why submission and cannot complete/close without it.
-  - RCA records link bidirectionally to originating Breakdown/Work Order and appear in timeline.
-- Provide **Admin-only Technician Analytics** in Plant Analytics:
-  - Enforced by backend role permissions (403 for non-admin), not just UI hiding.
-- Runtime is logged **per line** (not per machine) to calculate availability correctly:
-  - Line-level runtime entry; machines inherit line runtime for reliability computations.
-- AWS supports Mechanical/Electrical/PLC category sorting/filtering:
-  - Category chips + per-machine failure category counts + dominant category.
+### Updated governance + workflow objectives (current)
+- **Hierarchy is Line-first** (real world): **Line → Department → Process Group → Machine**.
+  - Implemented via in-place DB migration keeping all transactional history.
+  - All UI + Admin CRUD + seed logic reflect Line-first.
+- **Work orders support Unassigned creation universally** (including public kiosk).
+  - Kanban includes an **UNASSIGNED** column.
+  - Any technician can **self-assign/claim** an unassigned WO.
+- **Admin-closure requirement is type-conditional**:
+  - **Corrective + Inspection + AWS/Predictive** WOs: technician can close directly (no admin approval).
+  - **Preventive (PM) + RCA** WOs: technician completes → `PENDING_ADMIN_CLOSURE` → admin closes.
+- **AWS / Predictive Maintenance Engine** is per-category:
+  - Track separate health/life pools per machine for **Mechanical / Electrical / PLC(Control)**.
+  - Trigger threshold is **admin-configurable** (default 80%) via `predictive_trigger_pct`.
+  - AWS-triggered WOs are a distinct type: **AWS/Predictive** (`wo_type='Predictive'`, `aws_category` set).
 
-### Phase M (delivered) objectives
-- **Mandatory technician assignment + mandatory WO creation** for all Breakdown **and Warning** submissions:
-  - Applies uniformly to authenticated, operator, and public kiosk entry points.
-  - Removes optional/checkbox-based auto-WO behavior; submitter explicitly selects technician.
-- Runtime module provides a **calendar-first, line-wise logging UX**:
-  - Month grid shows logged/partial/missing line-days.
-  - Day dialog supports per-line log/update/delete for Admins; view-only for others.
-  - Admin-only deletion removes fanned per-machine logs.
+### Control Room KPI/range objectives
+- Control Room line KPIs support presets **Shift=8h, Day=24h, Week=168h** plus a **custom date range** slicer.
+- Control Room visual cleanup:
+  - Remove “flavor/narrative text” from line cards and plant totals; keep KPIs only.
+  - Add a live red breakdown timer ribbon (HH:MM:SS ticking) on any line card with an active breakdown.
 
-### Phase N (delivered) objectives — “Plant Bugfix Pack”
-- Fix Breakdown↔WO lifecycle synchronization:
-  - Breakdown completion must immediately update the linked WO status.
-  - WO admin closure is the single closure point and must auto-close the linked breakdown.
-- Make time capture correctable everywhere it matters:
-  - Breakdown start time at report; breakdown start/end at repair close; WO start/end at completion.
-  - All time edits must drive downtime/duration and RCA triggers.
-- Correct availability computation:
-  - Strict window-based formula with downtime capped to the window.
-  - Use merged (union) downtime intervals per line/section.
-- Remove redundant/incorrect UI steps:
-  - Remove breakdown “Final Close” (closure happens via WO admin approval).
-- Improve shop-floor usability:
-  - Warning click should allow WO generation with technician assignment (for legacy warnings w/out WOs).
-  - Spare selection must be fuzzy/typeahead search.
-- PM checklist print fidelity:
-  - Embed branding logo as a real image, render outlined checkboxes, allow editable Date.
+### Navigation + productivity objectives
+- **Universal “jump to Work Order” deep linking**:
+  - Clicking a WO reference anywhere opens the **exact Work Order popout/modal** rather than a generic list.
+  - Contract: `?wo=<id>` plus a global `openWorkOrder(id)`.
+- **Global “My Tasks” filter** for technicians across: Breakdowns, Work Orders (Kanban), PMs.
+- **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
 
-### Phase O (delivered) objectives — “Kanban cleanup + Clear Closed + Redundancy removal”
-- Remove redundant **OPEN** Kanban column (WOs are never created unassigned going forward).
-- Provide **Clear List** on CLOSED Kanban column:
-  - Clears closed WOs off Kanban only; keeps them in Table view and all reporting.
-- Eliminate remaining sources of new OPEN work orders:
-  - Manual WO creation requires technician assignment (backend + frontend enforcement).
-- Remove legacy redundant UI elements:
-  - Remove OPEN status filter chip in WO table filters.
-  - Remove legacy breakdown “Assign Technician” button in Machine Drawer.
+### Analytics + runtime objectives
+- Analytics supports a date range slicer applied to all KPIs/charts.
+- Add closure-rate KPI + Pareto analysis.
+- **Runtime module is the single source of truth**:
+  - Default assumption: plant runs **24/7**, ticking in real time.
+  - End-of-day override: once a line runtime log exists for a date, it becomes authoritative globally.
 
 ---
 
@@ -112,7 +70,7 @@
 ---
 
 ### Phase 3 — Reliability/AWS + Predictive + Analytics (multi-level)
-**Status:** ✅ COMPLETE
+**Status:** ✅ COMPLETE *(superseded by newer AWS multi-pool implementation)*
 
 ---
 
@@ -148,17 +106,17 @@
 ---
 
 ### Phase I — Warnings + Workflow Changes + Kanban/Repair Dedicated Pages
-**Status:** ✅ COMPLETE
+**Status:** ✅ COMPLETE *(workflow rules updated/superseded by newer governance rules)*
 
 **Phase I Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_5.json`
   - **backend 100% (34/34)**
-  - **frontend 95%** *(1 skipped automation step due to no OPEN breakdowns available; verified manually via direct repair URL)*
+  - **frontend 95%** *(1 skipped automation step due to no OPEN breakdowns available; verified manually)*
 
 ---
 
 ### Phase J — PM WO Admin Closure + Kanban Detail Popout Modal (P0)
-**Status:** ✅ COMPLETE
+**Status:** ✅ COMPLETE *(closure rules updated/superseded by current branching rules)*
 
 **Phase J Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_6.json`
@@ -168,17 +126,17 @@
 ---
 
 ### Phase L — RCA 5-Why Module + Technician Analytics + Line Runtime + AWS Category Sorting (P0)
-**Status:** ✅ COMPLETE
+**Status:** ✅ COMPLETE *(analytics extended later; AWS logic now multi-pool)*
 
 **Phase L Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_7.json`
   - **backend 100% (15/15)**
-  - **frontend verified via main-agent screenshot automation + manual checks**
+  - **frontend verified via screenshot automation + manual checks**
 
 ---
 
 ### Phase M — Mandatory Technician Assignment + Mandatory WO Creation + Runtime Calendar (P0)
-**Status:** ✅ COMPLETE
+**Status:** ✅ COMPLETE *(technician-mandatory rule superseded: Unassigned WOs allowed universally)*
 
 **Phase M Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_8.json`
@@ -188,7 +146,7 @@
 ---
 
 ### Phase N — Plant bugfix pack (Breakdown/WO sync + Time edits + Availability + Warnings + Spares + PM PDF) (P0)
-**Status:** ✅ COMPLETE
+**Status:** ✅ COMPLETE *(availability + runtime now unified via kpi_engine.py)*
 
 **Phase N Testing:** ✅ COMPLETE
 - Backend: **15/15 tests passed (100%)**
@@ -197,140 +155,202 @@
 ---
 
 ### Phase O — Kanban cleanup (remove OPEN column) + Clear Closed + remove redundant elements (P0)
+**Status:** ✅ COMPLETE *(OPEN/Unassigned state reintroduced intentionally in current governance)*
+
+---
+
+### Phase P — Data Management (Seed Sample Data + Purge Operational Data)
+**Status:** ✅ COMPLETE — **USER VERIFIED**
+
+---
+
+## New Work Phases (Current Roadmap)
+
+### Phase Q — Backend overhaul: Hierarchy inversion + governance + AWS multi-pool + runtime unification
 **Status:** ✅ COMPLETE
 
-#### O1) Remove OPEN column from WO Kanban
-**Delivered**
-- Kanban lifecycle columns now: `ASSIGNED → IN_PROGRESS → PENDING_ADMIN_CLOSURE → CLOSED`.
-- Legacy `OPEN` WOs are merged into `ASSIGNED` column.
+#### Q1) Schema + migration (Line-first hierarchy)
+- ✅ New hierarchy: **Line → Department → Process Group → Machine**.
+- ✅ In-place migration executed via `/app/backend/migrations.py` preserving history.
 
-#### O2) Clear CLOSED list from Kanban (keep in Table)
-**Delivered**
-- Added `POST /api/work-orders/clear-closed` which sets:
-  - `kanban_cleared=true`, `kanban_cleared_by`, `kanban_cleared_at`.
-- Kanban filters out `kanban_cleared` items.
-- Table view and all reporting remain unaffected.
+#### Q2) Work Orders lifecycle (Unassigned + claim + closure branching)
+- ✅ Unassigned (`assigned_to=null`) supported.
+- ✅ Claim endpoint implemented: `POST /api/work-orders/{wo_id}/claim`.
+- ✅ Closure branching implemented (and corrected to match requirement):
+  - Tech closes **Corrective + Inspection + Predictive (AWS)** directly.
+  - **PM + RCA** require Admin closure (Pending Admin state).
 
-#### O3) Mandatory technician for manual WO creation
-**Delivered**
-- `POST /api/work-orders` now requires `assigned_to` and validates active technician.
-- WO status is always born `ASSIGNED` (no new OPEN WOs).
-- Create WO dialog enforces technician required.
+#### Q3) AWS/Reliability engine (3 independent pools)
+- ✅ Implemented in `/app/backend/reliability.py`:
+  - Mechanical, Electrical, PLC pools
+  - Admin-configurable threshold (default 80%) via `predictive_trigger_pct`
+  - Reset/cancel behaviors on close/breakdown
 
-#### O4) Remove redundant legacy UI
-**Delivered**
-- Removed OPEN filter chip from Work Orders table.
-- Removed legacy “Assign Technician” button in Machine Drawer breakdown actions.
-- `TechnicianSelect` filters to `role='technician'` only.
+#### Q4) Runtime single-source-of-truth
+- ✅ Centralized calculations in `/app/backend/kpi_engine.py`.
 
-**Phase O Verification:** ✅ COMPLETE
-- Backend curl verified:
-  - 400 on manual WO without technician.
-  - Clear-closed clears from Kanban while remaining in table (`kanban_cleared=true`).
-- Frontend build clean; screenshot verified 4 columns, no OPEN.
-- Cleaned leftover test WOs + orphan RCA WOs.
+**Phase Q Testing**
+- ✅ Backend verified via python/curl/bash.
+
+---
+
+### Phase T — Frontend Sync: Control Room + Hierarchy + UX cleanup (P0)
+**Status:** ✅ COMPLETE
+
+**Primary goal:** Make React frontend fully compatible with new backend schemas and deliver Control Room UX changes.
+
+#### T0) Frontend schema sync audit (prevent crashes)
+- ✅ Updated components that assumed old `Dept → Line` hierarchy.
+- ✅ Key updates:
+  - `/app/frontend/src/pages/ControlRoom.jsx` (Line-first grouping + filters)
+  - `/app/frontend/src/pages/Administration.jsx` (CRUD inverted: Line → Dept → PG)
+  - `/app/frontend/src/components/ReportBreakdownDialog.jsx` (Line-first + fuzzy typeahead)
+
+#### T1) Control Room filter ribbon reposition (A)
+- ✅ Filter ribbon moved **above** line cards.
+- ✅ Departments filter deduped (Line-first duplicates removed).
+
+#### T2) Custom date range slicer (E)
+- ✅ Presets: Shift=8h, Day=24h, Week=168h.
+- ✅ Custom date range supported.
+- ✅ Wired to `GET /api/control-room/line-kpis?hours=...` and `?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`.
+
+#### T3) Remove flavor text from line/plant totals (F, G)
+- ✅ Line cards and plant totals set to KPIs-only.
+
+#### T4) Live breakdown timer ribbon (H)
+- ✅ Live red HH:MM:SS breakdown timer ribbon on active line cards.
+
+#### T5) Report Breakdown fuzzy/typeahead selectors (L)
+- ✅ Fuzzy/typeahead for Line and Machine.
+- ✅ Optional technician assignment supported (enables UNASSIGNED WOs).
+
+**Phase T Testing**
+- ✅ Frontend screenshot-based verification completed.
+
+---
+
+### Phase U — Frontend Sync: Work Orders + Kanban + Deep-links + My Tasks (P0)
+**Status:** ✅ COMPLETE
+
+#### U0) Global WO modal state foundation
+- ✅ `AppContext`: `openWorkOrder`, `closeWorkOrder`, `woVersion` refresh bump.
+
+#### U1) Kanban “Unassigned” column (I)
+- ✅ 5-column Kanban: **UNASSIGNED / ASSIGNED / IN_PROGRESS / PENDING_ADMIN_CLOSURE / CLOSED**.
+
+#### U2) Technician claim/self-assign in WO popout (I)
+- ✅ Claim action integrated (button shows when unassigned).
+- ✅ Claim verified end-to-end as technician.
+
+#### U3) AWS/Predictive WO type support (K)
+- ✅ WO type filters include **Predictive (AWS)** and AWS badges.
+
+#### U4) Universal deep-link “jump to Work Order” (C)
+- ✅ Universal deep-link contract: `?wo=<id>`.
+- ✅ `Layout.jsx` opens the modal automatically when `?wo=` is present.
+- ✅ Notifications now open the exact WO popout (when reference_type=work_order).
+
+#### U5) Global “My Tasks” toggle for technicians (D)
+- ✅ Implemented across:
+  - Breakdowns (`My Tasks` filters assigned_to)
+  - Work Orders
+  - Preventive Maintenance tasks
+
+#### U6) Closure rules reflected in UI (J)
+- ✅ UI actions match governance:
+  - Corrective/Inspection/Predictive: tech can complete & close.
+  - PM/RCA: complete → pending admin closure (admin closes).
+
+**Phase U Testing**
+- ✅ Frontend screenshot-based verification completed.
+- ✅ Deep-link `?wo=` verified.
+
+---
+
+### Phase V — Frontend additions: Analytics + AWS page + Report Breakdown fuzzy search (P1)
+**Status:** ✅ COMPLETE
+
+#### V1) Analytics tab expansions (N)
+- ✅ Added global date slicer (`date_from`/`date_to`) applied to all KPIs/charts.
+- ✅ Added **Closure Rate** KPI.
+- ✅ Added **Failure Modes Pareto** chart (count + cumulative %).
+- ✅ Dedupe department lists for Line-first hierarchy.
+
+#### V2) AWS page UI for 3 pools + threshold config (M)
+- ✅ AWS page shows **3 independent pools** (MEC/ELE/PLC) using pool bars.
+- ✅ Driving (riskiest) pool marked with ▲.
+- ✅ Admin settings include `predictive_trigger_pct` (default 80%) with explanatory copy.
+
+#### V3) Report Breakdown fuzzy/typeahead selectors (L)
+- ✅ Completed as part of Phase T implementation (dialog rewrite), verified working.
+
+**Phase V Testing**
+- ✅ Frontend screenshot-based verification completed.
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- None required; Phase O deliverables implemented and validated.
+- Run **testing_agent_v3** comprehensive suite (frontend + backend) now that all phases are implemented.
+- Produce/commit new test reports:
+  - `/app/test_reports/iteration_9.json` — Phase T verification
+  - `/app/test_reports/iteration_10.json` — Phase U verification
+  - `/app/test_reports/iteration_11.json` — Phase V verification
+- Fix any issues surfaced by the test agent (priority order):
+  1) auth/session / routing regressions
+  2) Control Room rendering / API mismatch
+  3) WO modal actions + permissions
+  4) Analytics queries / charts
+  5) AWS pools display + settings persistence
 
-### Hardening / Refactor (P1)
-- Centralize “admin review required” notification/timeline logic for all WO sources (Corrective, PM, RCA) to reduce duplication.
-- Add MongoDB indexes:
-  - `work_orders`: `pm_task_id`, `rca_task_id`, `source_breakdown_id`, `source_warning_id`, `source_work_order_id`, `assigned_to`, `status`, `completed_at`, `kanban_cleared`
-  - `breakdowns`: `assigned_to`, `status`, `end_time`, `work_order_id`
-  - `warnings`: `assigned_to`, `status`, `work_order_id`
-  - `runtime_logs`: `machine_id`, `line`, `date`, `source`
-  - `line_runtime_logs`: `line`, `date`
-- Add drill-down from Technician Analytics rows to pre-filtered Work Orders / Breakdowns.
-
-### Runtime governance note (Supersession + coexistence)
-- **Line runtime is the availability source of truth**.
-- **Plant Runtime Clock per-machine accumulation is still enabled** (per user choice) and may co-exist with line fan-out.
-  - If conflicts appear (same machine+date written by multiple sources), define precedence (e.g., `source='line'` overrides `plant_clock`) or disable plant clock.
-
-### Optional Next Enhancements (Future / Backlog)
-- Add a “Kanban Cleared” filter toggle in Table view to quickly find/restore cleared CLOSED items.
-- RCA aging dashboard for admins (open RCAs, aging, overdue) linked from Admin/Analytics.
-- Harden public kiosk endpoints:
-  - rate limiting / spam throttling
-  - optional kiosk PIN
-  - optional photo upload.
-- True “current shift” time window mode using a configurable shift schedule (timezone-aware) for availability KPIs.
-- Control Room ribbon drilldown: click line/section → open filtered breakdown/work-order panel.
-- PDF styling polish:
-  - optional signature capture.
+### Hardening / Refactor (P1) — optional (after major changes stabilize)
+- Refactor frontend hierarchy selectors into a single shared hook/component (single source for Line→Dept→PG traversal).
+- Add/verify MongoDB indexes for hierarchy fields and work order list queries if UI reveals latency.
+- Add E2E regression scripts for deep-linking behavior (`?wo=`) and Unassigned-claim lifecycle.
 
 ---
 
 ## 4) Success Criteria
-- ✅ Control Room ribbon is **line-first**:
-  - Availability + downtime per line always visible.
-  - Expandable to section/process-group breakdown.
-  - Plant-wide totals available but demoted.
-- ✅ Sidebar supports per user:
-  - icon colors
-  - drag-and-drop ordering
-  - persistence across refresh/login.
-- ✅ Branding supports admin:
-  - uploadable logo
-  - hex brand accent
-  - immediate visual propagation.
-- ✅ Buttons/icons are consistently outlined across the app.
-- ✅ Theme background is true black without blue undertone.
-- ✅ PM execution is structured and auditable:
-  - component → sub-item checklist rows
-  - per-row OK/NOT OK + per-row remarks
-  - dedicated close page
-- ✅ PM checklists are printable and consistent:
-  - blank + completed PDF export matches checklist sheet format.
-- ✅ Reporting is accessible to non-authenticated operators:
-  - login-page public reporting
-  - reporter accountability captured
-  - submissions flagged `public_kiosk` and visually tagged.
-- ✅ Reporting is dispatch-ready:
-  - Breakdown + Warning submissions require selecting a technician
-  - WO auto-creation is mandatory (no checkbox/toggle)
-  - linked WO is assigned to selected technician.
-- ✅ Reliability calculations are verifiable:
-  - deterministic Weibull demo dataset exists (runtime logs + closed breakdowns)
-  - AWS shows L3/Advanced machines with beta/eta, predicted life and Weibull Active count.
-- ✅ Warnings are functionally distinct from breakdowns:
-  - no downtime impact
-  - yellow watch state
-  - WO auto-dispatched (explicitly assigned at report time)
-- ✅ Work orders require admin closure:
-  - `PENDING_ADMIN_CLOSURE` implemented
-  - admin notifications sent
-  - only admin can final-close.
-- ✅ PM Work Orders follow the same governance:
-  - PM completion does **not** auto-close a WO
-  - linked PM WO transitions to `PENDING_ADMIN_CLOSURE`
-  - admin notification targeted to `admin` role.
-- ✅ Kanban has fast inspection + quick edits:
-  - card click opens detail modal
-  - Start/End time edits available per role rules
-  - validation enforced (no end before start)
-- ✅ Runtime is line-first and calendar-visible:
-  - month calendar highlights missing line-days
-  - admin can log/edit/delete per line/day
-  - technician/operator view-only
-  - machines inherit line runtime for per-machine analytics/reliability.
-- ✅ Kanban hygiene:
-  - OPEN column removed; legacy OPEN merged into ASSIGNED.
-  - CLOSED column can be cleared off Kanban while records remain visible in Table.
-  - No new OPEN WOs can be created (technician mandatory everywhere).
 
-### Validation evidence
-- ✅ All changes validated by test reports:
-  - Phase E: `/app/test_reports/iteration_3.json`
-  - Phase F: `/app/test_reports/iteration_4.json`
-  - Phase I: `/app/test_reports/iteration_5.json`
-  - Phase J: `/app/test_reports/iteration_6.json`
-  - Phase L: `/app/test_reports/iteration_7.json`
-  - Phase M: `/app/test_reports/iteration_8.json`
-  - Phase N: (included in latest iteration_8.json summary; backend 15/15 + frontend verified)
-  - Phase O: verified via backend curl + frontend screenshot automation (4 Kanban columns; no OPEN)
+### Hierarchy + Admin
+- ✅ Backend hierarchy is **Line → Department → Process Group → Machine**, implemented as an in-place migration preserving all operational history.
+- ✅ Frontend Admin pages render and edit hierarchy without crashes.
+
+### Control Room
+- ✅ Filter ribbon positioned above line group cards.
+- ✅ KPI presets: 8h/24h/168h + custom date range.
+- ✅ No flavor text on line cards / plant totals.
+- ✅ Active breakdown lines show live HH:MM:SS red timer ribbon.
+
+### Work Orders + Governance
+- ✅ Backend supports Unassigned WOs universally (including kiosk) + claim.
+- ✅ Kanban shows UNASSIGNED.
+- ✅ Techs can claim unassigned WOs via UI.
+- ✅ Closure branching:
+  - Corrective + Inspection + AWS/Predictive close directly by technician.
+  - PM/RCA require admin closure.
+- ✅ UI enforces/displays closure branching correctly.
+
+### AWS / Predictive
+- ✅ Backend per-category health pools (Mechanical/Electrical/PLC) computed independently.
+- ✅ Backend threshold is admin-configurable.
+- ✅ AWS page shows 3 pools + admin threshold setting.
+
+### Navigation + Technician productivity
+- ✅ Any WO reference deep-links into the exact WO popout.
+- ✅ “My Tasks” filter exists across technician-accessible modules.
+- ✅ Breakdown report Area/Line + Machine selectors have fuzzy/typeahead.
+
+### Analytics + Runtime
+- ✅ Backend runtime is unified via `kpi_engine.py` and used by Control Room endpoints.
+- ✅ Analytics has a date range slicer affecting all KPIs/charts.
+- ✅ Closure rate KPI and Pareto chart exist.
+- ✅ Runtime is a single source of truth (backend).
+
+### Validation evidence (to produce)
+- ⏳ Add new test reports (next step):
+  - `/app/test_reports/iteration_9.json` — Phase T (Control Room + hierarchy sync)
+  - `/app/test_reports/iteration_10.json` — Phase U (Kanban + deep-link + My Tasks)
+  - `/app/test_reports/iteration_11.json` — Phase V (Analytics + AWS UI + typeahead)
