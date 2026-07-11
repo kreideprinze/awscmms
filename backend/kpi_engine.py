@@ -105,15 +105,15 @@ async def compute_line_kpis(since, until):
         return out
 
     since_iso = since.isoformat()
-    active_bd = {}  # line -> earliest open breakdown start (live timer ribbon)
+    active_bd = {}  # line -> (earliest open breakdown start, breakdown id, ticket) for the live timer ribbon
     q = {'$or': [{'end_time': None}, {'end_time': {'$gte': since_iso}}]}
-    async for bd in db.breakdowns.find(q, {'_id': 0, 'line': 1, 'process_group': 1, 'start_time': 1, 'end_time': 1, 'status': 1}):
+    async for bd in db.breakdowns.find(q, {'_id': 0, 'id': 1, 'ticket_number': 1, 'line': 1, 'process_group': 1, 'start_time': 1, 'end_time': 1, 'status': 1}):
         start = parse_iso(bd.get('start_time') or '') or since
         end = parse_iso(bd.get('end_time') or '') or now
         if not bd.get('end_time') and bd.get('status') in ('OPEN', 'ASSIGNED', 'IN_PROGRESS'):
             prev = active_bd.get(bd.get('line'))
-            if prev is None or start < prev:
-                active_bd[bd.get('line')] = start
+            if prev is None or start < prev[0]:
+                active_bd[bd.get('line')] = (start, bd.get('id'), bd.get('ticket_number'))
         s, e = max(start, since), min(end, until)
         if (e - s).total_seconds() <= 0:
             continue
@@ -163,7 +163,9 @@ async def compute_line_kpis(since, until):
             'downtime_minutes': round(ln_down, 1),
             'availability': avail(ln_down),
             'logged_days': len(excl),
-            'active_breakdown_since': active_since.isoformat() if active_since else None,
+            'active_breakdown_since': active_since[0].isoformat() if active_since else None,
+            'active_breakdown_id': active_since[1] if active_since else None,
+            'active_breakdown_ticket': active_since[2] if active_since else None,
             'sections': sections,
         })
     out.sort(key=lambda x: (order.get(x['line'], 99), x['department'] or '', x['line']))

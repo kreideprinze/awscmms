@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Gauge, CalendarRange, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Input } from '@/components/ui/input';
@@ -48,6 +49,7 @@ function BreakdownTimer({ since }) {
 // Primary Control Room ribbon: availability + downtime per Line, expandable to
 // per-Section (process group) breakdown. KPIs only — no narrative text.
 export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [windowH, setWindowH] = useState(24);
   const [customOpen, setCustomOpen] = useState(false);
@@ -164,8 +166,10 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
           const isSelected = selectedLine === l.line;
           const hasActiveBd = !!l.active_breakdown_since;
           return (
-            <button
+            <div
               key={l.line}
+              role="button"
+              tabIndex={0}
               data-testid={`line-kpi-${l.line.replace(/\s+/g, '-')}`}
               onClick={() => {
                 // card click = expand sections AND filter the Digital Twin to this line (toggle)
@@ -177,7 +181,8 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
                   onSelectLine && onSelectLine(l.line);
                 }
               }}
-              className={`cyber-chamfer-sm min-w-[170px] shrink-0 border bg-transparent px-3 pt-2 text-left transition-all duration-150 hover:-translate-y-0.5 ${hasActiveBd ? 'pb-0' : 'pb-2'} ${
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.click(); }}
+              className={`cyber-chamfer-sm min-w-[170px] shrink-0 cursor-pointer border bg-transparent px-3 pt-2 text-left transition-all duration-150 hover:-translate-y-0.5 ${hasActiveBd ? 'pb-0' : 'pb-2'} ${
                 isSelected || isOpen
                   ? 'border-[hsl(var(--primary))] shadow-[0_0_12px_rgba(var(--accent-rgb),0.2)]'
                   : hasActiveBd
@@ -200,21 +205,29 @@ export function LineKpiRibbon({ onSelectLine, selectedLine, refreshSignal }) {
                   {fmtDowntime(l.downtime_minutes)} down
                 </span>
               </div>
-              {/* Live breakdown ribbon — HH:MM:SS ticking since the earliest open breakdown */}
+              {/* Live breakdown ribbon — HH:MM:SS ticking; CLICK jumps to the exact breakdown */}
               {hasActiveBd && (
-                <div
+                <button
+                  type="button"
                   data-testid={`line-bd-timer-${l.line.replace(/\s+/g, '-')}`}
-                  className="-mx-3 mt-1.5 flex items-center justify-between gap-2 border-t border-[#ff2e63]/50 bg-[#ff2e63]/10 px-3 py-1"
+                  title={`Jump to breakdown ${l.active_breakdown_ticket || ''}`.trim()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (l.active_breakdown_id) navigate(`/breakdowns?bd=${l.active_breakdown_id}`);
+                    else navigate('/breakdowns');
+                  }}
+                  className="-mx-3 mt-1.5 flex w-[calc(100%+1.5rem)] items-center justify-between gap-2 border-t border-[#ff2e63]/50 bg-[#ff2e63]/10 px-3 py-1 transition-colors hover:bg-[#ff2e63]/25"
                 >
                   <span className="flex items-center gap-1 font-mono text-[8px] uppercase tracking-[0.2em] text-[#ff2e63]">
                     <span className="h-1.5 w-1.5 rounded-full bg-[#ff2e63] alarm-pulse" style={{ boxShadow: '0 0 6px #ff2e63' }} /> Down
                   </span>
-                  <span className="text-[11px] text-[#ff2e63]" style={{ textShadow: '0 0 8px rgba(255,46,99,0.5)' }}>
+                  <span className="flex items-center gap-1 text-[11px] text-[#ff2e63]" style={{ textShadow: '0 0 8px rgba(255,46,99,0.5)' }}>
                     <BreakdownTimer since={l.active_breakdown_since} />
+                    <span className="font-mono text-[9px]">↗</span>
                   </span>
-                </div>
+                </button>
               )}
-            </button>
+            </div>
           );
         })}
       </div>

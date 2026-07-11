@@ -40,11 +40,15 @@
 - Control Room visual cleanup:
   - Remove “flavor/narrative text” from line cards and plant totals; keep KPIs only.
   - Add a live red breakdown timer ribbon (HH:MM:SS ticking) on any line card with an active breakdown.
+  - **New:** Clicking the live DOWN timer ribbon **jumps to the exact breakdown** (deep-link).
 
 ### Navigation + productivity objectives
 - **Universal “jump to Work Order” deep linking**:
   - Clicking a WO reference anywhere opens the **exact Work Order popout/modal** rather than a generic list.
   - Contract: `?wo=<id>` plus a global `openWorkOrder(id)`.
+- **New:** **Universal “jump to Breakdown” deep linking** from Control Room:
+  - Clicking a line’s live DOWN timer ribbon opens `/breakdowns?bd=<breakdown_id>`.
+  - Breakdowns page expands + highlights + scrolls to the referenced breakdown, then cleans the URL.
 - **Global “My Tasks” filter** for technicians across: Breakdowns, Work Orders (Kanban), PMs.
 - **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
 
@@ -175,8 +179,8 @@
 
 #### Q2) Work Orders lifecycle (Unassigned + claim + closure branching)
 - ✅ Unassigned (`assigned_to=null`) supported.
-- ✅ Claim endpoint implemented: `POST /api/work-orders/{wo_id}/claim`.
-- ✅ Closure branching implemented (and corrected to match requirement):
+- ✅ Claim supported (UI uses `PUT /api/work-orders/{id}` with `{action:'claim'}`).
+- ✅ Closure branching implemented (verified):
   - Tech closes **Corrective + Inspection + Predictive (AWS)** directly.
   - **PM + RCA** require Admin closure (Pending Admin state).
 
@@ -189,22 +193,23 @@
 #### Q4) Runtime single-source-of-truth
 - ✅ Centralized calculations in `/app/backend/kpi_engine.py`.
 
+#### Q5) Control Room breakdown jump metadata
+- ✅ `kpi_engine.py` now returns:
+  - `active_breakdown_id`
+  - `active_breakdown_ticket`
+  alongside `active_breakdown_since` for each line.
+
 **Phase Q Testing**
 - ✅ Backend verified via python/curl/bash.
+- ✅ `/app/test_reports/iteration_9.json` backend: **100%**.
 
 ---
 
 ### Phase T — Frontend Sync: Control Room + Hierarchy + UX cleanup (P0)
 **Status:** ✅ COMPLETE
 
-**Primary goal:** Make React frontend fully compatible with new backend schemas and deliver Control Room UX changes.
-
 #### T0) Frontend schema sync audit (prevent crashes)
 - ✅ Updated components that assumed old `Dept → Line` hierarchy.
-- ✅ Key updates:
-  - `/app/frontend/src/pages/ControlRoom.jsx` (Line-first grouping + filters)
-  - `/app/frontend/src/pages/Administration.jsx` (CRUD inverted: Line → Dept → PG)
-  - `/app/frontend/src/components/ReportBreakdownDialog.jsx` (Line-first + fuzzy typeahead)
 
 #### T1) Control Room filter ribbon reposition (A)
 - ✅ Filter ribbon moved **above** line cards.
@@ -212,8 +217,7 @@
 
 #### T2) Custom date range slicer (E)
 - ✅ Presets: Shift=8h, Day=24h, Week=168h.
-- ✅ Custom date range supported.
-- ✅ Wired to `GET /api/control-room/line-kpis?hours=...` and `?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`.
+- ✅ Custom date range supported (type=`date`).
 
 #### T3) Remove flavor text from line/plant totals (F, G)
 - ✅ Line cards and plant totals set to KPIs-only.
@@ -224,9 +228,10 @@
 #### T5) Report Breakdown fuzzy/typeahead selectors (L)
 - ✅ Fuzzy/typeahead for Line and Machine.
 - ✅ Optional technician assignment supported (enables UNASSIGNED WOs).
+- ✅ Post-test fix: prevent dialog auto-focus from opening dropdowns (`onOpenAutoFocus={e => e.preventDefault()}`), verified.
 
 **Phase T Testing**
-- ✅ Frontend screenshot-based verification completed.
+- ✅ Screenshot verification completed.
 
 ---
 
@@ -249,22 +254,20 @@
 #### U4) Universal deep-link “jump to Work Order” (C)
 - ✅ Universal deep-link contract: `?wo=<id>`.
 - ✅ `Layout.jsx` opens the modal automatically when `?wo=` is present.
-- ✅ Notifications now open the exact WO popout (when reference_type=work_order).
+- ✅ Notifications open the exact WO popout (when `reference_type=work_order`).
 
 #### U5) Global “My Tasks” toggle for technicians (D)
-- ✅ Implemented across:
-  - Breakdowns (`My Tasks` filters assigned_to)
-  - Work Orders
-  - Preventive Maintenance tasks
+- ✅ Implemented across Breakdowns, Work Orders, Preventive Maintenance.
 
 #### U6) Closure rules reflected in UI (J)
-- ✅ UI actions match governance:
-  - Corrective/Inspection/Predictive: tech can complete & close.
-  - PM/RCA: complete → pending admin closure (admin closes).
+- ✅ UI actions match governance.
+- ✅ Verified via API: Corrective→CLOSED direct, Predictive→CLOSED direct, Preventive→PENDING_ADMIN_CLOSURE→Admin close.
+
+#### U7) Post-test stability fixes
+- ✅ Fixed dialog overlay interception after WO creation by preventing auto-focus in dialog content.
 
 **Phase U Testing**
-- ✅ Frontend screenshot-based verification completed.
-- ✅ Deep-link `?wo=` verified.
+- ✅ Screenshot verification completed.
 
 ---
 
@@ -280,35 +283,58 @@
 #### V2) AWS page UI for 3 pools + threshold config (M)
 - ✅ AWS page shows **3 independent pools** (MEC/ELE/PLC) using pool bars.
 - ✅ Driving (riskiest) pool marked with ▲.
-- ✅ Admin settings include `predictive_trigger_pct` (default 80%) with explanatory copy.
-
-#### V3) Report Breakdown fuzzy/typeahead selectors (L)
-- ✅ Completed as part of Phase T implementation (dialog rewrite), verified working.
+- ✅ Admin settings include `predictive_trigger_pct` input with explanatory copy.
 
 **Phase V Testing**
-- ✅ Frontend screenshot-based verification completed.
+- ✅ Screenshot verification completed.
+
+---
+
+### Phase W — New Feature: Jump-to-breakdown from live DOWN timer (P0)
+**Status:** ✅ COMPLETE
+
+#### W1) Backend support
+- ✅ `kpi_engine.py` now includes `active_breakdown_id` + `active_breakdown_ticket` per line KPI.
+
+#### W2) Control Room UI
+- ✅ Live DOWN ribbon in `LineKpiRibbon.jsx` is clickable.
+- ✅ Clicking navigates to `/breakdowns?bd=<id>`.
+
+#### W3) Breakdowns deep-link handler
+- ✅ `Breakdowns.jsx` reads `?bd=`:
+  - expands the matching row
+  - highlights it in red
+  - scrolls it into view
+  - then cleans the URL
+- ✅ Added a visible expand chevron indicator on each breakdown row (`data-testid=breakdown-expand-*`).
+
+**Phase W Testing**
+- ✅ End-to-end verified via screenshot automation.
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- Run **testing_agent_v3** comprehensive suite (frontend + backend) now that all phases are implemented.
-- Produce/commit new test reports:
-  - `/app/test_reports/iteration_9.json` — Phase T verification
-  - `/app/test_reports/iteration_10.json` — Phase U verification
-  - `/app/test_reports/iteration_11.json` — Phase V verification
-- Fix any issues surfaced by the test agent (priority order):
-  1) auth/session / routing regressions
-  2) Control Room rendering / API mismatch
-  3) WO modal actions + permissions
-  4) Analytics queries / charts
-  5) AWS pools display + settings persistence
+- ✅ All major roadmap phases completed (Q/T/U/V/W).
+- ✅ Test artifacts cleaned from DB (temporary test WOs and TEST-* hierarchy entries removed).
 
-### Hardening / Refactor (P1) — optional (after major changes stabilize)
-- Refactor frontend hierarchy selectors into a single shared hook/component (single source for Line→Dept→PG traversal).
-- Add/verify MongoDB indexes for hierarchy fields and work order list queries if UI reveals latency.
-- Add E2E regression scripts for deep-linking behavior (`?wo=`) and Unassigned-claim lifecycle.
+### Validation evidence (P0)
+- Current test reports:
+  - `/app/test_reports/iteration_9.json` — Backend verification **100%**.
+  - `/app/test_reports/iteration_10.json` — Frontend automation report (contained false positives + real issues).
+- Post-iteration fixes completed:
+  - Dialog overlay interception resolved.
+  - Fuzzy search interaction stabilized.
+  - Breakdown expand affordance added.
+  - Jump-to-breakdown from live DOWN timer shipped.
+
+### Optional hardening / Refactor (P1)
+- Consolidate hierarchy selectors and fuzzy pickers into shared hooks/components.
+- Add E2E regression tests for deep-links:
+  - `?wo=<id>` (WO modal)
+  - `?bd=<id>` (Breakdowns expand + highlight)
+- Add/verify MongoDB indexes for large plants if latency observed.
 
 ---
 
@@ -323,6 +349,7 @@
 - ✅ KPI presets: 8h/24h/168h + custom date range.
 - ✅ No flavor text on line cards / plant totals.
 - ✅ Active breakdown lines show live HH:MM:SS red timer ribbon.
+- ✅ **Clicking the DOWN timer jumps to the exact breakdown**.
 
 ### Work Orders + Governance
 - ✅ Backend supports Unassigned WOs universally (including kiosk) + claim.
@@ -342,15 +369,10 @@
 - ✅ Any WO reference deep-links into the exact WO popout.
 - ✅ “My Tasks” filter exists across technician-accessible modules.
 - ✅ Breakdown report Area/Line + Machine selectors have fuzzy/typeahead.
+- ✅ Breakdown deep-link `?bd=` expands + highlights + scrolls.
 
 ### Analytics + Runtime
 - ✅ Backend runtime is unified via `kpi_engine.py` and used by Control Room endpoints.
 - ✅ Analytics has a date range slicer affecting all KPIs/charts.
 - ✅ Closure rate KPI and Pareto chart exist.
 - ✅ Runtime is a single source of truth (backend).
-
-### Validation evidence (to produce)
-- ⏳ Add new test reports (next step):
-  - `/app/test_reports/iteration_9.json` — Phase T (Control Room + hierarchy sync)
-  - `/app/test_reports/iteration_10.json` — Phase U (Kanban + deep-link + My Tasks)
-  - `/app/test_reports/iteration_11.json` — Phase V (Analytics + AWS UI + typeahead)

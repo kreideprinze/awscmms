@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Search, AlertTriangle, GitBranch, UserRound } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Plus, Search, AlertTriangle, GitBranch, UserRound, ChevronRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -172,6 +172,8 @@ export default function Breakdowns() {
   const [warningOpen, setWarningOpen] = useState(false);
   const [view, setView] = useState('breakdowns'); // breakdowns | warnings
   const [expanded, setExpanded] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const load = useCallback(() => {
     const params = new URLSearchParams();
@@ -182,6 +184,26 @@ export default function Breakdowns() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { load(); }, [liveFeed.length]); // refresh on live events
+
+  // Deep-link: /breakdowns?bd=<id> (e.g. from the Control Room live DOWN timer)
+  // expands + highlights + scrolls to the exact breakdown row
+  useEffect(() => {
+    const bdId = searchParams.get('bd');
+    if (!bdId || !data.items.length) return;
+    const found = data.items.find((b) => b.id === bdId);
+    if (found) {
+      setView('breakdowns');
+      setExpanded(bdId);
+      setHighlightId(bdId);
+      setTimeout(() => {
+        document.getElementById(`bd-row-${bdId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 150);
+      setTimeout(() => setHighlightId(null), 5000);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('bd');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = myTasks ? data.items.filter((bd) => bd.assigned_to === user?.username) : data.items;
 
@@ -256,10 +278,13 @@ export default function Breakdowns() {
             )}
             {items.map((bd) => (
               <React.Fragment key={bd.id}>
-                <TableRow data-testid={`breakdowns-row-${bd.ticket_number}`} onClick={() => setExpanded(expanded === bd.id ? null : bd.id)}
-                  className="cursor-pointer border-border hover:bg-white/[0.03]">
+                <TableRow id={`bd-row-${bd.id}`} data-testid={`breakdowns-row-${bd.ticket_number}`} onClick={() => setExpanded(expanded === bd.id ? null : bd.id)}
+                  className={`cursor-pointer border-border hover:bg-white/[0.03] ${highlightId === bd.id ? 'bg-[#ff2e63]/10 shadow-[inset_2px_0_0_#ff2e63]' : ''}`}>
                   <TableCell className="font-mono text-xs text-[hsl(var(--primary))]">
-                    {bd.ticket_number}
+                    <span className="flex items-center gap-1">
+                      <ChevronRight className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 ${expanded === bd.id ? 'rotate-90 text-[hsl(var(--primary))]' : ''}`} data-testid={`breakdown-expand-${bd.ticket_number}`} />
+                      {bd.ticket_number}
+                    </span>
                     {bd.submitted_via === 'public_kiosk' && (
                       <span className="ml-1.5 border border-[#f9f871]/50 px-1 py-px text-[8px] uppercase tracking-wide text-[#f9f871]" title="Reported without login (public kiosk)" data-testid={`public-badge-${bd.ticket_number}`}>Public</span>
                     )}

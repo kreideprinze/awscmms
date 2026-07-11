@@ -218,6 +218,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
       <DialogContent
         className="max-h-[90vh] gap-0 overflow-y-auto border-border bg-[#0a0a0f] p-0 sm:max-w-lg"
         data-testid={isWarning ? 'report-warning-dialog' : 'report-breakdown-dialog'}
+        onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}

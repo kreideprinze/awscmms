@@ -331,7 +331,7 @@ export default function WorkOrders() {
 
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="border-border bg-[hsl(var(--panel-1))]">
+        <DialogContent className="border-border bg-[hsl(var(--panel-1))]" onOpenAutoFocus={(e) => e.preventDefault()}>
           <DialogHeader><DialogTitle>New Work Order</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">Machine</Label><MachineSelect value={form.machine_id} onChange={(id) => setForm({ ...form, machine_id: id })} testId="wo-create-machine-select" /></div>
