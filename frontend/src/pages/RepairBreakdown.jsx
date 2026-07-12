@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Wrench, CheckCircle2, Timer } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Timer } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { LifecycleBadge, TypeBadge, fmtDate, CrackedGear } from '@/components/StatusBits';
-import { SpareRows, DateTimeField, toLocalInput, toIsoUtc } from '@/components/Shared';
+import { SpareRows, DateTimeField, TechnicianSelect, toLocalInput, toIsoUtc } from '@/components/Shared';
 
 function Elapsed({ since }) {
   const [now, setNow] = useState(Date.now());
@@ -27,11 +27,12 @@ function Elapsed({ since }) {
 export default function RepairBreakdown() {
   const { breakdownId } = useParams();
   const navigate = useNavigate();
-  const { isTech } = useApp();
+  const { isTech, isAdmin, user } = useApp();
   const [bd, setBd] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [actionTaken, setActionTaken] = useState('');
   const [spares, setSpares] = useState([]);
+  const [assignTech, setAssignTech] = useState('');
   const [startT, setStartT] = useState('');
   const [endT, setEndT] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -64,9 +65,16 @@ export default function RepairBreakdown() {
   const completeRepair = async () => {
     if (!actionTaken.trim()) { toast.error('Action Taken is required to complete the repair'); return; }
     if (startT && endT && new Date(endT) < new Date(startT)) { toast.error('End time cannot be before start time'); return; }
+    // A breakdown can never be closed without a technician on record:
+    // technicians auto-assign themselves; admins must pick from the dropdown.
+    if (!bd.assigned_to && isAdmin && !assignTech) {
+      toast.error('Select the technician who performed this repair before completing');
+      return;
+    }
     const ok = await act({
       action: 'complete',
       action_taken: actionTaken,
+      assigned_to: bd.assigned_to ? undefined : (assignTech || undefined),
       start_time: startT ? toIsoUtc(startT) : undefined,
       end_time: endT ? toIsoUtc(endT) : undefined,
       consumed_spares: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
@@ -136,14 +144,22 @@ export default function RepairBreakdown() {
 
       {active && isTech ? (
         <div className="space-y-4">
-          {bd.status !== 'IN_PROGRESS' && (
-            <Button data-testid="repair-start-button" disabled={submitting} onClick={() => act({ action: 'start' }, 'Repair started — machine marked under repair')}
-              className="w-full">
-              <Wrench className="mr-1 h-4 w-4" /> Start Repair Now
-            </Button>
-          )}
           <div className="cyber-panel space-y-3 p-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Repair record</div>
+            {/* Repairing technician — mandatory: closures always carry a technician name */}
+            {!bd.assigned_to && (
+              isAdmin ? (
+                <div data-testid="repair-assign-section">
+                  <Label className="text-xs">Repairing Technician *</Label>
+                  <div className="mt-1"><TechnicianSelect value={assignTech} onChange={setAssignTech} testId="repair-assign-select" /></div>
+                  <p className="mt-1 text-[11px] text-[#f9f871]">This breakdown is unassigned — select the technician who performed the repair. It cannot be closed without one.</p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-[#f9f871]" data-testid="repair-self-assign-note">
+                  Unassigned — completing this repair records you ({user?.username}) as the repairing technician.
+                </p>
+              )
+            )}
             {/* Corrected times: downtime + the 30-min RCA trigger evaluate against these, not the raw timer */}
             <div className="grid grid-cols-2 gap-3">
               <DateTimeField label="Breakdown Start Time" value={startT} onChange={setStartT} testId="repair-start-time" />

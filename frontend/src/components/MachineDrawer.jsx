@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge, HealthBadge, LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
-import { SpareRows } from '@/components/Shared';
+import { SpareRows, TechnicianSelect } from '@/components/Shared';
 import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 const TABS = ['Overview', 'Reports', 'Breakdowns', 'Work Orders', 'PM Tasks', 'Analytics', 'Timeline', 'Notes', 'Documents', 'Reliability', 'Spares'];
@@ -166,14 +166,15 @@ function ReportsTab({ machineId, machineName }) {
 
 /* ---------------- Breakdowns ---------------- */
 export function BreakdownActions({ bd, onDone, compact }) {
-  const { isTech } = useApp();
+  const { isTech, isAdmin, user } = useApp();
   const navigate = useNavigate();
+  const [assignTech, setAssignTech] = useState('');
 
   if (!isTech) return null;
-  const act = async (payload) => {
+  const act = async (payload, msg) => {
     try {
       const res = await api.put(`/breakdowns/${bd.id}`, payload);
-      toast.success(`Breakdown ${res.data.status || 'updated'}`);
+      toast.success(msg || `Breakdown ${res.data.status || 'updated'}`);
       onDone();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -188,12 +189,32 @@ export function BreakdownActions({ bd, onDone, compact }) {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
+  const active = ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(bd.status);
+
   return (
     <div className="mt-2 space-y-2">
+      {/* Unassigned breakdown: admin assigns a technician from the dropdown;
+          technicians take it by starting the repair (auto-assign) */}
+      {active && !bd.assigned_to && isAdmin && (
+        <div className="flex flex-wrap items-center gap-2" data-testid={`bd-assign-row-${bd.ticket_number}`} onClick={(e) => e.stopPropagation()}>
+          <div className="w-64">
+            <TechnicianSelect value={assignTech} onChange={setAssignTech} testId={`bd-assign-select-${bd.ticket_number}`} />
+          </div>
+          <Button size="sm" disabled={!assignTech} data-testid={`bd-assign-btn-${bd.ticket_number}`}
+            className="h-9 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40"
+            onClick={() => act({ action: 'assign', assigned_to: assignTech }, `${bd.ticket_number} assigned to ${assignTech}`)}>
+            Assign Technician
+          </Button>
+        </div>
+      )}
+      {active && !bd.assigned_to && !isAdmin && (
+        <div className="text-[11px] text-[#f9f871]" data-testid={`bd-unassigned-note-${bd.ticket_number}`}>
+          Unassigned — starting the repair assigns it to you ({user?.username}).
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5">
-        {/* Assign button removed — every breakdown is assigned to a technician at creation */}
         {['OPEN', 'ASSIGNED'].includes(bd.status) && (
-          <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={startRepair}>Start Repair</Button>
+          <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={(e) => { e.stopPropagation(); startRepair(); }}>Start Repair</Button>
         )}
         {bd.status === 'IN_PROGRESS' && (
           <Button size="sm" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`bd-open-repair-${bd.ticket_number}`} onClick={() => navigate(`/breakdowns/repair/${bd.id}`)}>Open Repair Page</Button>

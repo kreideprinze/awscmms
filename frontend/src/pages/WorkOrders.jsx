@@ -185,11 +185,20 @@ export default function WorkOrders() {
       <div className="text-[9px] text-muted-foreground">{wo.wo_type} · {wo.assigned_to || 'unassigned'} · {fmtDate(wo.created_at)}</div>
       <div className="mt-1.5 flex flex-wrap gap-1">
         {isUnassigned(wo) ? (
-          <Button size="sm" data-testid={`wo-claim-${wo.wo_number}`}
-            className="h-5 border border-[#f9f871]/60 bg-transparent px-1.5 text-[9px] text-[#f9f871] hover:bg-[#f9f871]/10"
-            onClick={(e) => { e.stopPropagation(); act(wo, 'claim'); }}>
-            <Hand className="mr-0.5 h-2.5 w-2.5" /> Claim
-          </Button>
+          isAdmin ? (
+            <Button size="sm" data-testid={`wo-assign-${wo.wo_number}`}
+              className="h-5 border border-[#f9f871]/60 bg-transparent px-1.5 text-[9px] text-[#f9f871] hover:bg-[#f9f871]/10"
+              onClick={(e) => { e.stopPropagation(); openWorkOrder(wo.id); }}
+              title="Open the work order to assign a technician">
+              <UserRound className="mr-0.5 h-2.5 w-2.5" /> Assign Tech
+            </Button>
+          ) : (
+            <Button size="sm" data-testid={`wo-claim-${wo.wo_number}`}
+              className="h-5 border border-[#f9f871]/60 bg-transparent px-1.5 text-[9px] text-[#f9f871] hover:bg-[#f9f871]/10"
+              onClick={(e) => { e.stopPropagation(); act(wo, 'claim'); }}>
+              <Hand className="mr-0.5 h-2.5 w-2.5" /> Claim
+            </Button>
+          )
         ) : (
           <>
             {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-5 border-border bg-[hsl(var(--panel-2))] px-1.5 text-[9px]" onClick={(e) => { e.stopPropagation(); act(wo, 'start'); }}>Start</Button>}
@@ -308,7 +317,11 @@ export default function WorkOrders() {
                   <TableCell>
                     <div className="flex gap-1">
                       {isUnassigned(wo) ? (
-                        <Button size="sm" className="h-6 border border-[#f9f871]/60 bg-transparent text-[10px] text-[#f9f871] hover:bg-[#f9f871]/10" data-testid={`wo-claim-${wo.wo_number}`} onClick={() => act(wo, 'claim')}>Claim</Button>
+                        isAdmin ? (
+                          <Button size="sm" className="h-6 border border-[#f9f871]/60 bg-transparent text-[10px] text-[#f9f871] hover:bg-[#f9f871]/10" data-testid={`wo-assign-${wo.wo_number}`} onClick={() => openWorkOrder(wo.id)}>Assign Tech</Button>
+                        ) : (
+                          <Button size="sm" className="h-6 border border-[#f9f871]/60 bg-transparent text-[10px] text-[#f9f871] hover:bg-[#f9f871]/10" data-testid={`wo-claim-${wo.wo_number}`} onClick={() => act(wo, 'claim')}>Claim</Button>
+                        )
                       ) : (
                         <>
                           {['OPEN', 'ASSIGNED'].includes(wo.status) && <Button size="sm" variant="outline" className="h-6 border-border bg-[hsl(var(--panel-2))] text-[10px]" data-testid={`wo-start-${wo.wo_number}`} onClick={() => act(wo, 'start')}>Start</Button>}

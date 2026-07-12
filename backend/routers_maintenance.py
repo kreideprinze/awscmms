@@ -280,6 +280,11 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
             raise HTTPException(status_code=400, detail='assigned_to required')
         updates = {'status': 'ASSIGNED', 'assigned_to': req.assigned_to}
         await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
+        # SYNC: assigning the breakdown also assigns its linked (still-open, unassigned) work order
+        if bd.get('work_order_id'):
+            await db.work_orders.update_one(
+                {'id': bd['work_order_id'], 'status': {'$in': ['OPEN', 'ASSIGNED']}},
+                {'$set': {'status': 'ASSIGNED', 'assigned_to': req.assigned_to}})
         await create_timeline_event('breakdown_assigned', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
                                     title=f"{bd['ticket_number']} assigned to {req.assigned_to}", user=user['username'],
                                     reference_id=bd_id, reference_type='breakdown', department=bd['department'], line=bd['line'])
@@ -290,7 +295,10 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
 
     if req.action == 'start':
         updates = {'status': 'IN_PROGRESS', 'repair_started_at': now_iso()}
-        if not bd.get('assigned_to'):
+        # Only a TECHNICIAN starting the repair takes ownership automatically.
+        # Admins/managers starting a repair do NOT get auto-assigned — they must pick
+        # a technician from the dropdown (the closure gate enforces it regardless).
+        if not bd.get('assigned_to') and user.get('role') == 'technician':
             updates['assigned_to'] = user['username']
         await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
         if machine:
@@ -303,6 +311,14 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         return {'ok': True, 'status': 'IN_PROGRESS'}
 
     if req.action in ('complete', 'close'):
+        # GOVERNANCE: a breakdown can NEVER be closed without a technician on record.
+        # - already assigned            -> keep that technician
+        # - explicit assigned_to in req -> admin picked a technician at closure time
+        # - closing user is a tech      -> auto-assign the completing technician
+        # - otherwise                   -> reject
+        closing_tech = bd.get('assigned_to') or req.assigned_to or (user['username'] if user.get('role') == 'technician' else None)
+        if not closing_tech:
+            raise HTTPException(status_code=400, detail='A technician must be assigned before closing — select the technician who performed the repair')
         # Corrected/edited times take precedence over the raw elapsed timer — downtime,
         # availability and the RCA trigger all evaluate against the EDITED duration.
         start_time = req.start_time or bd['start_time']
@@ -335,6 +351,7 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
             'status': new_status, 'start_time': start_time, 'end_time': end_time, 'downtime_minutes': downtime,
             'repair_duration_minutes': repair_duration, 'root_cause': root_cause,
             'action_taken': req.action_taken or bd.get('action_taken'),
+            'assigned_to': closing_tech,  # repairing technician is always recorded
             'closed_by': user['username'], 'closed_at': now_iso(),
         }
         if consumed:
@@ -343,7 +360,7 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         # RCA rule: EDITED/corrected downtime above threshold auto-triggers a 5-Why RCA WO
         rca_task_id = bd.get('rca_task_id')
         if downtime > rc_threshold and not rca_task_id:
-            tech = bd.get('assigned_to') or user['username']
+            tech = closing_tech
             rca_wo = await _create_rca_wo(
                 bd['machine_id'], bd['machine_name'], bd['department'], bd['line'], tech,
                 origin_label=bd['ticket_number'],
@@ -368,7 +385,7 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
                 'started_at': linked_wo.get('started_at') or start_time,
                 'duration_minutes': linked_wo.get('duration_minutes') or repair_duration,
                 'action_taken': req.action_taken or linked_wo.get('action_taken'),
-                'assigned_to': linked_wo.get('assigned_to') or bd.get('assigned_to') or user['username'],
+                'assigned_to': linked_wo.get('assigned_to') or closing_tech,
             }})
             await create_timeline_event('wo_closed', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
                                         title=f"WO {linked_wo['wo_number']} closed (breakdown {bd['ticket_number']} closed)",
@@ -379,7 +396,7 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         await db.repair_events.insert_one({
             'id': str(uuid.uuid4()), 'breakdown_id': bd_id, 'ticket_number': bd['ticket_number'],
             'machine_id': bd['machine_id'], 'machine_name': bd['machine_name'],
-            'technician': bd.get('assigned_to') or user['username'],
+            'technician': closing_tech,
             'downtime_minutes': downtime, 'repair_duration_minutes': repair_duration,
             'root_cause': root_cause, 'action_taken': req.action_taken, 'created_at': now_iso(),
         })
@@ -520,7 +537,8 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
 
     if req.action == 'start':
         updates = {'status': 'IN_PROGRESS', 'started_at': now_iso()}
-        if not wo.get('assigned_to'):
+        # Only technicians take ownership implicitly on start; admins assign explicitly
+        if not wo.get('assigned_to') and user.get('role') == 'technician':
             updates['assigned_to'] = user['username']
         await db.work_orders.update_one({'id': wo_id}, {'$set': updates})
         return {'ok': True, 'status': 'IN_PROGRESS'}

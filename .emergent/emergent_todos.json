@@ -1,26 +1,30 @@
 [
   {
-    "content": "Phase T complete: hierarchy sync, filter ribbon, date slicer, timers, fuzzy search, admin CRUD",
-    "status": "completed"
+    "content": "1. Admin assign-technician dropdown instead of Claim (WO popout, Kanban, breakdowns)",
+    "status": "pending"
   },
   {
-    "content": "Phase U complete: UNASSIGNED column, claim, Predictive, My Tasks, universal WO popout + ?wo= deep-links",
-    "status": "completed"
+    "content": "2. Block breakdown closure without an assigned technician (backend rule + repair page UI)",
+    "status": "pending"
   },
   {
-    "content": "Analytics: date range slicer, Closure Rate KPI, Failure Modes Pareto, dedup dept filter",
+    "content": "3. Remove redundant 'Start Repair Now' button on repair page",
+    "status": "pending"
+  },
+  {
+    "content": "4. Fix AWS Life % not functioning (hours-since-failure runtime source)",
+    "status": "pending"
+  },
+  {
+    "content": "5. Remove Corrective WO-type choice from Report Warning (always Inspection)",
+    "status": "pending"
+  },
+  {
+    "content": "6. Thorough review of ALL calculations (kpi_engine, reliability, analytics, downtime, durations)",
     "status": "in_progress"
   },
   {
-    "content": "AWS page: 3 health pools (MEC/ELE/PLC) + admin threshold config",
-    "status": "pending"
-  },
-  {
-    "content": "Compile + screenshot verify Phase V",
-    "status": "pending"
-  },
-  {
-    "content": "Full testing agent run (frontend) across all phases",
+    "content": "7. Test everything + final summary of changes & calculation logic",
     "status": "pending"
   }
 ]

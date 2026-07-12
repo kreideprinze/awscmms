@@ -22,7 +22,7 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
   const { openWorkOrder, isTech } = useApp();
   const [technicians, setTechnicians] = useState([]);
   const [tech, setTech] = useState('');
-  const [woType, setWoType] = useState('Inspection');
+  const [woType] = useState('Inspection'); // warnings always dispatch an Inspection WO
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -80,7 +80,7 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
           {!hasOpenWo && (
             <div className="space-y-2 border border-[#f9f871]/30 bg-[#f9f871]/[0.03] p-3">
               <Label className="text-[10px] uppercase tracking-widest text-[#f9f871]">Generate Work Order</Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2">
                 <Select value={tech || 'none'} onValueChange={(v) => setTech(v === 'none' ? '' : v)}>
                   <SelectTrigger data-testid="warning-wo-technician" className="bg-[hsl(var(--panel-2))]"><SelectValue placeholder="Unassigned — claimable" /></SelectTrigger>
                   <SelectContent>
@@ -88,11 +88,8 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
                     {technicians.map((t) => <SelectItem key={t.username} value={t.username}>{t.name} ({t.username})</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Select value={woType} onValueChange={setWoType}>
-                  <SelectTrigger data-testid="warning-wo-type" className="bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="Inspection">Inspection</SelectItem><SelectItem value="Corrective">Corrective</SelectItem></SelectContent>
-                </Select>
               </div>
+              <p className="text-[10px] text-muted-foreground" data-testid="warning-wo-type-note">An Inspection work order will be dispatched.</p>
               <Button onClick={generate} disabled={busy} data-testid="warning-generate-wo"
                 className="w-full border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40">
                 {busy ? 'Generating…' : 'Generate Work Order'}

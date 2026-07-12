@@ -15,10 +15,6 @@ const BREAKDOWN_TYPES = [
   { value: 'ELECTRICAL', label: 'ELECTRICAL' },
   { value: 'CONTROL_PLC', label: 'CONTROL (PLC)' },
 ];
-const WO_TYPES = [
-  { value: 'Inspection', label: 'INSPECTION' },
-  { value: 'Corrective', label: 'CORRECTIVE' },
-];
 
 function Segmented({ options, value, onChange, testPrefix, accent = 'primary' }) {
   const selCls = accent === 'yellow'
@@ -108,7 +104,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
   const [machineId, setMachineId] = useState('');
   const [reporterName, setReporterName] = useState('');
   const [breakdownType, setBreakdownType] = useState('MECHANICAL');
-  const [woType, setWoType] = useState('Inspection');
+  const woType = 'Inspection'; // warnings ALWAYS dispatch an Inspection WO (fixed)
   const [remarks, setRemarks] = useState('');
   const [technician, setTechnician] = useState('');
   const [startTime, setStartTime] = useState('');
@@ -130,7 +126,6 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
     }
     setReporterName(publicMode ? '' : user?.name || '');
     setBreakdownType('MECHANICAL');
-    setWoType('Inspection');
     setRemarks('');
     setTechnician('');
     setStartTime(toLocalInput(new Date().toISOString()));
@@ -299,11 +294,10 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
             <Segmented options={BREAKDOWN_TYPES} value={breakdownType} onChange={setBreakdownType} testPrefix="bd-type" accent={isWarning ? 'yellow' : 'primary'} />
           </div>
 
-          {/* Warning: WO type choice */}
+          {/* Warning: an INSPECTION work order is always dispatched (fixed type) */}
           {isWarning && (
-            <div>
-              <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Work Order Type (always dispatched)</Label>
-              <Segmented options={WO_TYPES} value={woType} onChange={setWoType} testPrefix="bd-wo-type" accent="yellow" />
+            <div className="border border-border bg-[hsl(var(--panel-2))] px-3 py-2 text-[11px] text-muted-foreground" data-testid="bd-wo-type-note">
+              An <span className="text-[#f9f871]">Inspection</span> work order is always dispatched with this warning.
             </div>
           )}
 

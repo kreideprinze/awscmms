@@ -26,7 +26,7 @@ PREDICTIVE WORK ORDERS (admin-configurable threshold, default 80%):
 import logging
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from database import db
 from events import create_notification, create_timeline_event, broadcast_machine_update, next_counter, now_iso
@@ -74,20 +74,40 @@ def parse_dt(iso):
 
 
 async def run_hours_between(machine_id, start_dt, end_dt, logs=None):
-    """Operating hours between two datetimes from runtime_logs; fallback to calendar hours."""
+    """Operating hours between two datetimes — SINGLE-SOURCE-OF-TRUTH hybrid
+    (same philosophy as kpi_engine):
+      • For each calendar day overlapping [start_dt, end_dt]:
+          - if a runtime log exists for (machine, day) the LOGGED run_hours are
+            authoritative, prorated by the fraction of that day inside the range
+            and capped at the elapsed overlap;
+          - otherwise the plant is assumed to run continuously (24/7), so the
+            full calendar overlap counts as run time.
+    This makes 'hours since failure' (and therefore AWS Life %) tick in real
+    time instead of freezing at 0 until the next end-of-day log."""
+    if start_dt is None or end_dt is None or end_dt <= start_dt:
+        return 0.0
     if logs is None:
         logs = await db.runtime_logs.find({'machine_id': machine_id}, {'_id': 0}).to_list(100000)
-    if logs:
-        total = 0.0
-        for lg in logs:
-            d = parse_dt(lg.get('date'))
-            if d and (start_dt is None or d >= start_dt) and (end_dt is None or d <= end_dt):
-                total += float(lg.get('run_hours', 0))
-        return total
-    # fallback: calendar elapsed hours
-    if start_dt and end_dt:
-        return max((end_dt - start_dt).total_seconds() / 3600.0, 0.0)
-    return 0.0
+    by_date = {}
+    for lg in logs:
+        d = str(lg.get('date') or '')[:10]
+        if d:
+            by_date[d] = by_date.get(d, 0.0) + float(lg.get('run_hours') or 0)
+    total = 0.0
+    day = start_dt.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    while day < end_dt:
+        day_end = day + timedelta(days=1)
+        o_start = max(day, start_dt)
+        o_end = min(day_end, end_dt)
+        overlap_h = max((o_end - o_start).total_seconds() / 3600.0, 0.0)
+        if overlap_h > 0:
+            key = day.date().isoformat()
+            if key in by_date:
+                total += min(by_date[key] * (overlap_h / 24.0), overlap_h)
+            else:
+                total += overlap_h
+        day = day_end
+    return total
 
 
 def weibull_fit(tbfs):

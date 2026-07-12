@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
-import { SpareRows, DateTimeField, toLocalInput, toIsoUtc } from '@/components/Shared';
+import { SpareRows, DateTimeField, TechnicianSelect, toLocalInput, toIsoUtc } from '@/components/Shared';
 
 // Closure governance (mirrors backend ADMIN_CLOSURE_TYPES):
 //   Corrective / Inspection / Predictive (AWS) — technician closes DIRECTLY
@@ -95,6 +95,7 @@ export function WorkOrderModal() {
   const [wo, setWo] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [assignTech, setAssignTech] = useState('');
   const [startT, setStartT] = useState('');
   const [endT, setEndT] = useState('');
   const [saving, setSaving] = useState(false);
@@ -114,7 +115,7 @@ export function WorkOrderModal() {
   }, [woModalId]);
 
   useEffect(() => {
-    setWo(null); setCompleting(false); setNotFound(false);
+    setWo(null); setCompleting(false); setNotFound(false); setAssignTech('');
     if (woModalId) fetchWo();
   }, [woModalId, fetchWo]);
 
@@ -126,7 +127,10 @@ export function WorkOrderModal() {
   const act = async (action, extra = {}) => {
     try {
       await api.put(`/work-orders/${wo.id}`, { action, ...extra });
-      toast.success(`${wo.wo_number} ${action === 'claim' ? `claimed by ${user.username}` : `${action}ed`}`);
+      const msg = action === 'claim' ? `claimed by ${user.username}`
+        : action === 'assign' ? `assigned to ${extra.assigned_to}`
+        : `${action}ed`;
+      toast.success(`${wo.wo_number} ${msg}`);
       await refresh();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -283,13 +287,25 @@ export function WorkOrderModal() {
           {/* Workflow actions — role + type aware */}
           {!completing && (
             <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-              {isUnassigned && (
+              {isUnassigned && (isAdmin ? (
+                /* Admins assign a technician explicitly — no self-claim */
+                <div className="flex w-full flex-wrap items-center gap-2" data-testid="wo-detail-assign-row">
+                  <div className="min-w-[220px] flex-1">
+                    <TechnicianSelect value={assignTech} onChange={setAssignTech} testId="wo-detail-assign-select" />
+                  </div>
+                  <Button size="sm" disabled={!assignTech} data-testid="wo-detail-assign-btn"
+                    className="h-9 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40"
+                    onClick={() => act('assign', { assigned_to: assignTech })}>
+                    Assign Technician
+                  </Button>
+                </div>
+              ) : (
                 <Button size="sm" data-testid="wo-detail-claim-btn"
                   className="h-7 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10"
                   onClick={() => act('claim')}>
                   <Hand className="mr-1 h-3 w-3" /> Claim (assign to me)
                 </Button>
-              )}
+              ))}
               {['OPEN', 'ASSIGNED'].includes(wo.status) && !isUnassigned && (
                 <Button size="sm" variant="outline" data-testid="wo-detail-start-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
                   onClick={() => act('start')}>Start</Button>

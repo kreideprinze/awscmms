@@ -178,7 +178,7 @@ async def runtime_clock_loop():
         try:
             await runtime_clock_tick()
             _clock_tick_count += 1
-            if _clock_tick_count % 15 == 0:  # refresh reliability life % every ~15 min
+            if _clock_tick_count % 5 == 0:  # refresh reliability life % every ~5 min so pools tick live
                 from reliability import recompute_all
                 await recompute_all(trigger='plant_clock')
         except Exception as e:
