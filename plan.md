@@ -26,31 +26,38 @@
   - All UI + Admin CRUD + seed logic reflect Line-first.
 - **Work orders support Unassigned creation universally** (including public kiosk).
   - Kanban includes an **UNASSIGNED** column.
-  - Any technician can **self-assign/claim** an unassigned WO.
-- **Admin-closure requirement is type-conditional**:
+  - **Technicians can self-assign/claim** an unassigned WO.
+  - **Admins do not “claim”**: admins explicitly **assign technicians via dropdown** in the WO popout.
+- **Breakdowns support Unassigned creation**, but **closure is governed**:
+  - A breakdown can **never be closed without a technician on record**.
+  - If a technician closes an unassigned breakdown, the system records that technician automatically.
+  - If an admin closes an unassigned breakdown, an **assigned technician must be selected** (otherwise 400).
+- **Admin-closure requirement is type-conditional (Work Orders)**:
   - **Corrective + Inspection + AWS/Predictive** WOs: technician can close directly (no admin approval).
   - **Preventive (PM) + RCA** WOs: technician completes → `PENDING_ADMIN_CLOSURE` → admin closes.
 - **AWS / Predictive Maintenance Engine** is per-category:
   - Track separate health/life pools per machine for **Mechanical / Electrical / PLC(Control)**.
   - Trigger threshold is **admin-configurable** (default 80%) via `predictive_trigger_pct`.
   - AWS-triggered WOs are a distinct type: **AWS/Predictive** (`wo_type='Predictive'`, `aws_category` set).
+  - **Life % must tick in real-time** using a unified runtime philosophy (logged EOD hours override; otherwise 24/7 continuous).
 
 ### Control Room KPI/range objectives
 - Control Room line KPIs support presets **Shift=8h, Day=24h, Week=168h** plus a **custom date range** slicer.
 - Control Room visual cleanup:
   - Remove “flavor/narrative text” from line cards and plant totals; keep KPIs only.
   - Add a live red breakdown timer ribbon (HH:MM:SS ticking) on any line card with an active breakdown.
-  - **New:** Clicking the live DOWN timer ribbon **jumps to the exact breakdown** (deep-link).
+  - Clicking the live DOWN timer ribbon **jumps to the exact breakdown** (deep-link).
 
 ### Navigation + productivity objectives
 - **Universal “jump to Work Order” deep linking**:
   - Clicking a WO reference anywhere opens the **exact Work Order popout/modal** rather than a generic list.
   - Contract: `?wo=<id>` plus a global `openWorkOrder(id)`.
-- **New:** **Universal “jump to Breakdown” deep linking** from Control Room:
+- **Universal “jump to Breakdown” deep linking** from Control Room:
   - Clicking a line’s live DOWN timer ribbon opens `/breakdowns?bd=<breakdown_id>`.
   - Breakdowns page expands + highlights + scrolls to the referenced breakdown, then cleans the URL.
 - **Global “My Tasks” filter** for technicians across: Breakdowns, Work Orders (Kanban), PMs.
 - **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
+- **Warnings are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
 
 ### Analytics + runtime objectives
 - Analytics supports a date range slicer applied to all KPIs/charts.
@@ -58,6 +65,7 @@
 - **Runtime module is the single source of truth**:
   - Default assumption: plant runs **24/7**, ticking in real time.
   - End-of-day override: once a line runtime log exists for a date, it becomes authoritative globally.
+  - AWS Life %/hours-since-failure uses the **same hybrid runtime philosophy** (day-prorated logs + 24/7 fallback) so predictive ticking is consistent with Control Room.
 
 ---
 
@@ -140,7 +148,7 @@
 ---
 
 ### Phase M — Mandatory Technician Assignment + Mandatory WO Creation + Runtime Calendar (P0)
-**Status:** ✅ COMPLETE *(technician-mandatory rule superseded: Unassigned WOs allowed universally)*
+**Status:** ✅ COMPLETE *(technician-mandatory WO rule superseded: Unassigned WOs allowed universally; technician-mandatory breakdown closure reinstated in Corrections Part 4)*
 
 **Phase M Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_8.json`
@@ -194,10 +202,9 @@
 - ✅ Centralized calculations in `/app/backend/kpi_engine.py`.
 
 #### Q5) Control Room breakdown jump metadata
-- ✅ `kpi_engine.py` now returns:
+- ✅ `kpi_engine.py` returns `active_breakdown_since`, plus:
   - `active_breakdown_id`
   - `active_breakdown_ticket`
-  alongside `active_breakdown_since` for each line.
 
 **Phase Q Testing**
 - ✅ Backend verified via python/curl/bash.
@@ -245,8 +252,8 @@
 - ✅ 5-column Kanban: **UNASSIGNED / ASSIGNED / IN_PROGRESS / PENDING_ADMIN_CLOSURE / CLOSED**.
 
 #### U2) Technician claim/self-assign in WO popout (I)
-- ✅ Claim action integrated (button shows when unassigned).
-- ✅ Claim verified end-to-end as technician.
+- ✅ Claim integrated for technicians.
+- ✅ Claim verified end-to-end.
 
 #### U3) AWS/Predictive WO type support (K)
 - ✅ WO type filters include **Predictive (AWS)** and AWS badges.
@@ -290,11 +297,11 @@
 
 ---
 
-### Phase W — New Feature: Jump-to-breakdown from live DOWN timer (P0)
+### Phase W — Feature: Jump-to-breakdown from live DOWN timer (P0)
 **Status:** ✅ COMPLETE
 
 #### W1) Backend support
-- ✅ `kpi_engine.py` now includes `active_breakdown_id` + `active_breakdown_ticket` per line KPI.
+- ✅ `kpi_engine.py` includes `active_breakdown_id` + `active_breakdown_ticket` per line KPI.
 
 #### W2) Control Room UI
 - ✅ Live DOWN ribbon in `LineKpiRibbon.jsx` is clickable.
@@ -306,28 +313,71 @@
   - highlights it in red
   - scrolls it into view
   - then cleans the URL
-- ✅ Added a visible expand chevron indicator on each breakdown row (`data-testid=breakdown-expand-*`).
+- ✅ Expand chevron indicator added per breakdown row.
 
 **Phase W Testing**
 - ✅ End-to-end verified via screenshot automation.
 
 ---
 
+### Phase X — PDF “Corrections Part 4” governance + AWS Life% fix (P0)
+**Status:** ✅ COMPLETE
+
+#### X1) Admin assignment UX (WO + Breakdowns)
+- ✅ **Admins assign technicians via dropdown** (no self-claim):
+  - WO popout: `wo-detail-assign-select` + `wo-detail-assign-btn` replaces Claim for admins.
+  - Kanban/table unassigned state: admin sees “Assign Tech” (opens popout).
+  - Breakdown actions (Machine Drawer): admin sees `bd-assign-select-*` + `bd-assign-btn-*` when unassigned.
+- ✅ Technicians retain Claim/self-assign behavior.
+
+#### X2) Breakdown closure governance (must have technician)
+- ✅ Backend enforces: cannot close without technician on record.
+  - Tech closure auto-assigns the closing tech if needed.
+  - Admin closure requires `assigned_to` selection (400 otherwise).
+  - `assigned_to` is persisted on breakdown close, and used consistently in logs / RCA auto-wo / linked WO sync.
+- ✅ Repair page UI:
+  - Admins must pick “Repairing Technician*” on unassigned breakdowns.
+
+#### X3) Repair page cleanup
+- ✅ Removed redundant “Start Repair Now” button on Repair page.
+  - Edited times are authoritative; start/complete happens via explicit actions.
+
+#### X4) AWS Life % fix + cadence
+- ✅ `reliability.run_hours_between` rewritten as **day-prorated hybrid runtime**:
+  - If a runtime log exists for a day: use logged `run_hours`, prorated by overlap fraction and capped by elapsed overlap.
+  - If no runtime log exists for a day: assume 24/7 operation (calendar overlap hours).
+- ✅ Reliability recompute cadence increased from ~15 min to ~5 min.
+- ✅ Verified Life % ticks and can cross thresholds.
+
+#### X5) Warnings always dispatch Inspection WO
+- ✅ Removed Corrective WO type choice from:
+  - Report Warning dialog
+  - Warning generate-WO dialog
+- ✅ Warnings always dispatch **Inspection**.
+
+#### X6) Start actions do not auto-assign admins
+- ✅ `start` for breakdowns/WOs auto-assigns only when the actor is a technician.
+- ✅ Breakdown `assign` action syncs linked open WO assignment.
+
+**Phase X Testing**
+- ✅ `/app/test_reports/iteration_11.json`:
+  - Backend **100% (24/24)**
+  - Frontend **100% (7/7)**
+- ✅ Calculation review completed (kpi_engine, analytics, breakdown/WO timing, availability, reliability life%).
+- ✅ Test residue cleaned (no machines in failed/repair, 0 open breakdowns).
+
+---
+
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ All major roadmap phases completed (Q/T/U/V/W).
-- ✅ Test artifacts cleaned from DB (temporary test WOs and TEST-* hierarchy entries removed).
+- ✅ All major roadmap phases completed (Q/T/U/V/W/X).
+- ✅ PDF “Corrections Part 4” implemented, tested, and cleaned.
 
 ### Validation evidence (P0)
 - Current test reports:
   - `/app/test_reports/iteration_9.json` — Backend verification **100%**.
-  - `/app/test_reports/iteration_10.json` — Frontend automation report (contained false positives + real issues).
-- Post-iteration fixes completed:
-  - Dialog overlay interception resolved.
-  - Fuzzy search interaction stabilized.
-  - Breakdown expand affordance added.
-  - Jump-to-breakdown from live DOWN timer shipped.
+  - `/app/test_reports/iteration_11.json` — PDF Corrections Part 4 regression **100%**.
 
 ### Optional hardening / Refactor (P1)
 - Consolidate hierarchy selectors and fuzzy pickers into shared hooks/components.
@@ -335,6 +385,7 @@
   - `?wo=<id>` (WO modal)
   - `?bd=<id>` (Breakdowns expand + highlight)
 - Add/verify MongoDB indexes for large plants if latency observed.
+- Add an “Operational data health” admin page (optional): counts, recompute buttons, stuck states.
 
 ---
 
@@ -349,21 +400,29 @@
 - ✅ KPI presets: 8h/24h/168h + custom date range.
 - ✅ No flavor text on line cards / plant totals.
 - ✅ Active breakdown lines show live HH:MM:SS red timer ribbon.
-- ✅ **Clicking the DOWN timer jumps to the exact breakdown**.
+- ✅ Clicking the DOWN timer jumps to the exact breakdown.
 
 ### Work Orders + Governance
 - ✅ Backend supports Unassigned WOs universally (including kiosk) + claim.
 - ✅ Kanban shows UNASSIGNED.
 - ✅ Techs can claim unassigned WOs via UI.
+- ✅ Admins assign technicians via dropdown (no admin self-claim).
 - ✅ Closure branching:
   - Corrective + Inspection + AWS/Predictive close directly by technician.
   - PM/RCA require admin closure.
-- ✅ UI enforces/displays closure branching correctly.
+
+### Breakdowns + Governance
+- ✅ Unassigned breakdowns allowed.
+- ✅ Breakdowns cannot be closed without a technician on record:
+  - tech auto-assigns on close
+  - admin must select technician
+- ✅ Repair page contains mandatory Repairing Technician selection for admins when needed.
 
 ### AWS / Predictive
 - ✅ Backend per-category health pools (Mechanical/Electrical/PLC) computed independently.
 - ✅ Backend threshold is admin-configurable.
 - ✅ AWS page shows 3 pools + admin threshold setting.
+- ✅ Life %/hours-since-failure tick in real time with hybrid runtime logic.
 
 ### Navigation + Technician productivity
 - ✅ Any WO reference deep-links into the exact WO popout.
@@ -375,4 +434,4 @@
 - ✅ Backend runtime is unified via `kpi_engine.py` and used by Control Room endpoints.
 - ✅ Analytics has a date range slicer affecting all KPIs/charts.
 - ✅ Closure rate KPI and Pareto chart exist.
-- ✅ Runtime is a single source of truth (backend).
+- ✅ Runtime is a single source of truth, and reliability uses compatible runtime assumptions.
