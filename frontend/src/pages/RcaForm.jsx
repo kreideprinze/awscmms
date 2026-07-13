@@ -1,20 +1,21 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, GitBranch, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, GitBranch, CheckCircle2, Lock } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
 
-// Dedicated 5-Why Root Cause Analysis submission page.
-// The RCA work order cannot be completed until all 5 Whys + Root Cause + Corrective Action are submitted.
-export default function RcaForm() {
-  const { woId } = useParams();
-  const navigate = useNavigate();
+/**
+ * Reusable 5-Why RCA form body — used by the dedicated /work-orders/rca/:woId page
+ * AND embedded in the IMMEDIATE post-breakdown-closure dialog (RepairBreakdown).
+ * The RCA work order cannot be completed until all 5 Whys + Root Cause + Corrective
+ * Action are submitted. RCA tasks are LOCKED to the closing technician — no transfer.
+ */
+export function RcaFormBody({ woId, onDone, immediate = false }) {
   const { user, isAdmin } = useApp();
   const [wo, setWo] = useState(null);
   const [whys, setWhys] = useState(['', '', '', '', '']);
@@ -66,25 +67,28 @@ export default function RcaForm() {
     try {
       await api.put(`/work-orders/${wo.id}`, { action: 'complete' });
       toast.success(`${wo.wo_number} completed — awaiting admin closure`);
-      navigate('/work-orders');
+      onDone && onDone();
     } catch (e) { toast.error(errMsg(e)); }
     setCompleting(false);
   };
 
   return (
-    <div className="mx-auto max-w-3xl p-6" data-testid="rca-form-page">
-      <button onClick={() => navigate('/work-orders')} data-testid="rca-back-button"
-        className="mb-4 flex items-center gap-1 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-[hsl(var(--primary))]">
-        <ArrowLeft className="h-3.5 w-3.5" /> Work Orders
-      </button>
-
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <GitBranch className="h-6 w-6 text-[#ff2e63]" />
-        <h1 className="text-2xl font-semibold tracking-tight">5-Why Root Cause Analysis</h1>
+    <div data-testid="rca-form-body">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <GitBranch className="h-5 w-5 text-[#ff2e63]" />
         <span className="font-mono text-sm text-[hsl(var(--primary))]" data-testid="rca-wo-number">{wo.wo_number}</span>
         <LifecycleBadge status={wo.status} />
         <CritBadge level={wo.priority} />
+        <span className="flex items-center gap-1 border border-[#ff2e63]/40 px-1.5 py-px font-mono text-[9px] uppercase tracking-widest text-[#ff2e63]" data-testid="rca-locked-badge">
+          <Lock className="h-2.5 w-2.5" /> Locked to {wo.assigned_to || '—'}
+        </span>
       </div>
+
+      {immediate && !locked && (
+        <div className="mb-4 border border-[#ff2e63]/50 bg-[#ff2e63]/[0.06] p-2.5 text-xs text-[#ff2e63]" data-testid="rca-immediate-banner">
+          Downtime exceeded the RCA threshold — complete this 5-Why analysis now. It is locked to you and cannot be transferred or claimed by anyone else.
+        </div>
+      )}
 
       <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border bg-[hsl(var(--panel-1))] p-3 sm:grid-cols-4">
         <div><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Machine</div><div className="font-mono text-xs" data-testid="rca-machine">{wo.machine_name}</div></div>
@@ -154,6 +158,28 @@ export default function RcaForm() {
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+// Dedicated 5-Why Root Cause Analysis submission page (also reachable from
+// Kanban / deep-links). The same form pops up IMMEDIATELY after a >threshold
+// breakdown closure via the dialog in RepairBreakdown.
+export default function RcaForm() {
+  const { woId } = useParams();
+  const navigate = useNavigate();
+
+  return (
+    <div className="mx-auto max-w-3xl p-6" data-testid="rca-form-page">
+      <button onClick={() => navigate('/work-orders')} data-testid="rca-back-button"
+        className="mb-4 flex items-center gap-1 text-xs uppercase tracking-widest text-muted-foreground transition-colors hover:text-[hsl(var(--primary))]">
+        <ArrowLeft className="h-3.5 w-3.5" /> Work Orders
+      </button>
+      <div className="mb-5 flex items-center gap-2">
+        <GitBranch className="h-6 w-6 text-[#ff2e63]" />
+        <h1 className="text-2xl font-semibold tracking-tight">5-Why Root Cause Analysis</h1>
+      </div>
+      <RcaFormBody woId={woId} onDone={() => navigate('/work-orders')} />
     </div>
   );
 }

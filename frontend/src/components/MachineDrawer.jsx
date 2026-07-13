@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge, HealthBadge, LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
-import { SpareRows, TechnicianSelect } from '@/components/Shared';
+import { SpareRows, TechnicianSelect, TransferControl } from '@/components/Shared';
 import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
 const TABS = ['Overview', 'Reports', 'Breakdowns', 'Work Orders', 'PM Tasks', 'Analytics', 'Timeline', 'Notes', 'Documents', 'Reliability', 'Spares'];
@@ -193,12 +193,12 @@ export function BreakdownActions({ bd, onDone, compact }) {
 
   return (
     <div className="mt-2 space-y-2">
-      {/* Unassigned breakdown: admin assigns a technician from the dropdown;
-          technicians take it by starting the repair (auto-assign) */}
+      {/* Unassigned breakdown: admins assign a technician from the dropdown (no self-claim);
+          technicians get BOTH options — claim it themselves OR assign a colleague */}
       {active && !bd.assigned_to && isAdmin && (
         <div className="flex flex-wrap items-center gap-2" data-testid={`bd-assign-row-${bd.ticket_number}`} onClick={(e) => e.stopPropagation()}>
           <div className="w-64">
-            <TechnicianSelect value={assignTech} onChange={setAssignTech} testId={`bd-assign-select-${bd.ticket_number}`} />
+            <TechnicianSelect value={assignTech} onChange={setAssignTech} testId={`bd-assign-select-${bd.ticket_number}`} placeholder="Assign To…" />
           </div>
           <Button size="sm" disabled={!assignTech} data-testid={`bd-assign-btn-${bd.ticket_number}`}
             className="h-9 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40"
@@ -208,9 +208,29 @@ export function BreakdownActions({ bd, onDone, compact }) {
         </div>
       )}
       {active && !bd.assigned_to && !isAdmin && (
-        <div className="text-[11px] text-[#f9f871]" data-testid={`bd-unassigned-note-${bd.ticket_number}`}>
-          Unassigned — starting the repair assigns it to you ({user?.username}).
+        <div className="space-y-2" data-testid={`bd-claim-row-${bd.ticket_number}`} onClick={(e) => e.stopPropagation()}>
+          <Button size="sm" data-testid={`bd-claim-btn-${bd.ticket_number}`}
+            className="h-7 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10"
+            onClick={() => act({ action: 'claim' }, `${bd.ticket_number} claimed by ${user?.username}`)}>
+            Claim for Me
+          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="w-64">
+              <TechnicianSelect value={assignTech} onChange={setAssignTech} testId={`bd-tech-assign-select-${bd.ticket_number}`} placeholder="Assign To…" />
+            </div>
+            <Button size="sm" disabled={!assignTech} data-testid={`bd-tech-assign-btn-${bd.ticket_number}`}
+              className="h-9 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40"
+              onClick={() => act({ action: 'assign', assigned_to: assignTech }, `${bd.ticket_number} assigned to ${assignTech}`)}>
+              Assign Technician
+            </Button>
+          </div>
         </div>
+      )}
+      {/* Transfer: an assigned, still-active breakdown can be handed to another
+          technician by its CURRENT HOLDER or an admin (server enforces governance) */}
+      {active && bd.assigned_to && (isAdmin || bd.assigned_to === user?.username) && (
+        <TransferControl current={bd.assigned_to} testId={`bd-transfer-${bd.ticket_number}`}
+          onTransfer={(t) => act({ action: 'assign', assigned_to: t }, `${bd.ticket_number} transferred to ${t}`)} />
       )}
       <div className="flex flex-wrap gap-1.5">
         {['OPEN', 'ASSIGNED'].includes(bd.status) && (

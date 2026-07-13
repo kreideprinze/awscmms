@@ -46,6 +46,21 @@
   - **Corrective + Inspection + AWS/Predictive** WOs: technician can close directly (no admin approval).
   - **Preventive (PM) + RCA** WOs: technician completes → `PENDING_ADMIN_CLOSURE` → admin closes.
 
+- **Task transfer & assignment (NEW, current)**:
+  - **Assigned tasks (WO/PM/Breakdown)** can be **transferred** to another technician.
+  - **Transfer governance**: the **current assignee** *or* an **admin** may transfer/reassign.
+  - **Unassigned tasks** must present BOTH:
+    - **Claim for Me** (tech self-claim)
+    - **Assign To…** (direct assignment to another technician)
+
+- **RCA exception (NEW, current)**:
+  - RCA work orders are **strictly locked** to the technician who closed the triggering breakdown (> threshold downtime).
+  - RCA tasks **cannot** be transferred, unassigned, or claimed (even by admins).
+
+- **Immediate RCA completion flow (NEW, current)**:
+  - When a breakdown is closed and downtime exceeds threshold (default 30 min), the **5-Why RCA form must open immediately in-flow**.
+  - If the user dismisses the immediate RCA popup, the RCA **remains as a locked pending task** assigned to that technician (prevents data loss).
+
 - **AWS / Predictive Maintenance Engine** is per-category:
   - Track separate health/life pools per machine for **Mechanical / Electrical / PLC(Control)**.
   - Trigger threshold is **admin-configurable** (default 80%) via `predictive_trigger_pct`.
@@ -429,23 +444,95 @@
 
 ---
 
+### Phase Z — Feature: Task Transfer + Immediate RCA Flow (P0)
+**Status:** ✅ IMPLEMENTED — **PENDING FULL REGRESSION TESTING**
+
+#### Z1) Backend: transfer/assign/claim governance + RCA locks
+- ✅ Work Orders (`PUT /api/work-orders/{id}`):
+  - `action:'assign'` doubles as **Assign** (unassigned) and **Transfer** (assigned).
+  - Transfer governance enforced: **current assignee OR admin**.
+  - Unassigned claim: `action:'claim'` assigns to the acting technician.
+  - ✅ RCA lock: `wo_type='RCA'` rejects `assign` and `claim` with explicit error.
+  - ✅ Timeline + notifications emitted:
+    - `wo_assigned` for first assignment
+    - `wo_transferred` for transfers
+- ✅ PM tasks (`POST /api/pm-tasks/{task_id}/claim`):
+  - Supports **self-claim**, **direct assign**, and **transfer**.
+  - Transfer governance enforced: **current assignee OR admin**.
+  - Emits `pm_assigned` and `pm_transferred` timeline/notification events.
+- ✅ Breakdowns (`PUT /api/breakdowns/{id}`):
+  - Added parity actions: `assign` and `claim` (unassigned claim = self).
+  - Transfer governance: **current assignee OR admin**.
+  - Emits `breakdown_assigned` and `breakdown_transferred` events.
+- ✅ Breakdown close response now includes immediate RCA metadata:
+  - `rca_required`, `rca_task_id`, `rca_assigned_to`
+
+#### Z2) Frontend: transfer/assign/claim UI parity
+- ✅ Shared components (`/app/frontend/src/components/Shared.jsx`):
+  - Enhanced `TechnicianSelect`:
+    - `exclude` prop (avoid selecting current assignee)
+    - `placeholder` prop
+  - New `TransferControl` component (dropdown + Transfer button)
+- ✅ Work Order popout (`WorkOrderModal.jsx`):
+  - Unassigned tasks show BOTH:
+    - **Claim for Me** (tech)
+    - **Assign To…** (tech/admin)
+  - Assigned tasks show **Transfer To…** (current assignee/admin)
+  - RCA work orders show **locked** banner and do not show transfer/claim controls
+- ✅ PM list (`PreventiveMaintenance.jsx`):
+  - Unassigned tasks show **Claim for Me** + **Assign To…**
+  - Assigned tasks show inline **Transfer To…** (assignee/admin)
+- ✅ Breakdown actions (Machine Drawer `BreakdownActions`):
+  - Unassigned breakdowns show **Claim for Me** + **Assign To…** for technicians
+  - Assigned breakdowns show **Transfer To…** (assignee/admin)
+
+#### Z3) Immediate RCA in-flow popup
+- ✅ `RcaForm.jsx` refactored:
+  - Extracted reusable `RcaFormBody` component
+  - Displays a **Locked-to** badge and a special **immediate** banner
+- ✅ `RepairBreakdown.jsx` updated:
+  - On breakdown completion, if API returns `rca_required=true`, opens an **in-flow dialog** embedding `RcaFormBody` immediately.
+  - Dismissal keeps RCA **pending and locked** (toast warning + navigation back).
+
+#### Z4) Verification evidence
+- ✅ Backend verified via scripted checks:
+  - `/app/tests/test_transfer_flow.py` (WO claim/transfer, PM transfer, Breakdown claim/transfer, RCA lock, immediate RCA response fields)
+- ✅ Frontend build compiles.
+- ✅ Visual spot-check: PM page shows Claim/Assign/Transfer controls.
+
+**Phase Z Testing**
+- ⏳ Run full testing agent (backend + frontend) and produce a new iteration report.
+
+---
+
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ All major roadmap phases completed (Q/T/U/V/W/X/Y).
+- ⏳ Run testing agent (backend + frontend) for Phase Z regressions.
+- ⏳ Fix any issues surfaced (focus: dialog state, role gating, tech lists, transfer governance UX).
+- ⏳ Add screenshot verification for:
+  - WO modal: unassigned claim+assign and assigned transfer
+  - Breakdown actions: claim/assign/transfer
+  - Repair page: immediate RCA dialog opening and completion
 
 ### Validation evidence (P0)
 - Current test reports:
   - `/app/test_reports/iteration_9.json` — Backend verification **100%**.
   - `/app/test_reports/iteration_11.json` — PDF Corrections Part 4 regression **100%**.
+- New evidence to generate:
+  - `/app/test_reports/iteration_12.json` — Phase Z regression (backend + frontend)
 
 ### Optional hardening / Refactor (P1)
-- Consolidate hierarchy selectors and fuzzy pickers into shared hooks/components.
+- Consolidate task governance UI patterns into shared helpers (unassigned/assigned logic).
 - Add E2E regression tests for deep-links:
   - `?wo=<id>` (WO modal)
   - `?bd=<id>` (Breakdowns expand + highlight)
   - `?warning=<id>` (Warnings open exact dialog)
   - `?task=<id>` (PM row highlight)
+- Add E2E tests for:
+  - transfer governance (only assignee/admin)
+  - RCA lock enforcement
+  - immediate RCA popup triggering on >threshold closure
 - Add/verify MongoDB indexes for large plants if latency observed.
 - Add an “Operational data health” admin page (optional): counts, recompute buttons, stuck states.
 
@@ -472,13 +559,17 @@
 - ✅ Closure branching:
   - Corrective + Inspection + AWS/Predictive close directly by technician.
   - PM/RCA require admin closure.
+- ✅ **Transfer/Assignment parity**:
+  - Unassigned shows **Claim for Me** + **Assign To…**
+  - Assigned supports **Transfer To…** (assignee/admin only)
+- ✅ **RCA lock** enforced: cannot claim/assign/transfer.
 
 ### Breakdowns + Governance
 - ✅ Unassigned breakdowns allowed.
 - ✅ Breakdowns cannot be closed without a technician on record:
   - tech auto-assigns on close
   - admin must select technician
-- ✅ Repair page contains mandatory Repairing Technician selection for admins when needed.
+- ✅ Breakdown claim/assign/transfer supported with governance.
 
 ### Preventive Maintenance (PM Tasks) + Governance
 - ✅ PM tasks can be created unassigned.
@@ -486,6 +577,12 @@
 - ✅ Unassigned PM tasks are visible to technicians and claimable.
 - ✅ Admins can assign technicians; technicians can claim.
 - ✅ PM assignment syncs to open PM work orders.
+- ✅ PM transfer supported with governance.
+
+### Immediate RCA Flow (NEW)
+- ✅ Closing a >threshold breakdown returns `rca_required` + `rca_task_id`.
+- ✅ Repair flow immediately pops **embedded 5-Why RCA form** in the same user journey.
+- ✅ Dismissal keeps the RCA as a **locked pending** task assigned to the closing technician.
 
 ### AWS / Predictive
 - ✅ Backend per-category health pools (Mechanical/Electrical/PLC) computed independently.

@@ -236,7 +236,7 @@ async def get_breakdown(bd_id: str, user: dict = Depends(get_current_user)):
 
 
 class BreakdownUpdate(BaseModel):
-    action: str  # assign | start | complete | close | update
+    action: str  # assign | claim | start | complete | close | update
     assigned_to: Optional[str] = None
     root_cause: Optional[str] = None
     action_taken: Optional[str] = None
@@ -275,23 +275,46 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
         return {'ok': True}
 
-    if req.action == 'assign':
-        if not req.assigned_to:
-            raise HTTPException(status_code=400, detail='assigned_to required')
-        updates = {'status': 'ASSIGNED', 'assigned_to': req.assigned_to}
+    if req.action in ('assign', 'claim'):
+        prev = bd.get('assigned_to')
+        if req.assigned_to:
+            # Direct assignment ("Assign To...") or TRANSFER of an already-assigned breakdown.
+            # Transfer governance: only the current holder or an admin may transfer.
+            assignee = await _validate_technician(req.assigned_to)
+            if prev and user.get('role') == 'technician' and user['username'] != prev:
+                raise HTTPException(status_code=403, detail=f'Only {prev} (current assignee) or an admin can transfer this breakdown')
+            if prev == assignee:
+                raise HTTPException(status_code=400, detail=f"{bd['ticket_number']} is already assigned to {assignee}")
+        elif user.get('role') == 'technician':
+            # "Claim for Me" — only valid while the breakdown is unassigned
+            if prev:
+                raise HTTPException(status_code=400, detail=f"{bd['ticket_number']} is already assigned to {prev} — use transfer instead")
+            assignee = user['username']
+        else:
+            raise HTTPException(status_code=400, detail='assigned_to required — admins assign a technician from the dropdown')
+        updates = {'status': bd['status'] if bd['status'] == 'IN_PROGRESS' else 'ASSIGNED', 'assigned_to': assignee}
         await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
-        # SYNC: assigning the breakdown also assigns its linked (still-open, unassigned) work order
+        # SYNC: assigning the breakdown also assigns its linked (non-RCA, still-open) work order
         if bd.get('work_order_id'):
             await db.work_orders.update_one(
-                {'id': bd['work_order_id'], 'status': {'$in': ['OPEN', 'ASSIGNED']}},
-                {'$set': {'status': 'ASSIGNED', 'assigned_to': req.assigned_to}})
-        await create_timeline_event('breakdown_assigned', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
-                                    title=f"{bd['ticket_number']} assigned to {req.assigned_to}", user=user['username'],
-                                    reference_id=bd_id, reference_type='breakdown', department=bd['department'], line=bd['line'])
-        await create_notification('breakdown', f"Breakdown Assigned: {bd['machine_name']}",
-                                  f"{bd['ticket_number']} assigned to {req.assigned_to}", severity='info',
-                                  machine_id=bd['machine_id'], machine_name=bd['machine_name'], reference_id=bd_id, reference_type='breakdown')
-        return {'ok': True, 'status': 'ASSIGNED'}
+                {'id': bd['work_order_id'], 'status': {'$in': ['OPEN', 'ASSIGNED']}, 'wo_type': {'$ne': 'RCA'}},
+                {'$set': {'status': 'ASSIGNED', 'assigned_to': assignee}})
+        if prev:
+            await create_timeline_event('breakdown_transferred', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
+                                        title=f"{bd['ticket_number']} transferred from {prev} to {assignee}",
+                                        description=f"Transferred by {user['username']}", user=user['username'],
+                                        reference_id=bd_id, reference_type='breakdown', department=bd['department'], line=bd['line'])
+            await create_notification('breakdown', f"Breakdown Transferred: {bd['machine_name']}",
+                                      f"{bd['ticket_number']} transferred from {prev} to {assignee} by {user['username']}", severity='info',
+                                      machine_id=bd['machine_id'], machine_name=bd['machine_name'], reference_id=bd_id, reference_type='breakdown')
+        else:
+            await create_timeline_event('breakdown_assigned', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
+                                        title=f"{bd['ticket_number']} assigned to {assignee}", user=user['username'],
+                                        reference_id=bd_id, reference_type='breakdown', department=bd['department'], line=bd['line'])
+            await create_notification('breakdown', f"Breakdown Assigned: {bd['machine_name']}",
+                                      f"{bd['ticket_number']} assigned to {assignee}", severity='info',
+                                      machine_id=bd['machine_id'], machine_name=bd['machine_name'], reference_id=bd_id, reference_type='breakdown')
+        return {'ok': True, 'status': updates['status'], 'assigned_to': assignee}
 
     if req.action == 'start':
         updates = {'status': 'IN_PROGRESS', 'repair_started_at': now_iso()}
@@ -415,7 +438,12 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         # reliability recompute (starts immediately after first breakdown)
         from reliability import recompute_machine_reliability
         await recompute_machine_reliability(bd['machine_id'], trigger='breakdown_closed')
-        return {'ok': True, 'status': new_status, 'downtime_minutes': downtime}
+        # IMMEDIATE RCA FLOW: when this closure just auto-triggered a 5-Why RCA, tell the
+        # frontend so it can pop the RCA form in-flow for the closing technician.
+        new_rca_id = updates.get('rca_task_id')
+        return {'ok': True, 'status': new_status, 'downtime_minutes': downtime,
+                'rca_required': bool(new_rca_id), 'rca_task_id': new_rca_id,
+                'rca_assigned_to': closing_tech if new_rca_id else None}
 
     raise HTTPException(status_code=400, detail='Invalid action')
 
@@ -510,17 +538,53 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
     if not wo:
         raise HTTPException(status_code=404, detail='Work order not found')
 
+    # RCA LOCK: an RCA task is exclusively bound to the technician who closed the
+    # triggering breakdown. It can NEVER be transferred, reassigned, claimed or left
+    # unassigned — not even by admins. If that technician is unavailable it stays
+    # pending under their name. (Escalation path intentionally out of scope for now.)
+    if req.action in ('assign', 'claim') and wo.get('wo_type') == 'RCA':
+        raise HTTPException(status_code=400,
+                            detail='RCA tasks are locked to the technician who closed the triggering breakdown and cannot be claimed, transferred or reassigned')
+
     if req.action == 'assign':
         if not req.assigned_to:
             raise HTTPException(status_code=400, detail='assigned_to required')
-        await db.work_orders.update_one({'id': wo_id}, {'$set': {'status': 'ASSIGNED', 'assigned_to': req.assigned_to}})
-        await create_notification('work_order', f"WO Assigned: {wo['machine_name']}",
-                                  f"{wo['wo_number']} assigned to {req.assigned_to}", severity='info',
-                                  machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
-        await create_timeline_event('wo_assigned', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
-                                    title=f"{wo['wo_number']} assigned to {req.assigned_to}", user=user['username'],
-                                    reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
-        return {'ok': True, 'status': 'ASSIGNED'}
+        assignee = await _validate_technician(req.assigned_to)
+        prev = wo.get('assigned_to')
+        # Transfer governance: an already-assigned task can only be transferred by its
+        # CURRENT HOLDER or an admin. Unassigned tasks can be assigned by any tech/admin.
+        if prev and user.get('role') == 'technician' and user['username'] != prev:
+            raise HTTPException(status_code=403, detail=f'Only {prev} (current assignee) or an admin can transfer this work order')
+        if prev == assignee:
+            raise HTTPException(status_code=400, detail=f'{wo["wo_number"]} is already assigned to {assignee}')
+        updates = {'assigned_to': assignee}
+        if wo.get('status') == 'OPEN':
+            updates['status'] = 'ASSIGNED'
+        await db.work_orders.update_one({'id': wo_id}, {'$set': updates})
+        # SYNC: linked PM task / origin breakdown follow the work order's technician
+        if wo.get('pm_task_id'):
+            await db.pm_tasks.update_one({'id': wo['pm_task_id']}, {'$set': {'assigned_to': assignee}})
+        if wo.get('source_breakdown_id'):
+            await db.breakdowns.update_one(
+                {'id': wo['source_breakdown_id'], 'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS']}},
+                {'$set': {'assigned_to': assignee}})
+        if prev:
+            # technician-to-technician (or admin-driven) TRANSFER — full audit trail
+            await create_notification('work_order', f"WO Transferred: {wo['machine_name']}",
+                                      f"{wo['wo_number']} transferred from {prev} to {assignee} by {user['username']}", severity='info',
+                                      machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
+            await create_timeline_event('wo_transferred', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                        title=f"{wo['wo_number']} transferred from {prev} to {assignee}",
+                                        description=f"Transferred by {user['username']}", user=user['username'],
+                                        reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
+        else:
+            await create_notification('work_order', f"WO Assigned: {wo['machine_name']}",
+                                      f"{wo['wo_number']} assigned to {assignee} by {user['username']}", severity='info',
+                                      machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
+            await create_timeline_event('wo_assigned', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                        title=f"{wo['wo_number']} assigned to {assignee}", user=user['username'],
+                                        reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
+        return {'ok': True, 'status': updates.get('status', wo.get('status')), 'assigned_to': assignee}
 
     if req.action == 'claim':
         # Any technician (or admin) can claim an unassigned work order from the Kanban board
@@ -909,28 +973,50 @@ class PMClaim(BaseModel):
 
 @router.post('/pm-tasks/{task_id}/claim')
 async def claim_pm_task(task_id: str, req: PMClaim, user: dict = Depends(require_admin_or_tech)):
-    """Assign an unassigned (or re-assign an existing) PM task.
-    Governance mirrors Work Orders: TECHNICIANS self-assign (claim);
-    ADMINS must pick a technician explicitly (no admin self-claim).
+    """Assign, claim or TRANSFER a PM task. Governance mirrors Work Orders:
+    - Unassigned + technician + no assigned_to  -> self-claim ("Claim for Me")
+    - Unassigned + assigned_to provided         -> direct assignment ("Assign To...")
+    - Already assigned + assigned_to provided   -> TRANSFER — only the current holder
+      or an admin may transfer; full audit trail on the timeline.
+    Admins must always pick a technician explicitly (no admin self-claim).
     Any open work order generated from this PM follows the assignment."""
     task = await db.pm_tasks.find_one({'id': task_id}, {'_id': 0})
     if not task:
         raise HTTPException(status_code=404, detail='PM task not found')
-    if user.get('role') == 'technician':
+    prev = task.get('assigned_to')
+    if req.assigned_to:
+        assignee = await _validate_technician(req.assigned_to)
+        # Transfer governance: an assigned PM can only be moved by its current holder or an admin
+        if prev and user.get('role') == 'technician' and user['username'] != prev:
+            raise HTTPException(status_code=403, detail=f'Only {prev} (current assignee) or an admin can transfer this PM task')
+        if prev == assignee:
+            raise HTTPException(status_code=400, detail=f'PM task is already assigned to {assignee}')
+    elif user.get('role') == 'technician':
+        if prev:
+            raise HTTPException(status_code=400, detail=f'PM task is already assigned to {prev} — use transfer instead')
         assignee = user['username']
     else:
-        assignee = await _validate_technician(req.assigned_to)
-        if not assignee:
-            raise HTTPException(status_code=400, detail='assigned_to required — admins assign a technician from the dropdown')
+        raise HTTPException(status_code=400, detail='assigned_to required — admins assign a technician from the dropdown')
     await db.pm_tasks.update_one({'id': task_id}, {'$set': {'assigned_to': assignee}})
     # SYNC: open PM work orders for this task inherit the assignment
     await db.work_orders.update_many(
-        {'pm_task_id': task_id, 'status': {'$in': ['OPEN', 'ASSIGNED']}},
+        {'pm_task_id': task_id, 'status': {'$in': ['OPEN', 'ASSIGNED']}, 'wo_type': {'$ne': 'RCA'}},
         {'$set': {'assigned_to': assignee, 'status': 'ASSIGNED'}})
-    await create_timeline_event('pm_assigned', machine_id=task['machine_id'], machine_name=task['machine_name'],
-                                title=f"PM \u201c{task['task_name']}\u201d assigned to {assignee}",
-                                user=user['username'], reference_id=task_id, reference_type='pm_task',
-                                department=task.get('department'), line=task.get('line'))
+    if prev:
+        await create_timeline_event('pm_transferred', machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                    title=f"PM \u201c{task['task_name']}\u201d transferred from {prev} to {assignee}",
+                                    description=f"Transferred by {user['username']}",
+                                    user=user['username'], reference_id=task_id, reference_type='pm_task',
+                                    department=task.get('department'), line=task.get('line'))
+        await create_notification('pm', f"PM Transferred: {task['machine_name']}",
+                                  f"PM \u201c{task['task_name']}\u201d transferred from {prev} to {assignee} by {user['username']}",
+                                  severity='info', machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                  reference_id=task_id, reference_type='pm_task')
+    else:
+        await create_timeline_event('pm_assigned', machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                    title=f"PM \u201c{task['task_name']}\u201d assigned to {assignee}",
+                                    user=user['username'], reference_id=task_id, reference_type='pm_task',
+                                    department=task.get('department'), line=task.get('line'))
     return {'ok': True, 'assigned_to': assignee}
 
 

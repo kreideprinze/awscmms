@@ -1,14 +1,16 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, Timer } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Timer, GitBranch } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { LifecycleBadge, TypeBadge, fmtDate, CrackedGear } from '@/components/StatusBits';
 import { SpareRows, DateTimeField, TechnicianSelect, toLocalInput, toIsoUtc } from '@/components/Shared';
+import { RcaFormBody } from '@/pages/RcaForm';
 
 function Elapsed({ since }) {
   const [now, setNow] = useState(Date.now());
@@ -36,6 +38,10 @@ export default function RepairBreakdown() {
   const [startT, setStartT] = useState('');
   const [endT, setEndT] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // IMMEDIATE RCA FLOW: when closure downtime exceeds the threshold, the backend
+  // returns the freshly created RCA task id — we pop the 5-Why form right here,
+  // in-flow, for the closing technician (it stays locked to them regardless).
+  const [rcaTaskId, setRcaTaskId] = useState(null);
 
   const load = useCallback(() => {
     api.get(`/breakdowns/${breakdownId}`).then((r) => {
@@ -50,10 +56,10 @@ export default function RepairBreakdown() {
   const act = async (payload, msg) => {
     setSubmitting(true);
     try {
-      await api.put(`/breakdowns/${bd.id}`, payload);
+      const res = await api.put(`/breakdowns/${bd.id}`, payload);
       toast.success(msg);
       load();
-      return true;
+      return res.data || true;
     } catch (e) {
       toast.error(errMsg(e));
       return false;
@@ -71,7 +77,7 @@ export default function RepairBreakdown() {
       toast.error('Select the technician who performed this repair before completing');
       return;
     }
-    const ok = await act({
+    const res = await act({
       action: 'complete',
       action_taken: actionTaken,
       assigned_to: bd.assigned_to ? undefined : (assignTech || undefined),
@@ -79,7 +85,23 @@ export default function RepairBreakdown() {
       end_time: endT ? toIsoUtc(endT) : undefined,
       consumed_spares: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
     }, 'Repair completed — machine restored');
-    if (ok) navigate('/breakdowns');
+    if (!res) return;
+    if (res.rca_required && res.rca_task_id) {
+      // Downtime exceeded the RCA threshold — the 5-Why form pops up IMMEDIATELY,
+      // in-flow, instead of leaving a task to be found later on the board.
+      toast.warning(`Downtime ${Math.round(res.downtime_minutes)} min exceeded the RCA threshold — complete the 5-Why analysis now`);
+      setRcaTaskId(res.rca_task_id);
+    } else {
+      navigate('/breakdowns');
+    }
+  };
+
+  const dismissRca = () => {
+    // Dismissing does NOT unassign anything — the RCA remains a locked pending
+    // task under the closing technician's name until they complete it.
+    setRcaTaskId(null);
+    toast.warning('RCA is still pending — it stays locked to you until the 5-Why analysis is completed');
+    navigate('/breakdowns');
   };
 
   if (notFound) {
@@ -192,6 +214,23 @@ export default function RepairBreakdown() {
           {!bd.root_cause && !bd.action_taken && <div className="text-sm text-muted-foreground">No repair details recorded.</div>}
         </div>
       )}
+
+      {/* IMMEDIATE 5-Why RCA — pops up right after a >threshold breakdown closure.
+          Dismissing keeps the RCA pending & locked to the closing technician. */}
+      <Dialog open={!!rcaTaskId} onOpenChange={(v) => { if (!v) dismissRca(); }}>
+        <DialogContent data-testid="immediate-rca-dialog" className="max-h-[88vh] max-w-2xl overflow-y-auto border-[#ff2e63]/40 bg-[hsl(var(--panel-1))]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitBranch className="h-5 w-5 text-[#ff2e63]" />
+              <span className="text-[#ff2e63]">5-Why RCA Required — Complete Now</span>
+            </DialogTitle>
+          </DialogHeader>
+          {rcaTaskId && (
+            <RcaFormBody woId={rcaTaskId} immediate
+              onDone={() => { setRcaTaskId(null); navigate('/breakdowns'); }} />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

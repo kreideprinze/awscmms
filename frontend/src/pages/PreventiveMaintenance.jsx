@@ -64,7 +64,7 @@ export default function PreventiveMaintenance() {
   const claim = async (task, assignedTo) => {
     try {
       const r = await api.post(`/pm-tasks/${task.id}/claim`, assignedTo ? { assigned_to: assignedTo } : {});
-      toast.success(`PM "${task.task_name}" assigned to ${r.data.assigned_to}`);
+      toast.success(`PM "${task.task_name}" ${task.assigned_to ? 'transferred' : 'assigned'} to ${r.data.assigned_to}`);
       load();
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -170,20 +170,37 @@ export default function PreventiveMaintenance() {
                   <TableCell><CritBadge level={t.priority} /></TableCell>
                   <TableCell className={`font-mono text-xs ${t.next_due_date < today && t.active ? 'text-[#ff2e63]' : ''}`}>{t.next_due_date}</TableCell>
                   <TableCell className="text-sm">
-                    {t.assigned_to ? t.assigned_to : (
+                    {t.assigned_to ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span data-testid={`pm-assigned-${t.id}`}>{t.assigned_to}</span>
+                        {/* Transfer: current holder or admin hands the PM to another technician */}
+                        {t.active !== false && (isAdmin || t.assigned_to === user?.username) && (
+                          <div className="w-40" data-testid={`pm-transfer-wrap-${t.id}`}>
+                            <TechnicianSelect value="" onChange={(v) => v && claim(t, v)} exclude={t.assigned_to}
+                              testId={`pm-transfer-select-${t.id}`} placeholder="Transfer To…" />
+                          </div>
+                        )}
+                      </div>
+                    ) : (
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="border border-[#f9f871]/50 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-[#f9f871]" data-testid={`pm-unassigned-${t.id}`}>Unassigned</span>
-                        {t.active !== false && (isTechRole ? (
-                          <Button size="sm" data-testid={`pm-claim-${t.id}`}
-                            className="h-6 border border-[#f9f871]/60 bg-transparent px-1.5 text-[10px] text-[#f9f871] hover:bg-[#f9f871]/10"
-                            onClick={() => claim(t)}>
-                            <Hand className="mr-0.5 h-2.5 w-2.5" /> Claim
-                          </Button>
-                        ) : isAdmin ? (
-                          <div className="w-40" data-testid={`pm-assign-wrap-${t.id}`}>
-                            <TechnicianSelect value="" onChange={(v) => v && claim(t, v)} testId={`pm-assign-select-${t.id}`} />
-                          </div>
-                        ) : null)}
+                        {t.active !== false && (
+                          <>
+                            {/* Technicians: claim it OR assign a colleague. Admins: dropdown only (no self-claim). */}
+                            {isTechRole && (
+                              <Button size="sm" data-testid={`pm-claim-${t.id}`}
+                                className="h-6 border border-[#f9f871]/60 bg-transparent px-1.5 text-[10px] text-[#f9f871] hover:bg-[#f9f871]/10"
+                                onClick={() => claim(t)}>
+                                <Hand className="mr-0.5 h-2.5 w-2.5" /> Claim for Me
+                              </Button>
+                            )}
+                            {(isTechRole || isAdmin) && (
+                              <div className="w-40" data-testid={`pm-assign-wrap-${t.id}`}>
+                                <TechnicianSelect value="" onChange={(v) => v && claim(t, v)} testId={`pm-assign-select-${t.id}`} placeholder="Assign To…" />
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
                   </TableCell>

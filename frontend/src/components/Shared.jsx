@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, ArrowRightLeft } from 'lucide-react';
 
 // ISO <-> datetime-local helpers (local timezone aware)
 export const toLocalInput = (iso) => {
@@ -171,7 +171,7 @@ export function SpareRows({ rows, setRows }) {
   );
 }
 
-export function TechnicianSelect({ value, onChange, testId = 'technician-select', allowNone = false }) {
+export function TechnicianSelect({ value, onChange, testId = 'technician-select', allowNone = false, exclude, placeholder }) {
   const [techs, setTechs] = useState([]);
   useEffect(() => {
     api.get('/users/technicians').then((r) => setTechs((r.data || []).filter((t) => t.role === 'technician'))).catch(() => {});
@@ -179,15 +179,40 @@ export function TechnicianSelect({ value, onChange, testId = 'technician-select'
   return (
     <Select value={value || (allowNone ? 'none' : '')} onValueChange={(v) => onChange(allowNone && v === 'none' ? '' : v)}>
       <SelectTrigger className="bg-[hsl(var(--panel-2))]" data-testid={testId}>
-        <SelectValue placeholder={allowNone ? 'Unassigned — any technician can claim' : 'Select technician'} />
+        <SelectValue placeholder={placeholder || (allowNone ? 'Unassigned — any technician can claim' : 'Select technician')} />
       </SelectTrigger>
       <SelectContent>
         {allowNone && <SelectItem value="none">Unassigned — any technician can claim</SelectItem>}
-        {techs.map((t) => (
+        {techs.filter((t) => t.username !== exclude).map((t) => (
           <SelectItem key={t.id} value={t.username}>{t.name} ({t.username})</SelectItem>
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+// Transfer an assigned task to another technician — shared by the WO modal,
+// PM table and breakdown views. Governance is enforced server-side (current
+// holder or admin only); RCA tasks reject transfers entirely.
+export function TransferControl({ current, onTransfer, testId = 'transfer-control', label = 'Transfer To' }) {
+  const [tech, setTech] = useState('');
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (!tech) return;
+    setBusy(true);
+    try { await onTransfer(tech); setTech(''); } finally { setBusy(false); }
+  };
+  return (
+    <div className="flex w-full flex-wrap items-center gap-2" data-testid={testId} onClick={(e) => e.stopPropagation()}>
+      <div className="min-w-[200px] flex-1">
+        <TechnicianSelect value={tech} onChange={setTech} exclude={current} testId={`${testId}-select`} placeholder={`${label}…`} />
+      </div>
+      <Button size="sm" disabled={!tech || busy} data-testid={`${testId}-btn`}
+        className="h-9 border border-[hsl(var(--primary))]/60 bg-transparent text-xs text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 disabled:opacity-40"
+        onClick={go}>
+        <ArrowRightLeft className="mr-1 h-3 w-3" /> {busy ? 'Transferring…' : 'Transfer'}
+      </Button>
+    </div>
   );
 }
 

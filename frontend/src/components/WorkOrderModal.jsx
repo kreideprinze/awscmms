@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
-import { SpareRows, DateTimeField, TechnicianSelect, toLocalInput, toIsoUtc } from '@/components/Shared';
+import { SpareRows, DateTimeField, TechnicianSelect, TransferControl, toLocalInput, toIsoUtc } from '@/components/Shared';
 
 // Closure governance (mirrors backend ADMIN_CLOSURE_TYPES):
 //   Corrective / Inspection / Predictive (AWS) — technician closes DIRECTLY
@@ -128,7 +128,7 @@ export function WorkOrderModal() {
     try {
       await api.put(`/work-orders/${wo.id}`, { action, ...extra });
       const msg = action === 'claim' ? `claimed by ${user.username}`
-        : action === 'assign' ? `assigned to ${extra.assigned_to}`
+        : action === 'assign' ? `${wo.assigned_to ? 'transferred' : 'assigned'} to ${extra.assigned_to}`
         : `${action}ed`;
       toast.success(`${wo.wo_number} ${msg}`);
       await refresh();
@@ -287,25 +287,43 @@ export function WorkOrderModal() {
           {/* Workflow actions — role + type aware */}
           {!completing && (
             <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-              {isUnassigned && (isAdmin ? (
-                /* Admins assign a technician explicitly — no self-claim */
-                <div className="flex w-full flex-wrap items-center gap-2" data-testid="wo-detail-assign-row">
-                  <div className="min-w-[220px] flex-1">
-                    <TechnicianSelect value={assignTech} onChange={setAssignTech} testId="wo-detail-assign-select" />
-                  </div>
-                  <Button size="sm" disabled={!assignTech} data-testid="wo-detail-assign-btn"
-                    className="h-9 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40"
-                    onClick={() => act('assign', { assigned_to: assignTech })}>
-                    Assign Technician
-                  </Button>
-                </div>
+              {isUnassigned && (wo.wo_type === 'RCA' ? (
+                <span className="text-[10px] text-[#ff2e63]" data-testid="wo-detail-rca-unassignable">RCA tasks cannot be claimed or assigned — locked to the closing technician</span>
               ) : (
-                <Button size="sm" data-testid="wo-detail-claim-btn"
-                  className="h-7 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10"
-                  onClick={() => act('claim')}>
-                  <Hand className="mr-1 h-3 w-3" /> Claim (assign to me)
-                </Button>
+                <div className="w-full space-y-2" data-testid="wo-detail-assign-row">
+                  {/* Technicians get BOTH options: claim it themselves OR hand it to a colleague.
+                      Admins must pick a technician from the dropdown (no self-claim). */}
+                  {!isAdmin && (
+                    <Button size="sm" data-testid="wo-detail-claim-btn"
+                      className="h-8 w-full border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10"
+                      onClick={() => act('claim')}>
+                      <Hand className="mr-1 h-3 w-3" /> Claim for Me
+                    </Button>
+                  )}
+                  <div className="flex w-full flex-wrap items-center gap-2">
+                    <div className="min-w-[220px] flex-1">
+                      <TechnicianSelect value={assignTech} onChange={setAssignTech} testId="wo-detail-assign-select" placeholder="Assign To…" />
+                    </div>
+                    <Button size="sm" disabled={!assignTech} data-testid="wo-detail-assign-btn"
+                      className="h-9 border border-[#f9f871]/60 bg-transparent text-xs text-[#f9f871] hover:bg-[#f9f871]/10 disabled:opacity-40"
+                      onClick={() => act('assign', { assigned_to: assignTech })}>
+                      Assign Technician
+                    </Button>
+                  </div>
+                </div>
               ))}
+              {/* Transfer: an assigned, still-active task can be handed to another technician
+                  by its CURRENT HOLDER or an admin. RCA tasks are locked — no transfer ever. */}
+              {!isUnassigned && wo.assigned_to && ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && (
+                wo.wo_type === 'RCA' ? (
+                  <span className="w-full border border-[#ff2e63]/40 bg-[#ff2e63]/5 px-2 py-1.5 text-[10px] text-[#ff2e63]" data-testid="wo-detail-rca-locked">
+                    RCA locked to {wo.assigned_to} — cannot be transferred or reassigned
+                  </span>
+                ) : (isAdmin || wo.assigned_to === user?.username) && (
+                  <TransferControl current={wo.assigned_to} testId="wo-detail-transfer"
+                    onTransfer={(t) => act('assign', { assigned_to: t })} />
+                )
+              )}
               {['OPEN', 'ASSIGNED'].includes(wo.status) && !isUnassigned && (
                 <Button size="sm" variant="outline" data-testid="wo-detail-start-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
                   onClick={() => act('start')}>Start</Button>
