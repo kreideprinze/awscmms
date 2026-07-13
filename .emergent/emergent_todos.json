@@ -17,22 +17,22 @@
   },
   {
     "content": "Frontend: WorkOrderModal - Transfer To / Claim for Me / Assign To controls, RCA locked",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Frontend: PM page - transfer/assign/claim controls",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: Breakdown views - transfer/assign/claim controls",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: Immediate RCA popup after >30min breakdown closure",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Run testing agent (backend + frontend)",
-    "status": "pending"
+    "status": "completed"
   }
 ]
