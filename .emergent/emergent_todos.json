@@ -1,38 +1,42 @@
 [
   {
-    "content": "Backend: PM claim endpoint - transfer governance + assign-to + transfer events",
-    "status": "completed"
+    "content": "kpi_engine.py: derive_line_day_rows helper + compute_line_kpis planned-based availability",
+    "status": "in_progress"
   },
   {
-    "content": "Backend: Breakdown assign action - claim/assign/transfer parity + governance + events",
-    "status": "completed"
+    "content": "routers_ops.py: runtime endpoints planned_hours model + CSV import",
+    "status": "pending"
   },
   {
-    "content": "Backend: Return rca_task_id in breakdown close response for immediate RCA popup",
-    "status": "completed"
+    "content": "reliability.py: run_hours_between uses planned - derived downtime (24/7 fallback)",
+    "status": "pending"
   },
   {
-    "content": "Backend verification via curl/python",
-    "status": "completed"
+    "content": "routers_ops.py analytics: run_hours/trend/failure_rate from new model",
+    "status": "pending"
   },
   {
-    "content": "Frontend: WorkOrderModal - Transfer To / Claim for Me / Assign To controls, RCA locked",
-    "status": "completed"
+    "content": "routers_core.py machine runtime summary from line model",
+    "status": "pending"
   },
   {
-    "content": "Frontend: PM page - transfer/assign/claim controls",
-    "status": "completed"
+    "content": "server.py: stop runtime_logs clock writes; routers_admin seeder update",
+    "status": "pending"
   },
   {
-    "content": "Frontend: Breakdown views - transfer/assign/claim controls",
-    "status": "completed"
+    "content": "Purge old runtime data (fresh start)",
+    "status": "pending"
   },
   {
-    "content": "Frontend: Immediate RCA popup after >30min breakdown closure",
-    "status": "completed"
+    "content": "Frontend Runtime.jsx: Planned Runtime input + derived display + clamp flag",
+    "status": "pending"
   },
   {
-    "content": "Run testing agent (backend + frontend)",
-    "status": "completed"
+    "content": "Backend verification (curl/python)",
+    "status": "pending"
+  },
+  {
+    "content": "Testing agent regression (backend + frontend)",
+    "status": "pending"
   }
 ]

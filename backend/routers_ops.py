@@ -39,81 +39,59 @@ async def reset_plant_clock(user: dict = Depends(require_admin)):
     return {'ok': True, 'started_at': ts}
 
 
-# ============ RUNTIME (LINE-LEVEL) ============
-# Runtime is logged PER LINE (one entry per line per day). Availability is computed from
-# line run hours vs calendar hours. Each machine in the line inherits the line runtime
-# (fanned out into runtime_logs) so per-machine Weibull/reliability computations keep working.
+# ============ RUNTIME (LINE-LEVEL, PLANNED-RUNTIME MODEL) ============
+# ONE manual value per Line × Date: planned_hours (scheduled production hours —
+# varies day to day, NOT a fixed 24h calendar constant). Downtime is derived LIVE
+# from that line's Breakdowns (Warnings never count). Availability =
+# ((Planned − Downtime) ÷ Planned) × 100, clamped at 0% with a `clamped`
+# data-quality flag. All derivation lives in kpi_engine (single source of truth).
 class RuntimeLogCreate(BaseModel):
-    line: Optional[str] = None       # line name (preferred entry mode)
-    machine_id: Optional[str] = None  # legacy per-machine entry (still accepted)
-    date: str  # YYYY-MM-DD
-    calendar_hours: float = 24.0
-    run_hours: float
+    line: str                 # line name (line-wise logging only — not machine-wise)
+    date: str                 # YYYY-MM-DD
+    planned_hours: float      # scheduled run hours for that line that day (0 < h <= 24)
 
 
-async def _fan_out_line_runtime(line_name, machines, date, cal_h, run_h, username, source='line'):
-    """Upsert a per-machine runtime log for every machine in the line (machines inherit line runtime)."""
-    dark = round(cal_h - run_h, 2)
+async def _recompute_line_reliability(line_name):
+    machines = await db.machines.find({'line': line_name}, {'_id': 0, 'id': 1}).to_list(2000)
+    from reliability import recompute_machine_reliability
     for m in machines:
-        log = {
-            'id': str(uuid.uuid4()), 'machine_id': m['id'], 'machine_name': m['name'],
-            'department': m['department'], 'line': m['line'], 'process_group': m.get('process_group'),
-            'date': date, 'calendar_hours': cal_h, 'run_hours': run_h,
-            'dark_hours': dark, 'availability': round(run_h / cal_h * 100, 1),
-            'entered_by': username, 'source': source, 'created_at': now_iso(),
-        }
-        await db.runtime_logs.update_one({'machine_id': m['id'], 'date': date}, {'$set': log}, upsert=True)
+        await recompute_machine_reliability(m['id'], trigger='runtime_log')
+    return len(machines)
 
 
 @router.post('/runtime-logs')
 async def create_runtime_log(req: RuntimeLogCreate, user: dict = Depends(require_admin)):
-    if req.run_hours < 0 or req.calendar_hours <= 0 or req.run_hours > req.calendar_hours:
-        raise HTTPException(status_code=400, detail='Invalid hours: run_hours must be 0..calendar_hours')
-    dark = round(req.calendar_hours - req.run_hours, 2)
-
-    if req.line:
-        machines = await db.machines.find({'line': req.line}, {'_id': 0}).to_list(2000)
-        if not machines:
-            raise HTTPException(status_code=404, detail=f'No machines found for line "{req.line}"')
-        line_log = {
-            'id': str(uuid.uuid4()), 'line': req.line, 'department': machines[0]['department'],
-            'date': req.date, 'calendar_hours': req.calendar_hours, 'run_hours': req.run_hours,
-            'dark_hours': dark, 'availability': round(req.run_hours / req.calendar_hours * 100, 1),
-            'machines_count': len(machines), 'entered_by': user['username'], 'source': 'manual', 'created_at': now_iso(),
-        }
-        await db.line_runtime_logs.update_one({'line': req.line, 'date': req.date}, {'$set': line_log}, upsert=True)
-        await _fan_out_line_runtime(req.line, machines, req.date, req.calendar_hours, req.run_hours, user['username'])
-        from reliability import recompute_machine_reliability
-        for m in machines:
-            await recompute_machine_reliability(m['id'], trigger='runtime_log')
-        line_log.pop('_id', None)
-        return line_log
-
-    # legacy per-machine entry (kept for compatibility)
-    if not req.machine_id:
-        raise HTTPException(status_code=400, detail='line (preferred) or machine_id is required')
-    machine = await db.machines.find_one({'id': req.machine_id}, {'_id': 0})
-    if not machine:
-        raise HTTPException(status_code=404, detail='Machine not found')
-    log = {
-        'id': str(uuid.uuid4()), 'machine_id': machine['id'], 'machine_name': machine['name'],
-        'department': machine['department'], 'line': machine['line'], 'process_group': machine.get('process_group'),
-        'date': req.date, 'calendar_hours': req.calendar_hours, 'run_hours': req.run_hours,
-        'dark_hours': dark, 'availability': round(req.run_hours / req.calendar_hours * 100, 1),
-        'entered_by': user['username'], 'source': 'manual', 'created_at': now_iso(),
+    if not (0 < req.planned_hours <= 24):
+        raise HTTPException(status_code=400, detail='planned_hours must be between 0 and 24')
+    try:
+        datetime.fromisoformat(req.date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail='Invalid date (use YYYY-MM-DD)')
+    machines_count = await db.machines.count_documents({'line': req.line})
+    if not machines_count:
+        raise HTTPException(status_code=404, detail=f'No machines found for line "{req.line}"')
+    line_log = {
+        'id': str(uuid.uuid4()), 'line': req.line, 'date': req.date,
+        'planned_hours': round(req.planned_hours, 2),
+        'machines_count': machines_count, 'entered_by': user['username'],
+        'source': 'manual', 'created_at': now_iso(), 'updated_at': now_iso(),
     }
-    # upsert per machine+date
-    await db.runtime_logs.update_one({'machine_id': machine['id'], 'date': req.date}, {'$set': log}, upsert=True)
-    await db.machines.update_one({'id': machine['id']}, {'$inc': {'total_run_hours': req.run_hours}})
-    from reliability import recompute_machine_reliability
-    await recompute_machine_reliability(machine['id'], trigger='runtime_log')
-    return log
+    m0 = await db.machines.find_one({'line': req.line}, {'_id': 0, 'department': 1})
+    line_log['department'] = (m0 or {}).get('department')
+    await db.line_runtime_logs.update_one({'line': req.line, 'date': req.date}, {'$set': line_log}, upsert=True)
+    await _recompute_line_reliability(req.line)
+    # respond with the fully derived row (downtime/run/availability computed live)
+    from kpi_engine import derive_line_day_rows
+    rows = await derive_line_day_rows(logs=[line_log])
+    return rows[0]
 
 
 @router.get('/line-runtime-logs')
 async def list_line_runtime_logs(line: Optional[str] = None, date_from: Optional[str] = None,
                                  date_to: Optional[str] = None, limit: int = Query(500, le=5000), skip: int = 0,
                                  user: dict = Depends(get_current_user)):
+    """Logged line-days with LIVE-derived figures: downtime (from breakdowns only),
+    effective run hours, availability (clamped at 0%) and the `clamped` data-quality flag."""
     q = {}
     if line:
         q['line'] = line
@@ -125,52 +103,38 @@ async def list_line_runtime_logs(line: Optional[str] = None, date_from: Optional
             q['date']['$lte'] = date_to
     total = await db.line_runtime_logs.count_documents(q)
     items = await db.line_runtime_logs.find(q, {'_id': 0}).sort('date', -1).skip(skip).limit(limit).to_list(limit)
-    return {'items': items, 'total': total}
+    from kpi_engine import derive_line_day_rows
+    rows = await derive_line_day_rows(logs=items)
+    return {'items': rows, 'total': total}
 
 
 @router.delete('/line-runtime-logs')
 async def delete_line_runtime_log(line: str, date: str, user: dict = Depends(require_admin)):
-    """Admin-only: remove a line runtime entry AND its fanned-out per-machine logs for that day."""
+    """Admin-only: remove a planned-runtime entry (the day reverts to unlogged)."""
     existing = await db.line_runtime_logs.find_one({'line': line, 'date': date}, {'_id': 0})
     if not existing:
         raise HTTPException(status_code=404, detail='Line runtime entry not found')
     await db.line_runtime_logs.delete_one({'line': line, 'date': date})
-    machines = await db.machines.find({'line': line}, {'_id': 0, 'id': 1}).to_list(2000)
-    mids = [m['id'] for m in machines]
-    res = await db.runtime_logs.delete_many({'machine_id': {'$in': mids}, 'date': date, 'source': {'$in': ['line', 'csv_import']}})
-    from reliability import recompute_machine_reliability
-    for mid in mids:
-        await recompute_machine_reliability(mid, trigger='runtime_delete')
-    await create_timeline_event('runtime_deleted', title=f'Line runtime removed: {line} {date}',
-                                description=f'{res.deleted_count} machine logs removed', user=user['username'])
-    return {'ok': True, 'machine_logs_removed': res.deleted_count}
+    n = await _recompute_line_reliability(line)
+    await create_timeline_event('runtime_deleted', title=f'Planned runtime removed: {line} {date}',
+                                description=f'{n} machines recomputed', user=user['username'])
+    return {'ok': True, 'machines_recomputed': n}
 
 
 @router.get('/runtime-logs')
 async def list_runtime_logs(machine_id: Optional[str] = None, line: Optional[str] = None,
                             date_from: Optional[str] = None, date_to: Optional[str] = None,
                             limit: int = Query(500, le=5000), skip: int = 0, user: dict = Depends(get_current_user)):
-    q = {}
-    if machine_id:
-        q['machine_id'] = machine_id
-    if line:
-        q['line'] = line
-    if date_from or date_to:
-        q['date'] = {}
-        if date_from:
-            q['date']['$gte'] = date_from
-        if date_to:
-            q['date']['$lte'] = date_to
-    total = await db.runtime_logs.count_documents(q)
-    items = await db.runtime_logs.find(q, {'_id': 0}).sort('date', -1).skip(skip).limit(limit).to_list(limit)
-    for it in items:  # auto-accumulated logs compute availability on read
-        cal = it.get('calendar_hours') or 0
-        run = it.get('run_hours') or 0
-        it['calendar_hours'] = round(cal, 2)
-        it['run_hours'] = round(run, 2)
-        it['dark_hours'] = round(it.get('dark_hours') or (cal - run), 2)
-        it['availability'] = it.get('availability') if it.get('source') in ('manual', 'csv_import') else (round(run / cal * 100, 1) if cal else 0)
-    return {'items': items, 'total': total}
+    """Machine-scoped view of the planned-runtime model. Machines inherit their LINE's
+    logged days (runtime is line-wise by design); figures are derived live."""
+    if machine_id and not line:
+        m = await db.machines.find_one({'id': machine_id}, {'_id': 0, 'line': 1})
+        if not m:
+            raise HTTPException(status_code=404, detail='Machine not found')
+        line = m.get('line')
+    from kpi_engine import derive_line_day_rows
+    rows = await derive_line_day_rows(line=line, date_from=date_from, date_to=date_to)
+    return {'items': rows[skip:skip + limit], 'total': len(rows)}
 
 
 class RuntimeCSV(BaseModel):
@@ -180,16 +144,16 @@ class RuntimeCSV(BaseModel):
 
 @router.post('/runtime-logs/import')
 async def import_runtime_csv(req: RuntimeCSV, user: dict = Depends(require_admin)):
-    """CSV columns: line, date, run_hours[, calendar_hours]. Preview unless apply=true.
-    Each line entry fans out to all machines in that line (machines inherit line runtime)."""
+    """CSV columns: line, date, planned_hours. Preview unless apply=true.
+    Downtime/availability are always derived — only Planned Runtime is entered."""
     reader = csv.DictReader(io.StringIO(req.csv_text.strip()))
     if not reader.fieldnames:
         raise HTTPException(status_code=400, detail='Empty CSV')
     cols = [c.strip().lower() for c in reader.fieldnames]
-    required = {'line', 'date', 'run_hours'}
+    required = {'line', 'date', 'planned_hours'}
     if not required.issubset(set(cols)):
-        raise HTTPException(status_code=400, detail=f'Missing columns. Required: line, date, run_hours. Found: {cols}')
-    all_machines = await db.machines.find({}, {'_id': 0}).to_list(20000)
+        raise HTTPException(status_code=400, detail=f'Missing columns. Required: line, date, planned_hours. Found: {cols}')
+    all_machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'line': 1, 'department': 1}).to_list(20000)
     by_line = defaultdict(list)
     for m in all_machines:
         by_line[m['line']].append(m)
@@ -202,12 +166,11 @@ async def import_runtime_csv(req: RuntimeCSV, user: dict = Depends(require_admin
             errors.append(f'Row {i}: unknown line \u201c{line_name}\u201d')
             continue
         try:
-            run_h = float(row['run_hours'])
-            cal_h = float(row.get('calendar_hours') or 24)
-            if run_h < 0 or cal_h <= 0 or run_h > cal_h:
+            planned = float(row['planned_hours'])
+            if not (0 < planned <= 24):
                 raise ValueError()
         except ValueError:
-            errors.append(f'Row {i}: invalid hours (run={row.get("run_hours")}, cal={row.get("calendar_hours")})')
+            errors.append(f'Row {i}: invalid planned_hours \u201c{row.get("planned_hours")}\u201d (must be 0-24)')
             continue
         date = row.get('date', '')
         try:
@@ -215,27 +178,24 @@ async def import_runtime_csv(req: RuntimeCSV, user: dict = Depends(require_admin
         except ValueError:
             errors.append(f'Row {i}: invalid date \u201c{date}\u201d (use YYYY-MM-DD)')
             continue
-        rows.append({'line': line_name, 'department': machines[0]['department'],
-                     'date': date, 'calendar_hours': cal_h, 'run_hours': run_h,
-                     'dark_hours': round(cal_h - run_h, 2), 'availability': round(run_h / cal_h * 100, 1),
-                     'machines_count': len(machines)})
+        rows.append({'line': line_name, 'department': machines[0].get('department'),
+                     'date': date, 'planned_hours': round(planned, 2), 'machines_count': len(machines)})
     if not req.apply:
         return {'preview': True, 'valid_rows': len(rows), 'errors': errors, 'rows': rows[:100]}
     if errors:
         raise HTTPException(status_code=400, detail=f'{len(errors)} validation errors; fix before applying: ' + '; '.join(errors[:5]))
-    affected = set()
+    affected_lines = set()
     for r in rows:
-        log = {**r, 'id': str(uuid.uuid4()), 'entered_by': user['username'], 'source': 'csv_import', 'created_at': now_iso()}
+        log = {**r, 'id': str(uuid.uuid4()), 'entered_by': user['username'], 'source': 'csv_import',
+               'created_at': now_iso(), 'updated_at': now_iso()}
         await db.line_runtime_logs.update_one({'line': r['line'], 'date': r['date']}, {'$set': log}, upsert=True)
-        machines = by_line[r['line']]
-        await _fan_out_line_runtime(r['line'], machines, r['date'], r['calendar_hours'], r['run_hours'], user['username'], source='csv_import')
-        affected.update(m['id'] for m in machines)
-    from reliability import recompute_machine_reliability
-    for mid in affected:
-        await recompute_machine_reliability(mid, trigger='runtime_import')
-    await create_timeline_event('runtime_imported', title=f'Line runtime CSV imported ({len(rows)} rows)',
-                                description=f'{len(affected)} machines affected', user=user['username'])
-    return {'preview': False, 'imported': len(rows), 'machines_affected': len(affected)}
+        affected_lines.add(r['line'])
+    machines_affected = 0
+    for ln in affected_lines:
+        machines_affected += await _recompute_line_reliability(ln)
+    await create_timeline_event('runtime_imported', title=f'Planned runtime CSV imported ({len(rows)} rows)',
+                                description=f'{machines_affected} machines affected', user=user['username'])
+    return {'preview': False, 'imported': len(rows), 'machines_affected': machines_affected}
 
 
 @router.get('/runtime-templates')
@@ -292,20 +252,20 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
     closed_in_range = len([b for b in breakdowns if b.get('status') in ('COMPLETED', 'CLOSED')])
     closure_rate = round(closed_in_range / failures * 100, 1) if failures else None
 
-    # ---- Runtime (single source of truth) ----
-    rt_q = dict(q)
-    if date_from or date_to:
-        rng = {}
-        if date_from:
-            rng['$gte'] = date_from
-        if date_to:
-            rng['$lte'] = date_to
-        rt_q['date'] = rng
-    rt = await db.runtime_logs.aggregate([
-        {'$match': rt_q}, {'$group': {'_id': None, 'run': {'$sum': '$run_hours'}, 'cal': {'$sum': '$calendar_hours'}}},
-    ]).to_list(1)
-    run_hours = round(rt[0]['run'], 1) if rt else 0
-    cal_hours = round(rt[0]['cal'], 1) if rt else 0
+    # ---- Runtime (single source of truth: PLANNED-RUNTIME model) ----
+    # Runtime is line-wise; machine/PG/department scopes map to their parent line(s).
+    lines_scope = None  # None = all lines (plant)
+    if value and level != 'plant':
+        if level == 'line':
+            lines_scope = [value]
+        else:
+            mq = {'id': value} if level == 'machine' else {level: value}
+            ms = await db.machines.find(mq, {'_id': 0, 'line': 1}).to_list(100000)
+            lines_scope = sorted({m['line'] for m in ms if m.get('line')}) or ['__none__']
+    from kpi_engine import derive_line_day_rows
+    rt_rows = await derive_line_day_rows(lines=lines_scope, date_from=date_from, date_to=date_to)
+    run_hours = round(sum(r['run_hours'] for r in rt_rows), 1)
+    planned_hours = round(sum(r['planned_hours'] for r in rt_rows), 1)
 
     # availability: plant/line scopes use the SHARED KPI ENGINE (identical to Control Room)
     availability = None
@@ -323,8 +283,9 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
             else:
                 row = next((l for l in engine['lines'] if l['line'] == value), None)
                 availability = row['availability'] if row else None
-    if availability is None and cal_hours:
-        availability = round(run_hours / cal_hours * 100, 1)
+    if availability is None and planned_hours:
+        # scope fallback over logged line-days: (Σplanned − Σdowntime)/Σplanned, day-clamped
+        availability = round(run_hours / planned_hours * 100, 1)
 
     # ---- MTBF ----
     # MACHINE level: UNIFIED with the AWS/reliability engine — reads the SAME
@@ -372,13 +333,14 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
     downtime_trend = [{'month': m, 'downtime_hours': round(downtime_by_month.get(m, 0) / 60, 1)} for m in months]
     failure_trend = [{'month': m, 'failures': failures_by_month.get(m, 0)} for m in months]
 
-    # availability trend by month (respects date slice)
-    avail_agg = await db.runtime_logs.aggregate([
-        {'$match': rt_q},
-        {'$group': {'_id': {'$substr': ['$date', 0, 7]}, 'run': {'$sum': '$run_hours'}, 'cal': {'$sum': '$calendar_hours'}}},
-        {'$sort': {'_id': 1}},
-    ]).to_list(100)
-    availability_trend = [{'month': a['_id'], 'availability': round(a['run'] / a['cal'] * 100, 1) if a['cal'] else 0} for a in avail_agg][-12:]
+    # availability trend by month (planned-runtime model, respects date slice)
+    trend_map = defaultdict(lambda: {'run': 0.0, 'planned': 0.0})
+    for r in rt_rows:
+        mth = str(r['date'])[:7]
+        trend_map[mth]['run'] += r['run_hours']
+        trend_map[mth]['planned'] += r['planned_hours']
+    availability_trend = [{'month': m, 'availability': round(v['run'] / v['planned'] * 100, 1) if v['planned'] else 0}
+                          for m, v in sorted(trend_map.items())][-12:]
 
     # top failing machines in scope (respects date slice)
     top_map = defaultdict(lambda: {'failures': 0, 'downtime': 0.0, 'name': ''})
@@ -416,7 +378,7 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         'failure_rate_per_1000h': failure_rate, 'pm_compliance': pm_compliance,
         'failures_total': failures, 'downtime_hours_total': round(total_downtime_min / 60, 1),
         'breakdowns_reported': failures, 'breakdowns_closed': closed_in_range, 'closure_rate': closure_rate,
-        'run_hours': run_hours, 'calendar_hours': cal_hours,
+        'run_hours': run_hours, 'planned_hours': planned_hours,
         'downtime_trend': downtime_trend, 'failure_trend': failure_trend,
         'availability_trend': availability_trend, 'top_failing_machines': top_failing,
         'failure_modes': failure_modes, 'pareto': pareto,

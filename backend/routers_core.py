@@ -78,11 +78,17 @@ async def get_machine(machine_id: str, user: dict = Depends(get_current_user)):
         'pm_tasks': await db.pm_tasks.count_documents({'machine_id': machine_id, 'active': True}),
         'notes': await db.machine_notes.count_documents({'machine_id': machine_id}),
     }
-    # runtime summary
-    pipeline = [{'$match': {'machine_id': machine_id}}, {'$group': {'_id': None, 'run': {'$sum': '$run_hours'}, 'cal': {'$sum': '$calendar_hours'}}}]
-    agg = await db.runtime_logs.aggregate(pipeline).to_list(1)
-    runtime = {'run_hours': round(agg[0]['run'], 1) if agg else 0, 'calendar_hours': round(agg[0]['cal'], 1) if agg else 0}
-    runtime['availability'] = round(runtime['run_hours'] / runtime['calendar_hours'] * 100, 1) if runtime['calendar_hours'] else None
+    # runtime summary — planned-runtime model: machine inherits its LINE's logged days
+    from kpi_engine import derive_line_day_rows
+    rt_rows = await derive_line_day_rows(line=m.get('line'))
+    planned = sum(r['planned_hours'] for r in rt_rows)
+    run = sum(r['run_hours'] for r in rt_rows)
+    down = sum(r['downtime_hours'] for r in rt_rows)
+    runtime = {
+        'planned_hours': round(planned, 1), 'downtime_hours': round(down, 1),
+        'run_hours': round(run, 1), 'logged_days': len(rt_rows),
+        'availability': round(run / planned * 100, 1) if planned else None,
+    }
     return {'machine': m, 'reliability': metrics, 'counts': counts, 'runtime': runtime}
 
 

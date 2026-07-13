@@ -416,7 +416,6 @@ async def seed_sample_data(user: dict = Depends(require_admin)):
     import random
     from datetime import datetime, timezone, timedelta
     from events import next_counter, create_timeline_event
-    from routers_ops import _fan_out_line_runtime
     from reliability import recompute_machine_reliability
 
     machines = await db.machines.find({}, {'_id': 0}).to_list(5000)
@@ -563,7 +562,7 @@ async def seed_sample_data(user: dict = Depends(require_admin)):
     })
     counts['pm_completions'] += 1
 
-    # --- 7 days of line runtime for every line ---
+    # --- 7 days of PLANNED line runtime for every line (downtime/availability derived) ---
     lines = sorted({m['line'] for m in machines})
     by_line = {}
     for m in machines:
@@ -571,15 +570,14 @@ async def seed_sample_data(user: dict = Depends(require_admin)):
     for d in range(1, 8):
         date = (now - timedelta(days=d)).date().isoformat()
         for line in lines:
-            run_h = round(rng.uniform(18, 23.5), 1)
+            planned_h = rng.choice([8.0, 16.0, 20.0, 24.0])
             ms = by_line[line]
             await db.line_runtime_logs.update_one({'line': line, 'date': date}, {'$set': {
                 'id': str(uuid.uuid4()), 'line': line, 'department': ms[0]['department'], 'date': date,
-                'calendar_hours': 24.0, 'run_hours': run_h, 'dark_hours': round(24 - run_h, 2),
-                'availability': round(run_h / 24 * 100, 1), 'machines_count': len(ms),
-                'entered_by': user['username'], 'source': 'manual', 'sample': True, 'created_at': now.isoformat(),
+                'planned_hours': planned_h, 'machines_count': len(ms),
+                'entered_by': user['username'], 'source': 'manual', 'sample': True,
+                'created_at': now.isoformat(), 'updated_at': now.isoformat(),
             }}, upsert=True)
-            await _fan_out_line_runtime(line, ms, date, 24.0, run_h, user['username'])
         counts['line_runtime_days'] += 1
 
     for m in picks[:4]:

@@ -65,11 +65,10 @@
   - Track separate health/life pools per machine for **Mechanical / Electrical / PLC(Control)**.
   - Trigger threshold is **admin-configurable** (default 80%) via `predictive_trigger_pct`.
   - AWS-triggered WOs are a distinct type: **AWS/Predictive** (`wo_type='Predictive'`, `aws_category` set).
-  - **Life % ticks in real-time** using unified runtime philosophy (logged EOD hours override; otherwise 24/7 continuous).
 
-- **MTBF consistency objective (NEW, completed)**:
-  - **Machine-level MTBF in Analytics must match AWS MTBF exactly**, because both represent the same reliability-engine metric.
-  - Provide a transparent source indicator (`mtbf_source`) for debugging and stakeholder clarity.
+- **MTBF consistency objective (completed)**:
+  - **Machine-level MTBF in Analytics matches AWS MTBF exactly** (same reliability-engine metric), via `/api/analytics/kpis?level=machine` reading from `reliability_metrics.mtbf`.
+  - Response includes `mtbf_source` (`reliability_engine` | `aggregate`) for transparency.
 
 ### Control Room KPI/range objectives
 - Control Room line KPIs support presets **Shift=8h, Day=24h, Week=168h** plus a **custom date range** slicer.
@@ -107,13 +106,19 @@
 - **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
 - **Warnings are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
 
-### Analytics + runtime objectives
+### Analytics + runtime objectives (UPDATED — Planned Runtime model)
 - Analytics supports a date range slicer applied to all KPIs/charts.
 - Add closure-rate KPI + Pareto analysis.
-- **Runtime module is the single source of truth**:
-  - Default assumption: plant runs **24/7**, ticking in real time.
-  - End-of-day override: once a line runtime log exists for a date, it becomes authoritative globally.
-  - AWS Life %/hours-since-failure uses the **same hybrid runtime philosophy** (day-prorated logs + 24/7 fallback) so predictive ticking is consistent with Control Room.
+- **Runtime is the single source of truth** (authoritative per line-day):
+  - **Input**: one manual value per **Line × Date**: **Planned Runtime (hours)**.
+  - **Downtime**: derived automatically from **Breakdowns only** for that line-day (Warnings never count).
+  - **Availability** (line-day): `((Planned − Downtime) ÷ Planned) × 100`.
+  - **Clamp rule**: if Downtime > Planned, Availability clamps at **0%**, and a visible **data-quality flag** is surfaced.
+  - **Unlogged days**: visually marked missing in calendar; **Control Room windows** keep the current live 24/7 fallback (**planned=24h**) only for unlogged days to keep live KPIs ticking.
+  - **No other module may recompute availability independently**; all must read from the shared engine.
+- **AWS/reliability runtime usage**:
+  - For a logged line-day: per-machine run-hours inherit `max(Planned − derived line downtime, 0)` (prorated by overlap).
+  - For unlogged days: retain 24/7 fallback.
 
 ---
 
@@ -196,7 +201,7 @@
 ---
 
 ### Phase M — Mandatory Technician Assignment + Mandatory WO Creation + Runtime Calendar (P0)
-**Status:** ✅ COMPLETE *(technician-mandatory WO rule superseded: Unassigned WOs allowed universally; technician-mandatory breakdown closure reinstated in Corrections Part 4)*
+**Status:** ✅ COMPLETE *(legacy runtime model superseded by Phase AB)*
 
 **Phase M Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_8.json`
@@ -206,7 +211,7 @@
 ---
 
 ### Phase N — Plant bugfix pack (Breakdown/WO sync + Time edits + Availability + Warnings + Spares + PM PDF) (P0)
-**Status:** ✅ COMPLETE *(availability + runtime now unified via kpi_engine.py)*
+**Status:** ✅ COMPLETE *(availability + runtime now unified via kpi_engine.py; superseded by Phase AB runtime model)*
 
 **Phase N Testing:** ✅ COMPLETE
 - Backend: **15/15 tests passed (100%)**
@@ -229,33 +234,7 @@
 ### Phase Q — Backend overhaul: Hierarchy inversion + governance + AWS multi-pool + runtime unification
 **Status:** ✅ COMPLETE
 
-#### Q1) Schema + migration (Line-first hierarchy)
-- ✅ New hierarchy: **Line → Department → Process Group → Machine**.
-- ✅ In-place migration executed via `/app/backend/migrations.py` preserving history.
-
-#### Q2) Work Orders lifecycle (Unassigned + claim + closure branching)
-- ✅ Unassigned (`assigned_to=null`) supported.
-- ✅ Claim supported (UI uses `PUT /api/work-orders/{id}` with `{action:'claim'}`).
-- ✅ Closure branching implemented (verified):
-  - Tech closes **Corrective + Inspection + Predictive (AWS)** directly.
-  - **PM + RCA** require Admin closure (Pending Admin state).
-
-#### Q3) AWS/Reliability engine (3 independent pools)
-- ✅ Implemented in `/app/backend/reliability.py`:
-  - Mechanical, Electrical, PLC pools
-  - Admin-configurable threshold (default 80%) via `predictive_trigger_pct`
-  - Reset/cancel behaviors on close/breakdown
-
-#### Q4) Runtime single-source-of-truth
-- ✅ Centralized calculations in `/app/backend/kpi_engine.py`.
-
-#### Q5) Control Room breakdown jump metadata
-- ✅ `kpi_engine.py` returns `active_breakdown_since`, plus:
-  - `active_breakdown_id`
-  - `active_breakdown_ticket`
-
 **Phase Q Testing**
-- ✅ Backend verified via python/curl/bash.
 - ✅ `/app/test_reports/iteration_9.json` backend: **100%**.
 
 ---
@@ -263,196 +242,37 @@
 ### Phase T — Frontend Sync: Control Room + Hierarchy + UX cleanup (P0)
 **Status:** ✅ COMPLETE
 
-#### T0) Frontend schema sync audit (prevent crashes)
-- ✅ Updated components that assumed old `Dept → Line` hierarchy.
-
-#### T1) Control Room filter ribbon reposition (A)
-- ✅ Filter ribbon moved **above** line cards.
-- ✅ Departments filter deduped (Line-first duplicates removed).
-
-#### T2) Custom date range slicer (E)
-- ✅ Presets: Shift=8h, Day=24h, Week=168h.
-- ✅ Custom date range supported (type=`date`).
-
-#### T3) Remove flavor text from line/plant totals (F, G)
-- ✅ Line cards and plant totals set to KPIs-only.
-
-#### T4) Live breakdown timer ribbon (H)
-- ✅ Live red HH:MM:SS breakdown timer ribbon on active line cards.
-
-#### T5) Report Breakdown fuzzy/typeahead selectors (L)
-- ✅ Fuzzy/typeahead for Line and Machine.
-- ✅ Optional technician assignment supported (enables UNASSIGNED WOs).
-- ✅ Post-test fix: prevent dialog auto-focus from opening dropdowns (`onOpenAutoFocus={e => e.preventDefault()}`), verified.
-
-**Phase T Testing**
-- ✅ Screenshot verification completed.
-
 ---
 
 ### Phase U — Frontend Sync: Work Orders + Kanban + Deep-links + My Tasks (P0)
 **Status:** ✅ COMPLETE
-
-#### U0) Global WO modal state foundation
-- ✅ `AppContext`: `openWorkOrder`, `closeWorkOrder`, `woVersion` refresh bump.
-
-#### U1) Kanban “Unassigned” column (I)
-- ✅ 5-column Kanban: **UNASSIGNED / ASSIGNED / IN_PROGRESS / PENDING_ADMIN_CLOSURE / CLOSED**.
-
-#### U2) Technician claim/self-assign in WO popout (I)
-- ✅ Claim integrated for technicians.
-- ✅ Claim verified end-to-end.
-
-#### U3) AWS/Predictive WO type support (K)
-- ✅ WO type filters include **Predictive (AWS)** and AWS badges.
-
-#### U4) Universal deep-link “jump to Work Order” (C)
-- ✅ Universal deep-link contract: `?wo=<id>`.
-- ✅ `Layout.jsx` opens the modal automatically when `?wo=` is present.
-- ✅ Notifications open the exact WO popout (when `reference_type=work_order`).
-
-#### U5) Global “My Tasks” toggle for technicians (D)
-- ✅ Implemented across Breakdowns, Work Orders, Preventive Maintenance.
-
-#### U6) Closure rules reflected in UI (J)
-- ✅ UI actions match governance.
-- ✅ Verified via API: Corrective→CLOSED direct, Predictive→CLOSED direct, Preventive→PENDING_ADMIN_CLOSURE→Admin close.
-
-#### U7) Post-test stability fixes
-- ✅ Fixed dialog overlay interception after WO creation by preventing auto-focus in dialog content.
-
-**Phase U Testing**
-- ✅ Screenshot verification completed.
 
 ---
 
 ### Phase V — Frontend additions: Analytics + AWS page + Report Breakdown fuzzy search (P1)
 **Status:** ✅ COMPLETE
 
-#### V1) Analytics tab expansions (N)
-- ✅ Added global date slicer (`date_from`/`date_to`) applied to all KPIs/charts.
-- ✅ Added **Closure Rate** KPI.
-- ✅ Added **Failure Modes Pareto** chart (count + cumulative %).
-- ✅ Dedupe department lists for Line-first hierarchy.
-
-#### V2) AWS page UI for 3 pools + threshold config (M)
-- ✅ AWS page shows **3 independent pools** (MEC/ELE/PLC) using pool bars.
-- ✅ Driving (riskiest) pool marked with ▲.
-- ✅ Admin settings include `predictive_trigger_pct` input with explanatory copy.
-
-**Phase V Testing**
-- ✅ Screenshot verification completed.
-
 ---
 
 ### Phase W — Feature: Jump-to-breakdown from live DOWN timer (P0)
 **Status:** ✅ COMPLETE
-
-#### W1) Backend support
-- ✅ `kpi_engine.py` includes `active_breakdown_id` + `active_breakdown_ticket` per line KPI.
-
-#### W2) Control Room UI
-- ✅ Live DOWN ribbon in `LineKpiRibbon.jsx` is clickable.
-- ✅ Clicking navigates to `/breakdowns?bd=<id>`.
-
-#### W3) Breakdowns deep-link handler
-- ✅ `Breakdowns.jsx` reads `?bd=`:
-  - expands the matching row
-  - highlights it in red
-  - scrolls it into view
-  - then cleans the URL
-- ✅ Expand chevron indicator added per breakdown row.
-
-**Phase W Testing**
-- ✅ End-to-end verified via screenshot automation.
 
 ---
 
 ### Phase X — PDF “Corrections Part 4” governance + AWS Life% fix (P0)
 **Status:** ✅ COMPLETE
 
-#### X1) Admin assignment UX (WO + Breakdowns)
-- ✅ **Admins assign technicians via dropdown** (no self-claim):
-  - WO popout: `wo-detail-assign-select` + `wo-detail-assign-btn` replaces Claim for admins.
-  - Kanban/table unassigned state: admin sees “Assign Tech” (opens popout).
-  - Breakdown actions (Machine Drawer): admin sees `bd-assign-select-*` + `bd-assign-btn-*` when unassigned.
-- ✅ Technicians retain Claim/self-assign behavior.
-
-#### X2) Breakdown closure governance (must have technician)
-- ✅ Backend enforces: cannot close without technician on record.
-  - Tech closure auto-assigns the closing tech if needed.
-  - Admin closure requires `assigned_to` selection (400 otherwise).
-  - `assigned_to` is persisted on breakdown close, and used consistently in logs / RCA auto-wo / linked WO sync.
-- ✅ Repair page UI:
-  - Admins must pick “Repairing Technician*” on unassigned breakdowns.
-
-#### X3) Repair page cleanup
-- ✅ Removed redundant “Start Repair Now” button on Repair page.
-
-#### X4) AWS Life % fix + cadence
-- ✅ `reliability.run_hours_between` rewritten as **day-prorated hybrid runtime**:
-  - If a runtime log exists for a day: use logged `run_hours`, prorated by overlap fraction and capped by elapsed overlap.
-  - If no runtime log exists for a day: assume 24/7 operation (calendar overlap hours).
-- ✅ Reliability recompute cadence increased from ~15 min to ~5 min.
-- ✅ Verified Life % ticks and can cross thresholds.
-
-#### X5) Warnings always dispatch Inspection WO
-- ✅ Removed Corrective WO type choice from:
-  - Report Warning dialog
-  - Warning generate-WO dialog
-- ✅ Warnings always dispatch **Inspection**.
-
-#### X6) Start actions do not auto-assign admins
-- ✅ `start` for breakdowns/WOs auto-assigns only when the actor is a technician.
-- ✅ Breakdown `assign` action syncs linked open WO assignment.
-
-**Phase X Testing**
-- ✅ `/app/test_reports/iteration_11.json`:
-  - Backend **100% (24/24)**
-  - Frontend **100% (7/7)**
-- ✅ Calculation review completed (kpi_engine, analytics, breakdown/WO timing, availability, reliability life%).
-
 ---
 
 ### Phase Y — Follow-up: Unassigned PM Tasks + Live Event Feed deep-linking (P0)
 **Status:** ✅ COMPLETE
-
-#### Y1) Unassigned PM Tasks (creation + visibility + claim)
-- ✅ PM Task creation supports optional technician (`assigned_to` optional in backend and UI).
-- ✅ PM page exposes **Unassigned** filter chip.
-- ✅ Unassigned PM tasks display a yellow **UNASSIGNED** badge in the Assigned column.
-- ✅ Technicians can **Claim** an unassigned PM task (self-assign) from the PM list.
-- ✅ Admins can assign via inline technician dropdown (no admin claim).
-- ✅ Backend endpoint: `POST /api/pm-tasks/{task_id}/claim`.
-
-#### Y2) Live Event Feed deep-linking for ALL event types
-- ✅ Live Event Feed click deep-links to the *exact* referenced record.
-- ✅ Same deep-link mapping added to the Layout notification bell.
-
-**Phase Y Testing**
-- ✅ Backend verified.
-- ✅ Frontend verified.
 
 ---
 
 ### Phase Z — Feature: Task Transfer + Immediate RCA Flow (P0)
 **Status:** ✅ COMPLETE — VERIFIED
 
-#### Z1) Backend: transfer/assign/claim governance + RCA locks
-- ✅ Work Orders: assign/claim/transfer governance + RCA lock.
-- ✅ PM tasks: claim/assign/transfer governance + timeline events.
-- ✅ Breakdowns: claim/assign/transfer governance + timeline events.
-- ✅ Breakdown close response includes `rca_required` + `rca_task_id`.
-
-#### Z2) Frontend: transfer/assign/claim UI parity
-- ✅ WO modal: Claim for Me + Assign To… (unassigned), Transfer To… (assigned), RCA locked.
-- ✅ PM page: Claim/Assign (unassigned), Transfer (assigned).
-- ✅ Breakdowns: Claim/Assign/Transfer controls.
-
-#### Z3) Immediate RCA in-flow popup
-- ✅ RepairBreakdown closes 30min breakdown → immediate RCA dialog opens.
-
-#### Z4) Verification evidence
+**Phase Z Testing**
 - ✅ `/app/test_reports/iteration_12.json` — backend 100%.
 - ✅ Frontend verified via screenshot automation.
 
@@ -461,42 +281,92 @@
 ### Phase AA — MTBF Unification (P1)
 **Status:** ✅ COMPLETE — VERIFIED
 
-#### AA1) Diagnosis summary
-- AWS page MTBF comes from **reliability engine** (`reliability_metrics.mtbf`, driving category, TBF-based).
-- Machine Analytics MTBF previously came from **run_hours ÷ failures** computed live in `routers_ops.py`.
-- Result: they could not match; also a specific data-quality case (breakdown backdated before commissioning) caused a poisoned 0.1h engine MTBF.
+- ✅ Machine-level Analytics MTBF now reads from `reliability_metrics.mtbf`.
+- ✅ `mtbf_source` field added.
 
-#### AA2) Implemented remedy (definition unification)
-- ✅ **Machine-level** Analytics MTBF (`/api/analytics/kpis?level=machine`) now reads MTBF from the same reliability engine field:
-  - Backend change: `/app/backend/routers_ops.py` in `analytics_kpis`
-  - For `level='machine'`: `mtbf_hours` comes from `reliability_metrics.mtbf`.
-  - Fallback: if no reliability_metrics exists yet, fall back to `run_hours ÷ failures`.
-  - Aggregate levels (plant/line/department/process_group) unchanged.
-- ✅ Response now includes `mtbf_source`:
-  - `reliability_engine` for machine level when metrics exist
-  - `aggregate` otherwise
+---
 
-#### AA3) Verification
-- ✅ All machines on AWS page now return identical MTBF via machine-level analytics (0 mismatches).
-- ✅ Plant/line aggregates unaffected.
-- ✅ No-failure machine returns `mtbf_hours=None` gracefully.
-- ✅ Backend logs clean.
+### Phase AB — Runtime Module Rework: Planned Runtime + Derived Downtime + Corrected Availability (P0)
+**Status:** ⏳ IN PROGRESS (design locked; implementation pending)
 
-#### AA4) Known outstanding (documented, not approved yet)
-- ⚠️ The **poisoned 0.1h MTBF** issue remains until a separate P0 data-quality fix is approved:
-  - In `reliability.py:_compute_category`, TBF values are floored with `max(hours, 0.1)` (line ~139), which masks invalid intervals when a breakdown is backdated before commissioning.
-  - This also poisons `predicted_failure_life` and can trigger spurious predictive WOs.
+#### AB0) Decisions locked (from user)
+- ✅ Control Room windows: keep current live 24/7 fallback (**planned=24h**) only for **unlogged** days.
+- ✅ Migration: **discard old runtime logs**; start fresh.
+- ✅ Reliability: logged line-day per-machine run-hours inherit `max(Planned − derived downtime, 0)`.
+- ✅ Derived downtime freshness: always computed **live from breakdown records**.
+
+#### AB1) Backend: data model + API contract changes
+- Update runtime models:
+  - `line_runtime_logs`: replace `{calendar_hours, run_hours}` with `{planned_hours}`.
+  - Remove fixed 24h calendar-hour assumption from line-day logs.
+  - Remove/retire per-machine `runtime_logs` as a persisted source of truth.
+- Update endpoints in `/app/backend/routers_ops.py`:
+  - `POST /runtime-logs`: accept `{line, date, planned_hours}` only.
+  - `GET /line-runtime-logs`: return planned_hours plus **derived** downtime_hours, run_hours, availability, clamped flag.
+  - `DELETE /line-runtime-logs`: remove planned entry.
+  - CSV import: `line,date,planned_hours`.
+
+#### AB2) Backend: shared KPI engine becomes authoritative for availability
+- Rewrite `/app/backend/kpi_engine.py`:
+  - Add a shared helper to derive per-line per-day rows: planned + merged breakdown downtime (breakdowns only).
+  - Rewrite `compute_line_kpis()` to compute window availability using:
+    - planned minutes (prorated per day overlap; fallback planned=24h for unlogged days)
+    - downtime minutes = merged breakdown overlap for that line/day
+    - availability = (Σplanned − Σdowntime) / Σplanned (clamped at 0%)
+  - Expose `planned_minutes`, `downtime_minutes`, `availability`, and `clamped_days` / `quality_flags` per line.
+
+#### AB3) Backend: analytics + summaries use the engine (no independent formulas)
+- Update `/app/backend/routers_ops.py` `analytics_kpis`:
+  - line/plant availability must come from the KPI engine (already partly true) but now using planned-runtime model.
+  - availability trend based on planned/downtime model.
+- Update `/app/backend/routers_core.py` machine detail runtime block:
+  - machine runtime summary derived from its line’s planned/downtime model.
+
+#### AB4) Backend: reliability runtime consumption
+- Update `/app/backend/reliability.py` `run_hours_between()` to use planned/downtime:
+  - for logged line-days: effective run = max(planned − downtime, 0) prorated by overlap
+  - unlogged: 24/7 fallback
+
+#### AB5) Backend: remove deprecated auto-ticker writes
+- Update `/app/backend/server.py` runtime clock:
+  - stop writing per-machine `runtime_logs` increments.
+  - keep plant clock mechanism if needed for non-runtime features, and keep machine `total_run_hours` ticking (UI-only runtime counter).
+
+#### AB6) Data operations
+- Purge/reset runtime collections per the new model:
+  - `runtime_logs` and `line_runtime_logs` cleared (fresh start).
+- Update sample seeders (`routers_admin.py`) to seed `planned_hours` (optional).
+
+#### AB7) Frontend: Runtime calendar UI changes
+- Update `/app/frontend/src/pages/Runtime.jsx`:
+  - Replace inputs: **single Planned Runtime** per line-day.
+  - Display derived: Downtime, Effective Run, Availability.
+  - Show clamp flag + tooltip: “Downtime exceeds Planned Runtime — check breakdown records for this day”.
+  - Keep existing logged/missing indicator behavior; missing should not display misleading KPIs.
+  - Update KPI cards and table headers accordingly.
+
+#### AB8) Testing
+- Run testing agent (backend + frontend) and generate new report:
+  - Availability matches formula
+  - Warnings excluded from downtime
+  - Clamp behavior visible + correct
+  - Unlogged day handling correct
+  - Control Room/Analytics/AWS all read from the shared model
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ None required for MTBF consistency; Phase AA is complete.
+- Implement Phase AB end-to-end:
+  - backend model + API + kpi_engine rewrite + reliability integration
+  - frontend Runtime page adjustments
+  - data reset (fresh start)
+  - full regression test
 
 ### Optional follow-ups (P0/P1)
-- **P0 (requires approval)**: fix reliability engine’s handling of backdated failures predating commissioning (skip invalid intervals rather than clamp to 0.1; add data-quality warning), and guard `predicted_failure_life` minimum.
-- **P1**: add a small UI hint showing `mtbf_source` (optional) for transparency/debugging.
+- **P0 (requires approval)**: reliability engine data-quality fix for backdated failures predating commissioning (skip invalid TBF intervals rather than clamp to 0.1; guard minimum predicted life).
+- **P1**: add UI hint for `mtbf_source` if needed.
 - **P1**: E2E regression tests asserting AWS MTBF === machine analytics MTBF.
 
 ### Validation evidence
@@ -540,10 +410,16 @@
 
 ### AWS / Predictive
 - ✅ 3-pool engine + threshold config.
-- ✅ Life % ticks with hybrid runtime logic.
+- ✅ Reliability uses the shared runtime model.
 
 ### Analytics + Runtime
 - ✅ Date slicer exists.
 - ✅ Closure rate + Pareto exist.
-- ✅ Runtime unified.
-- ✅ **MTBF consistency**: Machine-level analytics MTBF matches AWS MTBF exactly (same reliability engine value).
+- ✅ Runtime is single source of truth.
+- ✅ **MTBF consistency**: Machine-level analytics MTBF matches AWS MTBF exactly.
+- ⏳ **Planned Runtime model (Phase AB)**:
+  - Planned Runtime is the only manual input per line-day.
+  - Downtime derived from Breakdowns only (Warnings excluded).
+  - Availability uses `((Planned − Downtime)/Planned) × 100` and clamps at 0% with a visible warning.
+  - Unlogged days are visibly marked and do not produce misleading figures.
+  - Control Room, Analytics, Plant totals, and reliability all read the same authoritative model.

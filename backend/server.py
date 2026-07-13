@@ -128,11 +128,12 @@ async def pm_scheduler_loop():
         await asyncio.sleep(60)
 
 
-# ---------------- PLANT RUNTIME CLOCK (auto runtime accumulation) ----------------
+# ---------------- PLANT RUNTIME CLOCK (live machine run-hour counter) ----------------
 async def runtime_clock_tick():
-    """Accumulate Run/Calendar/Dark hours per machine off the single plant clock.
-    Machines in running/watch/inspection_due accrue run hours; all accrue calendar hours."""
-    from pymongo import UpdateOne
+    """Tick the plant clock and accrue `total_run_hours` on running machines (UI counter).
+    NOTE: per-day availability is NOT accumulated here anymore — the PLANNED-RUNTIME
+    model (kpi_engine) derives downtime/availability live from planned line-days +
+    breakdown records. The deprecated per-machine runtime_logs writes were removed."""
     from datetime import datetime as dt_cls
     now = datetime.now(timezone.utc)
     clock = await db.settings.find_one({'id': 'plant_clock'}, {'_id': 0})
@@ -149,22 +150,7 @@ async def runtime_clock_tick():
     await db.settings.update_one({'id': 'plant_clock'}, {'$set': {'last_tick_at': now_iso()}})
     if dt_hours <= 0:
         return
-    today = now_iso()[:10]
     running_statuses = ['running', 'watch', 'inspection_due']
-    machines = await db.machines.find({}, {'_id': 0, 'id': 1, 'name': 1, 'status': 1, 'department': 1, 'line': 1, 'process_group': 1}).to_list(20000)
-    ops = []
-    for m in machines:
-        is_running = m.get('status') in running_statuses
-        ops.append(UpdateOne(
-            {'machine_id': m['id'], 'date': today},
-            {'$inc': {'calendar_hours': dt_hours, 'run_hours': dt_hours if is_running else 0.0, 'dark_hours': 0.0 if is_running else dt_hours},
-             '$setOnInsert': {'id': str(uuid.uuid4()), 'machine_id': m['id'], 'machine_name': m['name'],
-                              'department': m.get('department'), 'line': m.get('line'), 'process_group': m.get('process_group'),
-                              'date': today, 'entered_by': 'plant_clock', 'source': 'plant_clock', 'created_at': now_iso()},
-             '$set': {'updated_at': now_iso()}},
-            upsert=True))
-    if ops:
-        await db.runtime_logs.bulk_write(ops, ordered=False)
     await db.machines.update_many({'status': {'$in': running_statuses}}, {'$inc': {'total_run_hours': dt_hours}})
 
 

@@ -73,26 +73,24 @@ def parse_dt(iso):
         return None
 
 
-async def run_hours_between(machine_id, start_dt, end_dt, logs=None):
-    """Operating hours between two datetimes — SINGLE-SOURCE-OF-TRUTH hybrid
-    (same philosophy as kpi_engine):
+def run_hours_between(start_dt, end_dt, ctx=None):
+    """Operating hours between two datetimes — PLANNED-RUNTIME single source of
+    truth (same model as kpi_engine):
       • For each calendar day overlapping [start_dt, end_dt]:
-          - if a runtime log exists for (machine, day) the LOGGED run_hours are
-            authoritative, prorated by the fraction of that day inside the range
-            and capped at the elapsed overlap;
+          - if a PLANNED line-runtime log exists for that day, the effective run
+            hours are max(planned − derived line breakdown downtime, 0), prorated
+            by the fraction of that day inside the range and capped at the
+            elapsed overlap;
           - otherwise the plant is assumed to run continuously (24/7), so the
             full calendar overlap counts as run time.
+    `ctx` comes from kpi_engine.build_line_runtime_ctx(line):
+      {'planned': {date: hours}, 'downtime_h': {date: hours}}.
     This makes 'hours since failure' (and therefore AWS Life %) tick in real
     time instead of freezing at 0 until the next end-of-day log."""
     if start_dt is None or end_dt is None or end_dt <= start_dt:
         return 0.0
-    if logs is None:
-        logs = await db.runtime_logs.find({'machine_id': machine_id}, {'_id': 0}).to_list(100000)
-    by_date = {}
-    for lg in logs:
-        d = str(lg.get('date') or '')[:10]
-        if d:
-            by_date[d] = by_date.get(d, 0.0) + float(lg.get('run_hours') or 0)
+    planned_map = (ctx or {}).get('planned') or {}
+    downtime_map = (ctx or {}).get('downtime_h') or {}
     total = 0.0
     day = start_dt.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     while day < end_dt:
@@ -102,8 +100,9 @@ async def run_hours_between(machine_id, start_dt, end_dt, logs=None):
         overlap_h = max((o_end - o_start).total_seconds() / 3600.0, 0.0)
         if overlap_h > 0:
             key = day.date().isoformat()
-            if key in by_date:
-                total += min(by_date[key] * (overlap_h / 24.0), overlap_h)
+            if key in planned_map:
+                eff_run = max(planned_map[key] - downtime_map.get(key, 0.0), 0.0)
+                total += min(eff_run * (overlap_h / 24.0), overlap_h)
             else:
                 total += overlap_h
         day = day_end
@@ -124,7 +123,7 @@ def weibull_fit(tbfs):
         return None
 
 
-async def _compute_category(machine, cat, failures, settings, runtime_logs, now):
+async def _compute_category(machine, cat, failures, settings, runtime_ctx, now):
     """Compute one category's reliability pool. Returns dict or None."""
     machine_id = machine['id']
     commissioned = parse_dt(machine.get('commissioned_at')) or parse_dt(machine.get('created_at'))
@@ -135,7 +134,7 @@ async def _compute_category(machine, cat, failures, settings, runtime_logs, now)
         f_start = parse_dt(f.get('start_time'))
         if not f_start:
             continue
-        hours = await run_hours_between(machine_id, prev, f_start, logs=runtime_logs)
+        hours = run_hours_between(prev, f_start, ctx=runtime_ctx)
         tbfs.append(max(hours, 0.1))
         prev = parse_dt(f.get('end_time')) or f_start
     if not tbfs:
@@ -182,7 +181,7 @@ async def _compute_category(machine, cat, failures, settings, runtime_logs, now)
     reset_iso = (machine.get('aws_resets') or {}).get(cat)
     reset_at = parse_dt(reset_iso)
     anchor = max([d for d in (last_end, reset_at) if d], default=None)
-    hours_since = await run_hours_between(machine_id, anchor, now, logs=runtime_logs)
+    hours_since = run_hours_between(anchor, now, ctx=runtime_ctx)
 
     if weibull:
         predicted_life, tier = weibull['mean_life'], 'advanced'
@@ -308,7 +307,10 @@ async def recompute_machine_reliability(machine_id, trigger='manual'):
         await db.machines.update_one({'id': machine_id}, {'$set': {'reliability_state': 'no_data', 'health': 'healthy', 'inspection_recommended': False}})
         return None
 
-    runtime_logs = await db.runtime_logs.find({'machine_id': machine_id}, {'_id': 0}).to_list(100000)
+    # Planned-runtime context for this machine's LINE (machines inherit line runtime):
+    # logged days → max(planned − derived breakdown downtime, 0); unlogged → 24/7.
+    from kpi_engine import build_line_runtime_ctx
+    runtime_ctx = await build_line_runtime_ctx(machine.get('line'))
     existing = await db.reliability_metrics.find_one({'machine_id': machine_id}, {'_id': 0})
 
     categories = {}
@@ -316,7 +318,7 @@ async def recompute_machine_reliability(machine_id, trigger='manual'):
         failures = [f for f in all_failures if (f.get('breakdown_type') or 'MECHANICAL') == cat]
         if not failures:
             continue
-        c = await _compute_category(machine, cat, failures, settings, runtime_logs, now)
+        c = await _compute_category(machine, cat, failures, settings, runtime_ctx, now)
         if c:
             categories[cat] = c
 
