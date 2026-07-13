@@ -102,12 +102,20 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
   );
 }
 
-function WarningsView() {
+function WarningsView({ initialWarningId, onInitialConsumed }) {
   const [data, setData] = useState({ items: [], total: 0 });
   const [selected, setSelected] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const load = useCallback(() => { api.get('/warnings').then((r) => setData(r.data)); }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Deep-link (?warning=<id>): open the exact warning detail card once the list loads
+  useEffect(() => {
+    if (!initialWarningId || !data.items.length) return;
+    const w = data.items.find((x) => x.id === initialWarningId);
+    if (w) { setSelected(w); setDialogOpen(true); }
+    onInitialConsumed && onInitialConsumed();
+  }, [initialWarningId, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="overflow-hidden border border-[#f9f871]/25" data-testid="warnings-table">
       <Table>
@@ -170,6 +178,7 @@ export default function Breakdowns() {
   const [view, setView] = useState('breakdowns'); // breakdowns | warnings
   const [expanded, setExpanded] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
+  const [warningTarget, setWarningTarget] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const load = useCallback(() => {
@@ -186,20 +195,33 @@ export default function Breakdowns() {
   // expands + highlights + scrolls to the exact breakdown row
   useEffect(() => {
     const bdId = searchParams.get('bd');
-    if (!bdId || !data.items.length) return;
-    const found = data.items.find((b) => b.id === bdId);
-    if (found) {
-      setView('breakdowns');
-      setExpanded(bdId);
-      setHighlightId(bdId);
-      setTimeout(() => {
-        document.getElementById(`bd-row-${bdId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 150);
-      setTimeout(() => setHighlightId(null), 5000);
+    if (bdId) {
+      if (!data.items.length) return;
+      const found = data.items.find((b) => b.id === bdId);
+      if (found) {
+        setView('breakdowns');
+        setExpanded(bdId);
+        setHighlightId(bdId);
+        setTimeout(() => {
+          document.getElementById(`bd-row-${bdId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 150);
+        setTimeout(() => setHighlightId(null), 5000);
+      }
+      const next = new URLSearchParams(searchParams);
+      next.delete('bd');
+      setSearchParams(next, { replace: true });
+      return;
     }
-    const next = new URLSearchParams(searchParams);
-    next.delete('bd');
-    setSearchParams(next, { replace: true });
+    // Deep-link: /breakdowns?warning=<id> (Live Event Feed) — switch to the
+    // warnings view and open that exact warning's detail card
+    const wId = searchParams.get('warning');
+    if (wId) {
+      setView('warnings');
+      setWarningTarget(wId);
+      const next = new URLSearchParams(searchParams);
+      next.delete('warning');
+      setSearchParams(next, { replace: true });
+    }
   }, [searchParams, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = myTasks ? data.items.filter((bd) => bd.assigned_to === user?.username) : data.items;
@@ -232,7 +254,7 @@ export default function Breakdowns() {
         ))}
       </div>
 
-      {view === 'warnings' ? <WarningsView /> : (
+      {view === 'warnings' ? <WarningsView initialWarningId={warningTarget} onInitialConsumed={() => setWarningTarget(null)} /> : (
       <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative">

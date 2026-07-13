@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, PanelRightClose, PanelRightOpen, Activity, Rows3, Network } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
@@ -44,7 +45,8 @@ const MachineTile = React.memo(function MachineTile({ machine, onOpen }) {
 });
 
 export default function ControlRoom() {
-  const { openMachine, machineUpdates, liveFeed } = useApp();
+  const { openMachine, openWorkOrder, isTech, machineUpdates, liveFeed } = useApp();
+  const navigate = useNavigate();
   const [machines, setMachines] = useState([]);
   const [hierarchy, setHierarchy] = useState({ departments: [], lines: [], process_groups: [] });
   const [summary, setSummary] = useState(null);
@@ -88,6 +90,26 @@ export default function ControlRoom() {
     const seen = new Set();
     return [...liveFeed, ...feed].filter((e) => (seen.has(e.id) ? false : seen.add(e.id))).slice(0, 40);
   }, [liveFeed, feed]);
+
+  // Universal deep-link: every feed entry jumps to ITS exact source record —
+  // WO popout, breakdown row, warning card, or PM task row (machine drawer as fallback)
+  const openFeedEvent = useCallback((e) => {
+    const rid = e.reference_id;
+    switch (rid ? e.reference_type : null) {
+      case 'work_order':
+        if (isTech) { openWorkOrder(rid); return; }
+        break;
+      case 'breakdown':
+        navigate(`/breakdowns?bd=${rid}`); return;
+      case 'warning':
+        navigate(`/breakdowns?warning=${rid}`); return;
+      case 'pm_task':
+        navigate(`/preventive-maintenance?task=${rid}`); return;
+      default:
+        break;
+    }
+    if (e.machine_id) openMachine(e.machine_id);
+  }, [isTech, openWorkOrder, openMachine, navigate]);
 
   const lineNames = useMemo(() => {
     const names = hierarchy.lines.map((l) => l.name);
@@ -338,7 +360,7 @@ export default function ControlRoom() {
               {combinedFeed.map((e) => {
                 const rail = e.event_type === 'warning_created' ? '#f9f871' : e.event_type === 'breakdown_created' ? '#ff2e63' : e.event_type === 'wo_completed' || e.event_type === 'breakdown_closed' ? '#05ffa1' : 'transparent';
                 return (
-                <button key={e.id} onClick={() => e.machine_id && openMachine(e.machine_id)} className="block w-full border-b border-border/50 border-l-2 px-3 py-2 text-left hover:bg-white/5" style={{ borderLeftColor: rail }}>
+                <button key={e.id} data-testid={`feed-event-${e.id}`} onClick={() => openFeedEvent(e)} className="block w-full border-b border-border/50 border-l-2 px-3 py-2 text-left hover:bg-white/5" style={{ borderLeftColor: rail }}>
                   <div className="text-xs font-medium" style={e.event_type === 'warning_created' ? { color: '#f9f871' } : undefined}>{e.title}</div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">{e.machine_name} {e.line ? `· ${e.line}` : ''}</div>
                   <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{fmtDate(e.created_at)} · {e.user}</div>

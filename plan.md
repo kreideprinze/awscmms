@@ -24,17 +24,28 @@
 - **Hierarchy is Line-first** (real world): **Line → Department → Process Group → Machine**.
   - Implemented via in-place DB migration keeping all transactional history.
   - All UI + Admin CRUD + seed logic reflect Line-first.
+
 - **Work orders support Unassigned creation universally** (including public kiosk).
   - Kanban includes an **UNASSIGNED** column.
   - **Technicians can self-assign/claim** an unassigned WO.
   - **Admins do not “claim”**: admins explicitly **assign technicians via dropdown** in the WO popout.
+
 - **Breakdowns support Unassigned creation**, but **closure is governed**:
   - A breakdown can **never be closed without a technician on record**.
   - If a technician closes an unassigned breakdown, the system records that technician automatically.
   - If an admin closes an unassigned breakdown, an **assigned technician must be selected** (otherwise 400).
+
+- **PM Tasks support Unassigned creation universally** (same philosophy as WOs/Breakdowns).
+  - A PM Task can be created with no technician.
+  - Unassigned PM Tasks are visible to all technicians (not hidden).
+  - Technicians can **claim** unassigned PM Tasks.
+  - Admins explicitly **assign** a technician (no admin claim).
+  - Assignment syncs to any open PM-generated work order.
+
 - **Admin-closure requirement is type-conditional (Work Orders)**:
   - **Corrective + Inspection + AWS/Predictive** WOs: technician can close directly (no admin approval).
   - **Preventive (PM) + RCA** WOs: technician completes → `PENDING_ADMIN_CLOSURE` → admin closes.
+
 - **AWS / Predictive Maintenance Engine** is per-category:
   - Track separate health/life pools per machine for **Mechanical / Electrical / PLC(Control)**.
   - Trigger threshold is **admin-configurable** (default 80%) via `predictive_trigger_pct`.
@@ -52,9 +63,27 @@
 - **Universal “jump to Work Order” deep linking**:
   - Clicking a WO reference anywhere opens the **exact Work Order popout/modal** rather than a generic list.
   - Contract: `?wo=<id>` plus a global `openWorkOrder(id)`.
-- **Universal “jump to Breakdown” deep linking** from Control Room:
+
+- **Universal “jump to Breakdown” deep linking**:
   - Clicking a line’s live DOWN timer ribbon opens `/breakdowns?bd=<breakdown_id>`.
   - Breakdowns page expands + highlights + scrolls to the referenced breakdown, then cleans the URL.
+
+- **Universal “jump to Warning” deep linking**:
+  - Clicking a warning reference opens `/breakdowns?warning=<warning_id>`.
+  - Breakdowns switches to Warnings view and opens the exact warning detail dialog.
+
+- **Universal “jump to PM Task” deep linking**:
+  - Clicking a PM task reference opens `/preventive-maintenance?task=<pm_task_id>`.
+  - PM page highlights + scrolls to the referenced task and cleans the URL.
+
+- **Live Event Feed deep-linking for all event types**:
+  - Clicking any Live Event Feed entry deep-links to the *exact* referenced record:
+    - Work Orders → WO popout
+    - Breakdowns → Breakdown row expansion
+    - Warnings → Warning detail dialog
+    - PM Tasks → PM row highlight
+    - Fallback → Machine drawer
+
 - **Global “My Tasks” filter** for technicians across: Breakdowns, Work Orders (Kanban), PMs.
 - **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
 - **Warnings are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
@@ -340,7 +369,6 @@
 
 #### X3) Repair page cleanup
 - ✅ Removed redundant “Start Repair Now” button on Repair page.
-  - Edited times are authoritative; start/complete happens via explicit actions.
 
 #### X4) AWS Life % fix + cadence
 - ✅ `reliability.run_hours_between` rewritten as **day-prorated hybrid runtime**:
@@ -364,15 +392,47 @@
   - Backend **100% (24/24)**
   - Frontend **100% (7/7)**
 - ✅ Calculation review completed (kpi_engine, analytics, breakdown/WO timing, availability, reliability life%).
-- ✅ Test residue cleaned (no machines in failed/repair, 0 open breakdowns).
+
+---
+
+### Phase Y — Follow-up: Unassigned PM Tasks + Live Event Feed deep-linking (P0)
+**Status:** ✅ COMPLETE
+
+#### Y1) Unassigned PM Tasks (creation + visibility + claim)
+- ✅ PM Task creation supports optional technician (`assigned_to` optional in backend and UI).
+- ✅ PM page exposes **Unassigned** filter chip.
+- ✅ Unassigned PM tasks display a yellow **UNASSIGNED** badge in the Assigned column.
+- ✅ Technicians can **Claim** an unassigned PM task (self-assign) from the PM list.
+- ✅ Admins can assign via inline technician dropdown (no admin claim).
+- ✅ Backend endpoint added: `POST /api/pm-tasks/{task_id}/claim`:
+  - Technician: assigns to self
+  - Admin: requires `assigned_to` else 400
+  - Syncs open PM-generated WOs to the assignee
+  - Emits `pm_assigned` timeline event
+
+#### Y2) Live Event Feed deep-linking for ALL event types
+- ✅ Control Room Live Event Feed click now deep-links to the *exact* referenced record:
+  - `work_order` → WO popout (`openWorkOrder`) for tech users
+  - `breakdown` → `/breakdowns?bd=<id>` (expand/highlight/scroll)
+  - `warning` → `/breakdowns?warning=<id>` (Warnings view opens the exact dialog)
+  - `pm_task` → `/preventive-maintenance?task=<id>` (highlight/scroll)
+  - fallback → machine drawer
+- ✅ Same deep-link mapping added to the Layout notification bell.
+- ✅ Timeline events verified to consistently carry `reference_type` + `reference_id`.
+
+**Phase Y Testing**
+- ✅ Backend API tests: PM claim (tech), PM assign (admin), admin enforcement (400 without assigned_to), deep-link contract.
+- ✅ Frontend verified via browser automation:
+  - PM Unassigned filter + claim/assign UX
+  - Feed deep-links for Warning/Breakdown/PM/WO
+- ✅ Test data cleaned; user-generated kiosk data preserved.
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ All major roadmap phases completed (Q/T/U/V/W/X).
-- ✅ PDF “Corrections Part 4” implemented, tested, and cleaned.
+- ✅ All major roadmap phases completed (Q/T/U/V/W/X/Y).
 
 ### Validation evidence (P0)
 - Current test reports:
@@ -384,6 +444,8 @@
 - Add E2E regression tests for deep-links:
   - `?wo=<id>` (WO modal)
   - `?bd=<id>` (Breakdowns expand + highlight)
+  - `?warning=<id>` (Warnings open exact dialog)
+  - `?task=<id>` (PM row highlight)
 - Add/verify MongoDB indexes for large plants if latency observed.
 - Add an “Operational data health” admin page (optional): counts, recompute buttons, stuck states.
 
@@ -418,6 +480,13 @@
   - admin must select technician
 - ✅ Repair page contains mandatory Repairing Technician selection for admins when needed.
 
+### Preventive Maintenance (PM Tasks) + Governance
+- ✅ PM tasks can be created unassigned.
+- ✅ PM page exposes an Unassigned filter.
+- ✅ Unassigned PM tasks are visible to technicians and claimable.
+- ✅ Admins can assign technicians; technicians can claim.
+- ✅ PM assignment syncs to open PM work orders.
+
 ### AWS / Predictive
 - ✅ Backend per-category health pools (Mechanical/Electrical/PLC) computed independently.
 - ✅ Backend threshold is admin-configurable.
@@ -429,6 +498,9 @@
 - ✅ “My Tasks” filter exists across technician-accessible modules.
 - ✅ Breakdown report Area/Line + Machine selectors have fuzzy/typeahead.
 - ✅ Breakdown deep-link `?bd=` expands + highlights + scrolls.
+- ✅ Warning deep-link `?warning=` opens exact warning detail dialog.
+- ✅ PM deep-link `?task=` highlights + scrolls.
+- ✅ Live Event Feed deep-links all event types to exact records.
 
 ### Analytics + Runtime
 - ✅ Backend runtime is unified via `kpi_engine.py` and used by Control Room endpoints.

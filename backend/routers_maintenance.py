@@ -903,6 +903,37 @@ async def delete_pm_task(task_id: str, user: dict = Depends(require_admin)):
     return {'ok': True}
 
 
+class PMClaim(BaseModel):
+    assigned_to: Optional[str] = None
+
+
+@router.post('/pm-tasks/{task_id}/claim')
+async def claim_pm_task(task_id: str, req: PMClaim, user: dict = Depends(require_admin_or_tech)):
+    """Assign an unassigned (or re-assign an existing) PM task.
+    Governance mirrors Work Orders: TECHNICIANS self-assign (claim);
+    ADMINS must pick a technician explicitly (no admin self-claim).
+    Any open work order generated from this PM follows the assignment."""
+    task = await db.pm_tasks.find_one({'id': task_id}, {'_id': 0})
+    if not task:
+        raise HTTPException(status_code=404, detail='PM task not found')
+    if user.get('role') == 'technician':
+        assignee = user['username']
+    else:
+        assignee = await _validate_technician(req.assigned_to)
+        if not assignee:
+            raise HTTPException(status_code=400, detail='assigned_to required — admins assign a technician from the dropdown')
+    await db.pm_tasks.update_one({'id': task_id}, {'$set': {'assigned_to': assignee}})
+    # SYNC: open PM work orders for this task inherit the assignment
+    await db.work_orders.update_many(
+        {'pm_task_id': task_id, 'status': {'$in': ['OPEN', 'ASSIGNED']}},
+        {'$set': {'assigned_to': assignee, 'status': 'ASSIGNED'}})
+    await create_timeline_event('pm_assigned', machine_id=task['machine_id'], machine_name=task['machine_name'],
+                                title=f"PM \u201c{task['task_name']}\u201d assigned to {assignee}",
+                                user=user['username'], reference_id=task_id, reference_type='pm_task',
+                                department=task.get('department'), line=task.get('line'))
+    return {'ok': True, 'assigned_to': assignee}
+
+
 class PMComplete(BaseModel):
     remarks: Optional[str] = None
     checklist_results: Optional[dict] = None

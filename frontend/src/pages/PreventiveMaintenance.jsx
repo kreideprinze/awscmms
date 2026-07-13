@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Plus, CheckCircle2, FileDown, UserRound } from 'lucide-react';
+import { Plus, CheckCircle2, FileDown, UserRound, Hand } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,8 @@ export default function PreventiveMaintenance() {
   const [templates, setTemplates] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [groups, setGroups] = useState([]);
+  const [highlightId, setHighlightId] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const load = useCallback(() => {
     const q = filter === 'overdue' ? '?due=overdue' : '';
@@ -36,7 +38,36 @@ export default function PreventiveMaintenance() {
   }, [filter]);
   useEffect(() => { load(); api.get('/pm-templates').then((r) => setTemplates(r.data)); }, [load]);
 
-  const items = myTasks ? data.items.filter((t) => t.assigned_to === user?.username) : data.items;
+  // Deep-link: /preventive-maintenance?task=<id> (e.g. from the Live Event Feed)
+  // highlights + scrolls to the exact PM task row
+  useEffect(() => {
+    const taskId = searchParams.get('task');
+    if (!taskId || !data.items.length) return;
+    if (data.items.find((t) => t.id === taskId)) {
+      setHighlightId(taskId);
+      setTimeout(() => {
+        document.getElementById(`pm-row-${taskId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 150);
+      setTimeout(() => setHighlightId(null), 5000);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('task');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const items = data.items
+    .filter((t) => (myTasks ? t.assigned_to === user?.username : true))
+    .filter((t) => (filter === 'unassigned' ? !t.assigned_to && t.active !== false : true));
+
+  // Claim (tech = self) / Assign (admin picks) — mirrors Work Order governance;
+  // open PM work orders inherit the assignment on the backend
+  const claim = async (task, assignedTo) => {
+    try {
+      const r = await api.post(`/pm-tasks/${task.id}/claim`, assignedTo ? { assigned_to: assignedTo } : {});
+      toast.success(`PM "${task.task_name}" assigned to ${r.data.assigned_to}`);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
 
   const applyTemplate = (tid) => {
     const t = templates.find((x) => x.id === tid);
@@ -102,7 +133,7 @@ export default function PreventiveMaintenance() {
             <UserRound className="h-3 w-3" /> My Tasks
           </button>
         )}
-        {['all', 'overdue'].map((f) => (
+        {['all', 'unassigned', 'overdue'].map((f) => (
           <button key={f} onClick={() => setFilter(f)} data-testid={`pm-filter-${f}`}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors capitalize ${filter === f ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             {f}
@@ -128,7 +159,8 @@ export default function PreventiveMaintenance() {
             {items.map((t) => {
               const rowCount = t.checklist_groups?.length ? t.checklist_groups.reduce((n, g) => n + g.items.length, 0) : (t.checklist?.length || 0);
               return (
-                <TableRow key={t.id} data-testid={`pm-row-${t.id}`} className="border-border hover:bg-white/[0.03]">
+                <TableRow key={t.id} id={`pm-row-${t.id}`} data-testid={`pm-row-${t.id}`}
+                  className={`border-border hover:bg-white/[0.03] ${highlightId === t.id ? 'bg-[hsl(var(--primary))]/10 shadow-[inset_2px_0_0_hsl(var(--primary))]' : ''}`}>
                   <TableCell>
                     <div className="text-sm font-medium">{t.task_name} {t.source === 'predictive' && <span className="ml-1 border border-[#ff9e1c]/50 px-1 text-[9px] uppercase text-[#ff9e1c]">AWS</span>}</div>
                     {rowCount > 0 && <div className="text-[10px] text-muted-foreground">{t.checklist_groups?.length ? `${t.checklist_groups.length} components · ` : ''}{rowCount} check rows</div>}
@@ -137,7 +169,24 @@ export default function PreventiveMaintenance() {
                   <TableCell className="text-xs capitalize">{t.frequency}</TableCell>
                   <TableCell><CritBadge level={t.priority} /></TableCell>
                   <TableCell className={`font-mono text-xs ${t.next_due_date < today && t.active ? 'text-[#ff2e63]' : ''}`}>{t.next_due_date}</TableCell>
-                  <TableCell className="text-sm">{t.assigned_to || '—'}</TableCell>
+                  <TableCell className="text-sm">
+                    {t.assigned_to ? t.assigned_to : (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="border border-[#f9f871]/50 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-[#f9f871]" data-testid={`pm-unassigned-${t.id}`}>Unassigned</span>
+                        {t.active !== false && (isTechRole ? (
+                          <Button size="sm" data-testid={`pm-claim-${t.id}`}
+                            className="h-6 border border-[#f9f871]/60 bg-transparent px-1.5 text-[10px] text-[#f9f871] hover:bg-[#f9f871]/10"
+                            onClick={() => claim(t)}>
+                            <Hand className="mr-0.5 h-2.5 w-2.5" /> Claim
+                          </Button>
+                        ) : isAdmin ? (
+                          <div className="w-40" data-testid={`pm-assign-wrap-${t.id}`}>
+                            <TechnicianSelect value="" onChange={(v) => v && claim(t, v)} testId={`pm-assign-select-${t.id}`} />
+                          </div>
+                        ) : null)}
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
                       {t.active !== false && (
@@ -200,7 +249,7 @@ export default function PreventiveMaintenance() {
             <div className="grid grid-cols-3 gap-3">
               <div><Label className="text-xs">First Due Date</Label><Input type="date" data-testid="pm-create-due-date" value={form.next_due_date} onChange={(e) => setForm({ ...form, next_due_date: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
               <div><Label className="text-xs">Reminder Offset (days)</Label><Input type="number" min="0" value={form.reminder_offset_days} onChange={(e) => setForm({ ...form, reminder_offset_days: e.target.value })} className="bg-[hsl(var(--panel-2))]" /></div>
-              <div><Label className="text-xs">Assign Technician</Label><TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="pm-create-technician" /></div>
+              <div><Label className="text-xs">Assign Technician (optional)</Label><TechnicianSelect value={form.assigned_to} onChange={(v) => setForm({ ...form, assigned_to: v })} testId="pm-create-technician" allowNone /><p className="mt-1 text-[10px] text-muted-foreground">Leave unassigned — any technician can claim it later.</p></div>
             </div>
             <div><Label className="text-xs">Description (optional)</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} className="bg-[hsl(var(--panel-2))]" /></div>
             <div>
