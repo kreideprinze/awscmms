@@ -326,7 +326,26 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
     if availability is None and cal_hours:
         availability = round(run_hours / cal_hours * 100, 1)
 
-    mtbf = round(run_hours / failures, 1) if failures and run_hours else None
+    # ---- MTBF ----
+    # MACHINE level: UNIFIED with the AWS/reliability engine — reads the SAME
+    # TBF-based MTBF (mean run-hours between consecutive failures, driving
+    # category) from reliability_metrics that the AWS page displays, so the two
+    # modules always agree. This is a lifetime reliability metric: the date
+    # slicer intentionally does not re-window it.
+    # Aggregate levels (plant/line/dept/PG) keep the run_hours ÷ failures form,
+    # since inter-failure intervals are not meaningful across mixed machines.
+    mtbf = None
+    mtbf_source = 'aggregate'
+    if level == 'machine':
+        rm = await db.reliability_metrics.find_one({'machine_id': value}, {'_id': 0, 'mtbf': 1})
+        if rm and rm.get('mtbf') is not None:
+            mtbf = rm['mtbf']
+            mtbf_source = 'reliability_engine'
+        elif failures and run_hours:
+            # fallback only when the engine has not computed metrics yet
+            mtbf = round(run_hours / failures, 1)
+    elif failures and run_hours:
+        mtbf = round(run_hours / failures, 1)
     failure_rate = round(failures / run_hours * 1000, 3) if run_hours else None  # failures per 1000 run-hours
 
     # PM compliance
@@ -393,7 +412,7 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
 
     return {
         'level': level, 'value': value, 'date_from': date_from, 'date_to': date_to,
-        'mtbf_hours': mtbf, 'mttr_hours': mttr_hours, 'availability': availability,
+        'mtbf_hours': mtbf, 'mtbf_source': mtbf_source, 'mttr_hours': mttr_hours, 'availability': availability,
         'failure_rate_per_1000h': failure_rate, 'pm_compliance': pm_compliance,
         'failures_total': failures, 'downtime_hours_total': round(total_downtime_min / 60, 1),
         'breakdowns_reported': failures, 'breakdowns_closed': closed_in_range, 'closure_rate': closure_rate,

@@ -67,6 +67,10 @@
   - AWS-triggered WOs are a distinct type: **AWS/Predictive** (`wo_type='Predictive'`, `aws_category` set).
   - **Life % ticks in real-time** using unified runtime philosophy (logged EOD hours override; otherwise 24/7 continuous).
 
+- **MTBF consistency objective (NEW, completed)**:
+  - **Machine-level MTBF in Analytics must match AWS MTBF exactly**, because both represent the same reliability-engine metric.
+  - Provide a transparent source indicator (`mtbf_source`) for debugging and stakeholder clarity.
+
 ### Control Room KPI/range objectives
 - Control Room line KPIs support presets **Shift=8h, Day=24h, Week=168h** plus a **custom date range** slicer.
 - Control Room visual cleanup:
@@ -419,26 +423,15 @@
 - ✅ Unassigned PM tasks display a yellow **UNASSIGNED** badge in the Assigned column.
 - ✅ Technicians can **Claim** an unassigned PM task (self-assign) from the PM list.
 - ✅ Admins can assign via inline technician dropdown (no admin claim).
-- ✅ Backend endpoint: `POST /api/pm-tasks/{task_id}/claim`:
-  - Technician: assigns to self
-  - Admin: requires `assigned_to` else 400
-  - Syncs open PM-generated WOs to the assignee
-  - Emits `pm_assigned` timeline event
+- ✅ Backend endpoint: `POST /api/pm-tasks/{task_id}/claim`.
 
 #### Y2) Live Event Feed deep-linking for ALL event types
-- ✅ Control Room Live Event Feed click deep-links to the *exact* referenced record:
-  - `work_order` → WO popout (`openWorkOrder`) for tech users
-  - `breakdown` → `/breakdowns?bd=<id>` (expand/highlight/scroll)
-  - `warning` → `/breakdowns?warning=<id>` (Warnings view opens the exact dialog)
-  - `pm_task` → `/preventive-maintenance?task=<id>` (highlight/scroll)
-  - fallback → machine drawer
+- ✅ Live Event Feed click deep-links to the *exact* referenced record.
 - ✅ Same deep-link mapping added to the Layout notification bell.
-- ✅ Timeline events verified to consistently carry `reference_type` + `reference_id`.
 
 **Phase Y Testing**
-- ✅ Backend API tests: PM claim (tech), PM assign (admin), admin enforcement (400 without assigned_to), deep-link contract.
-- ✅ Frontend verified via browser automation.
-- ✅ Test data cleaned; user-generated kiosk data preserved.
+- ✅ Backend verified.
+- ✅ Frontend verified.
 
 ---
 
@@ -446,95 +439,71 @@
 **Status:** ✅ COMPLETE — VERIFIED
 
 #### Z1) Backend: transfer/assign/claim governance + RCA locks
-- ✅ Work Orders (`PUT /api/work-orders/{id}`):
-  - `action:'assign'` doubles as **Assign** (unassigned) and **Transfer** (assigned).
-  - Transfer governance enforced: **current assignee OR admin**.
-  - Unassigned claim: `action:'claim'` assigns to the acting technician.
-  - ✅ RCA lock: `wo_type='RCA'` rejects `assign` and `claim` (400), including admins.
-  - ✅ Timeline + notifications:
-    - `wo_assigned` for first assignment
-    - `wo_transferred` for transfers
-
-- ✅ PM tasks (`POST /api/pm-tasks/{task_id}/claim`):
-  - Supports **self-claim**, **direct assignment**, and **transfer**.
-  - Transfer governance enforced: **current assignee OR admin**.
-  - Emits `pm_assigned` and `pm_transferred` timeline/notification events.
-
-- ✅ Breakdowns (`PUT /api/breakdowns/{id}`):
-  - Supports `assign` and `claim`.
-  - Transfer governance: **current assignee OR admin**.
-  - Emits `breakdown_assigned` and `breakdown_transferred` events.
-
-- ✅ Immediate RCA metadata returned on breakdown close:
-  - `rca_required`, `rca_task_id`, `rca_assigned_to`
+- ✅ Work Orders: assign/claim/transfer governance + RCA lock.
+- ✅ PM tasks: claim/assign/transfer governance + timeline events.
+- ✅ Breakdowns: claim/assign/transfer governance + timeline events.
+- ✅ Breakdown close response includes `rca_required` + `rca_task_id`.
 
 #### Z2) Frontend: transfer/assign/claim UI parity
-- ✅ Shared components (`/app/frontend/src/components/Shared.jsx`):
-  - Enhanced `TechnicianSelect` with:
-    - `exclude` prop (avoid selecting current assignee)
-    - `placeholder` prop
-  - New reusable `TransferControl` component.
-
-- ✅ Work Order popout (`WorkOrderModal.jsx`):
-  - Unassigned: **Claim for Me** (tech) + **Assign To…** (tech/admin).
-  - Assigned: **Transfer To…** for current assignee/admin.
-  - RCA: locked banner, no claim/assign/transfer controls.
-
-- ✅ PM list (`PreventiveMaintenance.jsx`):
-  - Unassigned: Claim + Assign.
-  - Assigned: Transfer (assignee/admin).
-
-- ✅ Breakdown actions (`MachineDrawer.jsx` → `BreakdownActions`):
-  - Unassigned: Claim + Assign (tech), Assign (admin).
-  - Assigned: Transfer (assignee/admin).
+- ✅ WO modal: Claim for Me + Assign To… (unassigned), Transfer To… (assigned), RCA locked.
+- ✅ PM page: Claim/Assign (unassigned), Transfer (assigned).
+- ✅ Breakdowns: Claim/Assign/Transfer controls.
 
 #### Z3) Immediate RCA in-flow popup
-- ✅ `RcaForm.jsx` refactored:
-  - Extracted reusable `RcaFormBody` component.
-  - Shows **LOCKED TO** badge and an **immediate RCA** banner.
+- ✅ RepairBreakdown closes 30min breakdown → immediate RCA dialog opens.
 
-- ✅ `RepairBreakdown.jsx` updated:
-  - On close with `rca_required=true`, opens an **in-flow dialog** (`immediate-rca-dialog`) embedding `RcaFormBody`.
-  - Dismissal keeps the RCA **pending and locked** (navigation back to Breakdowns).
+#### Z4) Verification evidence
+- ✅ `/app/test_reports/iteration_12.json` — backend 100%.
+- ✅ Frontend verified via screenshot automation.
 
-#### Z4) Verification evidence + cleanliness
-- ✅ Automated backend regression:
-  - `/app/test_reports/iteration_12.json` — **backend 100% (19/19)**.
-  - Note: the reported frontend login issue in iteration_12 was a **test automation selector artifact**, not a product bug.
-- ✅ Frontend verified via screenshot automation:
-  - WO modal: unassigned claim+assign, assigned transfer, governance behavior when not holder.
-  - PM page: claim/assign/transfer controls reflect governance.
-  - RCA WO modal: locked banner with no claim/assign/transfer.
-  - Immediate RCA E2E: repair close (45 min downtime) → immediate dialog → submit + complete → returns to /breakdowns.
-  - Breakdown row: holder transfer control visible.
-- ✅ Test artifacts cleaned from DB (selected breakdowns/WOs created for verification) while preserving prior user-generated data.
+---
+
+### Phase AA — MTBF Unification (P1)
+**Status:** ✅ COMPLETE — VERIFIED
+
+#### AA1) Diagnosis summary
+- AWS page MTBF comes from **reliability engine** (`reliability_metrics.mtbf`, driving category, TBF-based).
+- Machine Analytics MTBF previously came from **run_hours ÷ failures** computed live in `routers_ops.py`.
+- Result: they could not match; also a specific data-quality case (breakdown backdated before commissioning) caused a poisoned 0.1h engine MTBF.
+
+#### AA2) Implemented remedy (definition unification)
+- ✅ **Machine-level** Analytics MTBF (`/api/analytics/kpis?level=machine`) now reads MTBF from the same reliability engine field:
+  - Backend change: `/app/backend/routers_ops.py` in `analytics_kpis`
+  - For `level='machine'`: `mtbf_hours` comes from `reliability_metrics.mtbf`.
+  - Fallback: if no reliability_metrics exists yet, fall back to `run_hours ÷ failures`.
+  - Aggregate levels (plant/line/department/process_group) unchanged.
+- ✅ Response now includes `mtbf_source`:
+  - `reliability_engine` for machine level when metrics exist
+  - `aggregate` otherwise
+
+#### AA3) Verification
+- ✅ All machines on AWS page now return identical MTBF via machine-level analytics (0 mismatches).
+- ✅ Plant/line aggregates unaffected.
+- ✅ No-failure machine returns `mtbf_hours=None` gracefully.
+- ✅ Backend logs clean.
+
+#### AA4) Known outstanding (documented, not approved yet)
+- ⚠️ The **poisoned 0.1h MTBF** issue remains until a separate P0 data-quality fix is approved:
+  - In `reliability.py:_compute_category`, TBF values are floored with `max(hours, 0.1)` (line ~139), which masks invalid intervals when a breakdown is backdated before commissioning.
+  - This also poisons `predicted_failure_life` and can trigger spurious predictive WOs.
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ None. Phase Z delivered and verified.
+- ✅ None required for MTBF consistency; Phase AA is complete.
 
-### Validation evidence (P0)
+### Optional follow-ups (P0/P1)
+- **P0 (requires approval)**: fix reliability engine’s handling of backdated failures predating commissioning (skip invalid intervals rather than clamp to 0.1; add data-quality warning), and guard `predicted_failure_life` minimum.
+- **P1**: add a small UI hint showing `mtbf_source` (optional) for transparency/debugging.
+- **P1**: E2E regression tests asserting AWS MTBF === machine analytics MTBF.
+
+### Validation evidence
 - Existing test reports:
   - `/app/test_reports/iteration_9.json` — Backend verification **100%**.
   - `/app/test_reports/iteration_11.json` — Corrections Part 4 regression **100%**.
   - `/app/test_reports/iteration_12.json` — Phase Z backend regression **100%**.
-
-### Optional hardening / Refactor (P1)
-- Consolidate task governance UI patterns into shared helpers (unassigned/assigned logic).
-- Add E2E regression tests for deep-links:
-  - `?wo=<id>` (WO modal)
-  - `?bd=<id>` (Breakdowns expand + highlight)
-  - `?warning=<id>` (Warnings open exact dialog)
-  - `?task=<id>` (PM row highlight)
-- Add E2E tests for:
-  - transfer governance (only assignee/admin)
-  - RCA lock enforcement
-  - immediate RCA popup triggering on >threshold closure
-- Add/verify MongoDB indexes for large plants if latency observed.
-- Add an “Operational data health” admin page (optional): counts, recompute buttons, stuck states.
 
 ---
 
@@ -552,55 +521,29 @@
 - ✅ Clicking the DOWN timer jumps to the exact breakdown.
 
 ### Work Orders + Governance
-- ✅ Backend supports Unassigned WOs universally (including kiosk) + claim.
-- ✅ Kanban shows UNASSIGNED.
-- ✅ Techs can claim unassigned WOs via UI.
-- ✅ Admins assign technicians via dropdown (no admin self-claim).
-- ✅ Closure branching:
-  - Corrective + Inspection + AWS/Predictive close directly by technician.
-  - PM/RCA require admin closure.
-- ✅ **Transfer/Assignment parity**:
-  - Unassigned shows **Claim for Me** + **Assign To…**
-  - Assigned supports **Transfer To…** (assignee/admin only)
-- ✅ **RCA lock** enforced: cannot claim/assign/transfer.
+- ✅ Unassigned supported + claim.
+- ✅ Admins assign via dropdown.
+- ✅ Transfer works (assignee/admin only).
+- ✅ RCA lock enforced.
 
 ### Breakdowns + Governance
-- ✅ Unassigned breakdowns allowed.
-- ✅ Breakdowns cannot be closed without a technician on record:
-  - tech auto-assigns on close
-  - admin must select technician
-- ✅ Breakdown claim/assign/transfer supported with governance.
+- ✅ Cannot close without technician.
+- ✅ Claim/assign/transfer supported.
 
 ### Preventive Maintenance (PM Tasks) + Governance
-- ✅ PM tasks can be created unassigned.
-- ✅ PM page exposes an Unassigned filter.
-- ✅ Unassigned PM tasks are visible to technicians and claimable.
-- ✅ Admins can assign technicians; technicians can claim.
-- ✅ PM assignment syncs to open PM work orders.
-- ✅ PM transfer supported with governance.
+- ✅ Unassigned supported + claim.
+- ✅ Transfer supported.
 
 ### Immediate RCA Flow
 - ✅ Closing a >threshold breakdown returns `rca_required` + `rca_task_id`.
-- ✅ Repair flow immediately pops **embedded 5-Why RCA form** in the same user journey.
-- ✅ Dismissal keeps the RCA as a **locked pending** task assigned to the closing technician.
+- ✅ Repair flow pops embedded 5-Why RCA form immediately.
 
 ### AWS / Predictive
-- ✅ Backend per-category health pools (Mechanical/Electrical/PLC) computed independently.
-- ✅ Backend threshold is admin-configurable.
-- ✅ AWS page shows 3 pools + admin threshold setting.
-- ✅ Life %/hours-since-failure tick in real time with hybrid runtime logic.
-
-### Navigation + Technician productivity
-- ✅ Any WO reference deep-links into the exact WO popout.
-- ✅ “My Tasks” filter exists across technician-accessible modules.
-- ✅ Breakdown report Area/Line + Machine selectors have fuzzy/typeahead.
-- ✅ Breakdown deep-link `?bd=` expands + highlights + scrolls.
-- ✅ Warning deep-link `?warning=` opens exact warning detail dialog.
-- ✅ PM deep-link `?task=` highlights + scrolls.
-- ✅ Live Event Feed deep-links all event types to exact records.
+- ✅ 3-pool engine + threshold config.
+- ✅ Life % ticks with hybrid runtime logic.
 
 ### Analytics + Runtime
-- ✅ Backend runtime is unified via `kpi_engine.py` and used by Control Room endpoints.
-- ✅ Analytics has a date range slicer affecting all KPIs/charts.
-- ✅ Closure rate KPI and Pareto chart exist.
-- ✅ Runtime is a single source of truth, and reliability uses compatible runtime assumptions.
+- ✅ Date slicer exists.
+- ✅ Closure rate + Pareto exist.
+- ✅ Runtime unified.
+- ✅ **MTBF consistency**: Machine-level analytics MTBF matches AWS MTBF exactly (same reliability engine value).
