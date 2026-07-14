@@ -1,30 +1,30 @@
 [
   {
     "content": "Explore AWSPage.jsx, routers_maintenance.py (complete_pm_task), routers_ops.py (analytics/kpis), Analytics.jsx",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Backend: PM Compliance on_time = within ±reminder_offset window in complete_pm_task",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Backend: Backfill on_time flag for existing pm_completions",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Backend: Add time_utilization aggregation (duration by wo_type) to analytics KPIs endpoint",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: AWSPage category filter hides non-matching pool columns + recalculates KPI cards",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Frontend: Time Utilization donut chart in Analytics.jsx with date/line/dept filters",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Run testing agent (backend + frontend) and fix any issues",
-    "status": "pending"
+    "status": "completed"
   }
 ]
