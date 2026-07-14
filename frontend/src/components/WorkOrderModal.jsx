@@ -36,13 +36,17 @@ function CompleteForm({ wo, onDone, onCancel }) {
   const [startT, setStartT] = useState(toLocalInput(wo.started_at || wo.created_at));
   const [endT, setEndT] = useState(toLocalInput(new Date().toISOString()));
   const [busy, setBusy] = useState(false);
+  const [triedSubmit, setTriedSubmit] = useState(false); // inline required-field flag for Action Taken *
 
   const submit = async () => {
+    // MANDATORY FIELD: Action Taken must be entered before completing (Corrective /
+    // Inspection / Predictive — the types where it's captured in this form)
+    if (!actionTaken.trim()) { setTriedSubmit(true); toast.error('Action Taken is required to complete this work order'); return; }
     if (startT && endT && new Date(endT) < new Date(startT)) { toast.error('End time cannot be before start time'); return; }
     setBusy(true);
     try {
       await api.put(`/work-orders/${wo.id}`, {
-        action: 'complete', action_taken: actionTaken || undefined,
+        action: 'complete', action_taken: actionTaken.trim(),
         started_at: startT ? toIsoUtc(startT) : undefined,
         completed_at: endT ? toIsoUtc(endT) : undefined,
         spare_parts: spares.filter((s) => s.sap_code && s.quantity > 0).map((s) => ({ sap_code: s.sap_code, quantity: parseFloat(s.quantity) })),
@@ -72,7 +76,17 @@ function CompleteForm({ wo, onDone, onCancel }) {
         <DateTimeField label="Start Time" value={startT} onChange={setStartT} testId="wo-complete-start-time" />
         <DateTimeField label="End Time" value={endT} onChange={setEndT} testId="wo-complete-end-time" />
       </div>
-      <div><Label className="text-xs">Action Taken</Label><Textarea data-testid="wo-complete-action-taken" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} className="bg-[hsl(var(--panel-2))]" /></div>
+      <div>
+        <Label className="text-xs">Action Taken <span className="text-[#ff2e63]">*</span></Label>
+        <Textarea data-testid="wo-complete-action-taken" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)}
+          placeholder="Describe the work performed (required)"
+          className={`bg-[hsl(var(--panel-2))] ${triedSubmit && !actionTaken.trim() ? 'border-[#ff2e63] focus-visible:ring-[#ff2e63]' : ''}`} />
+        {triedSubmit && !actionTaken.trim() && (
+          <p className="mt-1 font-mono text-[10px] uppercase tracking-wide text-[#ff2e63]" data-testid="wo-complete-action-taken-error">
+            Action Taken is required to complete this work order *
+          </p>
+        )}
+      </div>
       <SpareRows rows={spares} setRows={setSpares} />
       <div className="flex gap-2">
         <Button onClick={submit} disabled={busy} data-testid="wo-complete-confirm" className="flex-1 border border-[#05ffa1]/60 bg-transparent text-[#05ffa1] hover:bg-[#05ffa1]/10">

@@ -33,6 +33,7 @@ export default function RepairBreakdown() {
   const [bd, setBd] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [actionTaken, setActionTaken] = useState('');
+  const [triedSubmit, setTriedSubmit] = useState(false); // inline required-field flag for Action Taken *
   const [spares, setSpares] = useState([]);
   const [assignTech, setAssignTech] = useState('');
   const [startT, setStartT] = useState('');
@@ -69,7 +70,7 @@ export default function RepairBreakdown() {
   };
 
   const completeRepair = async () => {
-    if (!actionTaken.trim()) { toast.error('Action Taken is required to complete the repair'); return; }
+    if (!actionTaken.trim()) { setTriedSubmit(true); toast.error('Action Taken is required to complete the repair'); return; }
     if (startT && endT && new Date(endT) < new Date(startT)) { toast.error('End time cannot be before start time'); return; }
     // A breakdown can never be closed without a technician on record:
     // technicians auto-assign themselves; admins must pick from the dropdown.
@@ -203,9 +204,15 @@ export default function RepairBreakdown() {
               If downtime exceeds the threshold, a dedicated 5-Why RCA work order is auto-assigned (root cause is captured there, not here).
             </p>
             <div>
-              <Label className="text-xs">Action Taken *</Label>
+              <Label className="text-xs">Action Taken <span className="text-[#ff2e63]">*</span></Label>
               <Textarea data-testid="repair-action-taken" value={actionTaken} onChange={(e) => setActionTaken(e.target.value)} rows={2}
-                placeholder="e.g. Replaced bearing 6205 ZZ, realigned shaft" className="bg-[hsl(var(--panel-2))]" />
+                placeholder="e.g. Replaced bearing 6205 ZZ, realigned shaft"
+                className={`bg-[hsl(var(--panel-2))] ${triedSubmit && !actionTaken.trim() ? 'border-[#ff2e63] focus-visible:ring-[#ff2e63]' : ''}`} />
+              {triedSubmit && !actionTaken.trim() && (
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-wide text-[#ff2e63]" data-testid="repair-action-taken-error">
+                  Action Taken is required to complete the repair *
+                </p>
+              )}
             </div>
             <SpareRows rows={spares} setRows={setSpares} />
             <Button data-testid="repair-complete-button" disabled={submitting} onClick={completeRepair}

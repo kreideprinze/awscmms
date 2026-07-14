@@ -361,16 +361,18 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         fm['downtime'] += b.get('downtime_minutes') or 0
     failure_modes = [{'mode': m, 'count': v['count']} for m, v in sorted(fm_map.items(), key=lambda kv: -kv[1]['count'])[:10]]
 
-    # ---- Pareto analysis: failure modes desc by frequency + cumulative % overlay ----
-    pareto_rows = sorted(fm_map.items(), key=lambda kv: (-kv[1]['count'], -kv[1]['downtime']))
-    total_count = sum(v['count'] for _, v in pareto_rows) or 1
-    cum = 0
+    # ---- Pareto analysis: failure modes desc by TOTAL DOWNTIME + cumulative % overlay ----
+    # Bars = downtime contribution per failure mode (NOT occurrence count); the
+    # cumulative line = cumulative downtime share — classic 80/20 against downtime.
+    pareto_rows = sorted(fm_map.items(), key=lambda kv: (-kv[1]['downtime'], -kv[1]['count']))
+    total_downtime = sum(v['downtime'] for _, v in pareto_rows) or 1
+    cum = 0.0
     pareto = []
     for mode, v in pareto_rows[:15]:
-        cum += v['count']
+        cum += v['downtime']
         pareto.append({'mode': mode, 'count': v['count'],
                        'downtime_hours': round(v['downtime'] / 60, 1),
-                       'cumulative_pct': round(cum / total_count * 100, 1)})
+                       'cumulative_pct': round(cum / total_downtime * 100, 1)})
 
     return {
         'level': level, 'value': value, 'date_from': date_from, 'date_to': date_to,

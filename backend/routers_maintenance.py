@@ -359,6 +359,9 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
             closing_tech = bd.get('assigned_to')
         if not closing_tech:
             raise HTTPException(status_code=400, detail='A technician must be assigned before closing — select the technician who performed the repair')
+        # MANDATORY FIELD: a repair can never be completed without describing what was done
+        if not str(req.action_taken or bd.get('action_taken') or '').strip():
+            raise HTTPException(status_code=400, detail='Action Taken is required — describe the repair before completing')
         # Corrected/edited times take precedence over the raw elapsed timer — downtime,
         # availability and the RCA trigger all evaluate against the EDITED duration.
         start_time = req.start_time or bd['start_time']
@@ -667,6 +670,12 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
         duration = req.duration_minutes
         if duration is None and s_dt and e_dt:
             duration = round((e_dt - s_dt).total_seconds() / 60.0, 1)
+        # MANDATORY FIELD: general/Corrective-style WOs (where Action Taken is captured
+        # at completion) cannot be completed without it. PM WOs close via the checklist
+        # flow and RCA via the 5-Why form (its corrective action becomes action_taken).
+        if req.action == 'complete' and wo.get('wo_type') in ('Corrective', 'Inspection', 'Predictive') \
+                and not str(req.action_taken or wo.get('action_taken') or '').strip():
+            raise HTTPException(status_code=400, detail='Action Taken is required — describe the work performed before completing')
         # Type-conditional lifecycle:
         #   admin-gated types: complete → PENDING_ADMIN_CLOSURE, only admin can CLOSE
         #   all other types:   complete → CLOSED directly (technician closure)
@@ -1077,10 +1086,16 @@ async def complete_pm_task(task_id: str, req: PMComplete, user: dict = Depends(r
         status = str(r.get('status', '')).upper().replace(' ', '_')
         if status not in ('OK', 'NOT_OK'):
             raise HTTPException(status_code=400, detail=f"Invalid row status '{r.get('status')}' — must be OK or NOT_OK")
+        remarks_txt = str(r.get('remarks', '') or '').strip()
+        # MANDATORY FIELD: every NOT OK row must carry a reason/observation.
+        # OK rows keep remarks optional. Applies to every PM frequency/machine/line.
+        if status == 'NOT_OK' and not remarks_txt:
+            raise HTTPException(status_code=400,
+                                detail=f"Remarks are required for NOT OK rows — add a reason/observation for \u201c{r.get('checked_for') or r.get('description') or 'row ' + str(r.get('sn'))}\u201d")
         rows.append({
             'sn': r.get('sn'), 'description': str(r.get('description', '')),
             'checked_for': str(r.get('checked_for', '')), 'parameter': str(r.get('parameter', '')),
-            'status': status, 'remarks': str(r.get('remarks', '') or ''),
+            'status': status, 'remarks': remarks_txt,
         })
     spares = [s.model_dump() for s in (req.spares_consumed or [])]
     if spares:

@@ -55,10 +55,18 @@ export default function ClosePMTask() {
 
   const setRow = (key, patch) => setResults((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
 
+  // MANDATORY: every NOT OK row must carry a reason/observation before submission
+  const rowNeedsRemarks = (r) => results[r.key]?.status === 'NOT_OK' && !(results[r.key]?.remarks || '').trim();
+  const notOkMissing = rows.filter(rowNeedsRemarks);
+
   const submit = async () => {
     const missing = rows.filter((r) => !results[r.key]?.status);
     if (missing.length) {
       toast.error(`Set OK / NOT OK for every row — ${missing.length} remaining`);
+      return;
+    }
+    if (notOkMissing.length) {
+      toast.error(`Remarks are required for NOT OK rows — ${notOkMissing.length} row${notOkMissing.length > 1 ? 's' : ''} missing a reason/observation`);
       return;
     }
     if (!doneBy.trim()) { toast.error('Done By name is required'); return; }
@@ -106,7 +114,7 @@ export default function ClosePMTask() {
           <Button variant="ghost" size="icon" onClick={() => navigate('/preventive-maintenance')} data-testid="close-pm-back"><ArrowLeft className="h-4 w-4" /></Button>
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Close PM Task — {task.task_name}</h1>
-            <p className="text-xs text-muted-foreground">Walk the checklist: every row needs a status. Remarks are per row.</p>
+            <p className="text-xs text-muted-foreground">Walk the checklist: every row needs a status. Remarks are mandatory for NOT OK rows *.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -162,7 +170,14 @@ export default function ClosePMTask() {
                 <td className="px-2 py-2"><StatusToggle value={results[r.key]?.status} onChange={(s) => setRow(r.key, { status: s })} testId={`close-pm-status-${r.key}`} /></td>
                 <td className="px-2 py-2">
                   <Input value={results[r.key]?.remarks || ''} onChange={(e) => setRow(r.key, { remarks: e.target.value })}
-                    placeholder="Row remarks…" data-testid={`close-pm-remarks-${r.key}`} className="h-8 bg-[hsl(var(--panel-2))] text-xs" />
+                    placeholder={results[r.key]?.status === 'NOT_OK' ? 'Reason / observation (required) *' : 'Row remarks…'}
+                    data-testid={`close-pm-remarks-${r.key}`}
+                    className={`h-8 bg-[hsl(var(--panel-2))] text-xs ${rowNeedsRemarks(r) ? 'border-[#ff2e63] focus-visible:ring-[#ff2e63]' : ''}`} />
+                  {rowNeedsRemarks(r) && (
+                    <p className="mt-1 font-mono text-[9px] uppercase tracking-wide text-[#ff2e63]" data-testid={`close-pm-remarks-error-${r.key}`}>
+                      Remarks required for NOT OK *
+                    </p>
+                  )}
                 </td>
               </tr>
             ))}

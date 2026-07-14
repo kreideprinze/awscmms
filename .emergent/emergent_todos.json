@@ -1,42 +1,18 @@
 [
   {
-    "content": "kpi_engine.py: derive_line_day_rows helper + compute_line_kpis planned-based availability",
+    "content": "Pareto: backend downtime-based sort/cumulative + Analytics.jsx chart labels/axes",
     "status": "completed"
   },
   {
-    "content": "routers_ops.py: runtime endpoints planned_hours model + CSV import",
+    "content": "Action Taken mandatory: backend enforcement (BD complete/close + WO complete) + inline validation UI (Repair page, WO modal)",
     "status": "completed"
   },
   {
-    "content": "reliability.py: run_hours_between uses planned - derived downtime (24/7 fallback)",
+    "content": "PM NOT OK remarks required: ClosePMTask inline validation + backend 400",
     "status": "completed"
   },
   {
-    "content": "routers_ops.py analytics: run_hours/trend/failure_rate from new model",
-    "status": "completed"
-  },
-  {
-    "content": "routers_core.py machine runtime summary from line model",
-    "status": "completed"
-  },
-  {
-    "content": "server.py: stop runtime_logs clock writes; routers_admin seeder update",
-    "status": "completed"
-  },
-  {
-    "content": "Purge old runtime data (fresh start)",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend Runtime.jsx: Planned Runtime input + derived display + clamp flag",
-    "status": "completed"
-  },
-  {
-    "content": "Backend verification (curl/python)",
-    "status": "completed"
-  },
-  {
-    "content": "Testing agent regression (backend + frontend)",
+    "content": "Verify (build + API checks + screenshots), test regression",
     "status": "completed"
   }
 ]

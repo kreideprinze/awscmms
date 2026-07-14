@@ -293,21 +293,21 @@ export default function Analytics() {
               )}
             </div>
             <div className="cyber-panel p-4 xl:col-span-2">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Failure Modes — Pareto (count + cumulative %)</div>
+              <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Failure Modes — Pareto (downtime + cumulative %)</div>
               {(kpis.pareto || []).length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No failures recorded</div> : (
                 <ResponsiveContainer width="100%" height={260}>
                   <ComposedChart data={kpis.pareto} data-testid="analytics-pareto-chart">
                     <CartesianGrid stroke={chartTheme.grid} vertical={false} />
                     <XAxis dataKey="mode" tick={{ ...chartTheme.tick, fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                    <YAxis yAxisId="count" tick={chartTheme.tick} width={35} allowDecimals={false} />
+                    <YAxis yAxisId="downtime" tick={chartTheme.tick} width={45} unit="h" />
                     <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={chartTheme.tick} width={40} unit="%" />
-                    <RTooltip contentStyle={chartTheme.tooltip} formatter={(v, name) => name === 'cumulative_pct' ? [`${v}%`, 'Cumulative'] : [v, name === 'count' ? 'Failures' : name]} />
-                    <Bar yAxisId="count" dataKey="count" fill="#00fff5" radius={[3, 3, 0, 0]} maxBarSize={42} />
+                    <RTooltip contentStyle={chartTheme.tooltip} formatter={(v, name) => name === 'cumulative_pct' ? [`${v}%`, 'Cumulative downtime'] : name === 'downtime_hours' ? [`${v}h`, 'Downtime'] : [v, name]} />
+                    <Bar yAxisId="downtime" dataKey="downtime_hours" fill="#00fff5" radius={[3, 3, 0, 0]} maxBarSize={42} />
                     <Line yAxisId="pct" type="monotone" dataKey="cumulative_pct" stroke="#ff9e1c" strokeWidth={2} dot={{ r: 3 }} />
                   </ComposedChart>
                 </ResponsiveContainer>
               )}
-              <p className="mt-1 text-[10px] text-muted-foreground">80/20 view — bars are failure counts per mode (sorted), the line is the cumulative share of all failures.</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">80/20 view — bars are TOTAL DOWNTIME (hours) per failure mode (sorted), the line is the cumulative share of all downtime.</p>
             </div>
           </div>
         </>
