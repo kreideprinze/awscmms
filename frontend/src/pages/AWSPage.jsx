@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { Siren, RefreshCw } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
@@ -25,9 +25,10 @@ const lifeBarColor = (pct) => (pct >= 100 ? 'bg-[#ff2e63]' : pct >= 80 ? 'bg-[#f
 
 // Three independent health pools per machine — Mechanical / Electrical / PLC.
 // Each pool has its own MTBF, predicted life and life %; the DRIVING pool (▲) is the riskiest.
-function PoolBars({ m }) {
+// When a category filter is active, ONLY that pool renders (others are hidden entirely).
+function PoolBars({ m, category = 'all' }) {
   const cats = m.categories || {};
-  const present = POOL_ORDER.filter((c) => cats[c]);
+  const present = POOL_ORDER.filter((c) => cats[c] && (category === 'all' || c === category));
   if (!present.length) return <span className="text-xs text-muted-foreground">—</span>;
   return (
     <div className="min-w-[180px] space-y-1" data-testid={`aws-pools-${m.machine_id}`}>
@@ -35,13 +36,13 @@ function PoolBars({ m }) {
         const p = cats[c];
         const driving = m.driving_category === c;
         return (
-          <div key={c} className={`flex items-center gap-1.5 ${driving ? '' : 'opacity-60'}`} title={`${p.label}: ${p.life_pct}% of ${p.predicted_failure_life}h predicted life · MTBF ${p.mtbf}h · ${p.health.replace('_', ' ')}`}>
+          <div key={c} className={`flex items-center gap-1.5 ${driving || category !== 'all' ? '' : 'opacity-60'}`} title={`${p.label}: ${p.life_pct}% of ${p.predicted_failure_life}h predicted life · MTBF ${p.mtbf}h · ${p.health.replace('_', ' ')}`}>
             <span className="w-7 font-mono text-[9px] font-semibold" style={{ color: CAT_COLOR[c] }}>{CAT_SHORT[c]}</span>
             <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[hsl(var(--panel-3))]">
               <div className={`h-full ${lifeBarColor(p.life_pct)}`} style={{ width: `${Math.min(p.life_pct, 100)}%` }} />
             </div>
             <span className="w-10 tabular-nums text-right text-[10px]">{p.life_pct}%</span>
-            {driving && <span className="font-mono text-[9px] text-[#ff9e1c]" title="Driving pool (riskiest)">▲</span>}
+            {driving && category === 'all' && <span className="font-mono text-[9px] text-[#ff9e1c]" title="Driving pool (riskiest)">▲</span>}
           </div>
         );
       })}
@@ -59,7 +60,10 @@ export default function AWSPage() {
 
   const load = useCallback(() => {
     const params = new URLSearchParams();
-    if (health !== 'all') params.set('health', health);
+    // With a category selected, the health filter is applied CLIENT-SIDE against
+    // that pool's own health — the server-side `health` param matches the blended
+    // (worst-pool) machine health, which would leak other pools' states in.
+    if (health !== 'all' && category === 'all') params.set('health', health);
     if (category !== 'all') params.set('category', category);
     api.get(`/reliability/metrics?${params}`).then((r) => setMetrics(r.data));
     api.get('/reliability/settings').then((r) => setSettings(r.data));
@@ -86,12 +90,33 @@ export default function AWSPage() {
     } catch (e) { toast.error(errMsg(e)); } finally { setSavingSettings(false); }
   };
 
+  // STRICT category scoping — selecting a pool hides machines without it and
+  // re-reads EVERY table figure + KPI card from that pool alone (never the
+  // blended machine-level state). 'All Pools' keeps the blended behaviour.
+  const rows = useMemo(() => {
+    if (category === 'all') return metrics;
+    return metrics
+      .filter((m) => (m.categories || {})[category])
+      .map((m) => {
+        const p = m.categories[category];
+        return {
+          ...m,
+          level: p.level, failures_count: p.failures_count, tier: p.tier,
+          mtbf: p.mtbf, predicted_failure_life: p.predicted_failure_life,
+          hours_since_last_failure: p.hours_since_last_failure,
+          health: p.health, weibull: p.weibull,
+        };
+      })
+      .filter((m) => health === 'all' || m.health === health);
+  }, [metrics, category, health]);
+
   const counts = {
-    watch: metrics.filter((m) => m.health === 'watch').length,
-    inspection: metrics.filter((m) => m.health === 'inspection_due').length,
-    overdue: metrics.filter((m) => m.health === 'overdue').length,
-    weibull: metrics.filter((m) => m.weibull).length,
+    watch: rows.filter((m) => m.health === 'watch').length,
+    inspection: rows.filter((m) => m.health === 'inspection_due').length,
+    overdue: rows.filter((m) => m.health === 'overdue').length,
+    weibull: rows.filter((m) => m.weibull).length,
   };
+  const catLabel = CATEGORY_FILTERS.find((c) => c.key === category)?.label;
 
   return (
     <div className="p-6" data-testid="aws-page">
@@ -108,7 +133,7 @@ export default function AWSPage() {
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
-        <KpiCard testId="aws-kpi-tracked" label="Machines Tracked" value={metrics.length} />
+        <KpiCard testId="aws-kpi-tracked" label={category === 'all' ? 'Machines Tracked' : `Machines Tracked — ${catLabel}`} value={rows.length} />
         <KpiCard testId="aws-kpi-watch" label="Watch (70–80%)" value={counts.watch} accent={counts.watch ? 'text-[#f9f871]' : ''} />
         <KpiCard testId="aws-kpi-inspection" label="Inspection Due (80–100%)" value={counts.inspection} accent={counts.inspection ? 'text-[#ff9e1c]' : ''} />
         <KpiCard testId="aws-kpi-overdue" label="Overdue (100%+)" value={counts.overdue} accent={counts.overdue ? 'text-[#ff2e63]' : ''} />
@@ -136,27 +161,29 @@ export default function AWSPage() {
           <TableHeader>
             <TableRow className="border-border bg-[hsl(var(--panel-1))] hover:bg-[hsl(var(--panel-1))]">
               <TableHead className="text-xs uppercase">Machine</TableHead>
-              <TableHead className="text-xs uppercase">Health Pools (life %)</TableHead>
+              <TableHead className="text-xs uppercase">{category === 'all' ? 'Health Pools (life %)' : `${catLabel} Pool (life %)`}</TableHead>
               <TableHead className="text-xs uppercase">Level</TableHead>
               <TableHead className="text-xs uppercase">Tier</TableHead>
-              <TableHead className="text-xs uppercase">MTBF ▲</TableHead>
-              <TableHead className="text-xs uppercase">Predicted Life ▲</TableHead>
-              <TableHead className="text-xs uppercase">Hours Since Failure ▲</TableHead>
+              <TableHead className="text-xs uppercase">MTBF {category === 'all' ? '▲' : ''}</TableHead>
+              <TableHead className="text-xs uppercase">Predicted Life {category === 'all' ? '▲' : ''}</TableHead>
+              <TableHead className="text-xs uppercase">Hours Since Failure {category === 'all' ? '▲' : ''}</TableHead>
               <TableHead className="text-xs uppercase">Health</TableHead>
-              <TableHead className="text-xs uppercase">Weibull β/η ▲</TableHead>
+              <TableHead className="text-xs uppercase">Weibull β/η {category === 'all' ? '▲' : ''}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {metrics.length === 0 && (
-              <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">No reliability data yet. Metrics appear immediately after the first recorded breakdown.</TableCell></TableRow>
+            {rows.length === 0 && (
+              <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">
+                {category === 'all' ? 'No reliability data yet. Metrics appear immediately after the first recorded breakdown.' : `No machines with an active ${catLabel} health pool${health !== 'all' ? ` in “${health.replace('_', ' ')}” state` : ''}.`}
+              </TableCell></TableRow>
             )}
-            {metrics.map((m) => (
+            {rows.map((m) => (
               <TableRow key={m.machine_id} data-testid={`aws-row-${m.machine_id}`} className="border-border hover:bg-white/[0.03]">
                 <TableCell>
                   <button className="text-sm font-medium hover:text-[hsl(var(--primary))]" onClick={() => openMachine(m.machine_id)}>{m.machine_name}</button>
                   <div className="text-[10px] text-muted-foreground">{m.line} / {m.process_group}</div>
                 </TableCell>
-                <TableCell><PoolBars m={m} /></TableCell>
+                <TableCell><PoolBars m={m} category={category} /></TableCell>
                 <TableCell className="text-sm">L{m.level} <span className="text-[10px] text-muted-foreground">({m.failures_count}f)</span></TableCell>
                 <TableCell className="text-xs capitalize">{m.tier}</TableCell>
                 <TableCell className="tabular-nums text-sm">{m.mtbf}h</TableCell>

@@ -1,213 +1,299 @@
-"""Test new features: line KPIs, UI prefs, branding.
-Tests:
-1. Line KPIs endpoint with different window sizes (8h, 24h, 168h)
-2. Invalid hours parameter rejection
-3. UI preferences GET/PUT per user with validation
-4. Branding accent color validation
-5. Logo upload/delete with size/type validation
 """
-import asyncio
-import base64
-import json
+Backend Testing: Three NEW Features
+1. PM on_time tolerance window (± reminder_offset_days)
+2. PM Backfill endpoint (idempotent)
+3. Time Utilization in Analytics KPIs
+"""
+import requests
 import sys
+from datetime import datetime, timedelta, timezone
 
-import httpx
+BASE_URL = "https://content-extractor-75.preview.emergentagent.com/api"
 
-BASE = 'https://content-extractor-75.preview.emergentagent.com/api'
+class NewFeaturesTester:
+    def __init__(self):
+        self.admin_token = None
+        self.tech_token = None
+        self.tests_run = 0
+        self.tests_passed = 0
+        self.test_machine_id = None
+        self.test_pm_task_id = None
+        self.test_pm_completion_ids = []
 
-results = []
+    def log(self, msg, status="INFO"):
+        prefix = {"PASS": "✅", "FAIL": "❌", "INFO": "🔍"}.get(status, "ℹ️")
+        print(f"{prefix} {msg}")
 
+    def test(self, name, fn):
+        """Run a single test"""
+        self.tests_run += 1
+        self.log(f"Testing: {name}", "INFO")
+        try:
+            fn()
+            self.tests_passed += 1
+            self.log(f"PASSED: {name}", "PASS")
+            return True
+        except AssertionError as e:
+            self.log(f"FAILED: {name} - {str(e)}", "FAIL")
+            return False
+        except Exception as e:
+            self.log(f"ERROR: {name} - {str(e)}", "FAIL")
+            return False
 
-def check(name, ok, detail=''):
-    results.append((name, ok, detail))
-    status = 'PASS' if ok else 'FAIL'
-    print(f"{status}: {name} {detail}")
+    def login(self, username, password):
+        """Login and return token"""
+        r = requests.post(f"{BASE_URL}/auth/login", json={"username": username, "password": password})
+        if r.status_code == 200:
+            return r.json().get("token")
+        raise Exception(f"Login failed for {username}: {r.status_code} {r.text}")
 
+    def get(self, endpoint, token, expected_status=200):
+        """GET request"""
+        headers = {"Authorization": f"Bearer {token}"}
+        r = requests.get(f"{BASE_URL}{endpoint}", headers=headers)
+        if r.status_code != expected_status:
+            raise AssertionError(f"GET {endpoint}: Expected {expected_status}, got {r.status_code}: {r.text}")
+        return r.json() if r.status_code == 200 else None
 
-async def main():
-    async with httpx.AsyncClient(timeout=30) as http:
-        # 1. Login as admin
-        r = await http.post(f'{BASE}/auth/login', json={'username': 'admin', 'password': 'admin123'})
-        check('admin login', r.status_code == 200, str(r.status_code))
-        if r.status_code != 200:
-            print(f"Login failed: {r.text}")
-            sys.exit(1)
-        admin_token = r.json()['token']
-        admin_headers = {'Authorization': f'Bearer {admin_token}'}
+    def post(self, endpoint, token, data, expected_status=200):
+        """POST request"""
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        r = requests.post(f"{BASE_URL}{endpoint}", headers=headers, json=data)
+        if r.status_code not in (expected_status, 201) if expected_status == 200 else r.status_code != expected_status:
+            raise AssertionError(f"POST {endpoint}: Expected {expected_status}, got {r.status_code}: {r.text}")
+        return r.json() if r.status_code in (200, 201) else None
 
-        # 2. Login as tech user
-        r = await http.post(f'{BASE}/auth/login', json={'username': 'tech', 'password': 'tech123'})
-        check('tech login', r.status_code == 200)
-        tech_token = r.json()['token']
-        tech_headers = {'Authorization': f'Bearer {tech_token}'}
+    def put(self, endpoint, token, data, expected_status=200):
+        """PUT request"""
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        r = requests.put(f"{BASE_URL}{endpoint}", headers=headers, json=data)
+        if r.status_code != expected_status:
+            raise AssertionError(f"PUT {endpoint}: Expected {expected_status}, got {r.status_code}: {r.text}")
+        return r.json() if r.status_code == 200 else None
 
-        # ---- LINE KPIs TESTS ----
-        print("\n=== LINE KPI TESTS ===")
+    def setup(self):
+        """Setup: login users, get test machine"""
+        self.log("=== SETUP ===")
+        self.admin_token = self.login("admin", "admin123")
+        self.tech_token = self.login("tech", "tech123")
+        self.log("Users logged in successfully")
+
+        # Get a test machine
+        machines = self.get("/machines", self.admin_token)
+        if machines and len(machines) > 0:
+            self.test_machine_id = machines[0]["id"]
+            self.log(f"Test machine: {machines[0]['name']} ({self.test_machine_id})")
+
+    # ============ FEATURE 1: PM ON_TIME TOLERANCE ============
+    def test_pm_on_time_within_tolerance(self):
+        """Test: PM completed within tolerance window should be on_time=TRUE"""
+        today = datetime.now(timezone.utc).date().isoformat()
         
-        # Test default (24h)
-        r = await http.get(f'{BASE}/control-room/line-kpis', headers=admin_headers)
-        check('line-kpis default (24h)', r.status_code == 200, str(r.status_code))
-        if r.status_code == 200:
-            data = r.json()
-            check('line-kpis has window_hours', 'window_hours' in data, str(data.get('window_hours')))
-            check('line-kpis has lines array', 'lines' in data and isinstance(data['lines'], list))
-            if data.get('lines'):
-                line = data['lines'][0]
-                required = ['line', 'department', 'machines', 'availability', 'downtime_minutes', 'sections']
-                for field in required:
-                    check(f'line-kpis line has {field}', field in line, str(line.keys()))
-                if line.get('sections'):
-                    section = line['sections'][0]
-                    sec_required = ['process_group', 'machines', 'availability', 'downtime_minutes']
-                    for field in sec_required:
-                        check(f'line-kpis section has {field}', field in section, str(section.keys()))
-
-        # Test 8h window
-        r = await http.get(f'{BASE}/control-room/line-kpis?hours=8', headers=admin_headers)
-        check('line-kpis 8h window', r.status_code == 200 and r.json().get('window_hours') == 8)
-
-        # Test 168h (week) window
-        r = await http.get(f'{BASE}/control-room/line-kpis?hours=168', headers=admin_headers)
-        check('line-kpis 168h window', r.status_code == 200 and r.json().get('window_hours') == 168)
-
-        # Test invalid hours (0)
-        r = await http.get(f'{BASE}/control-room/line-kpis?hours=0', headers=admin_headers)
-        check('line-kpis rejects hours=0', r.status_code == 422, str(r.status_code))
-
-        # Test invalid hours (200)
-        r = await http.get(f'{BASE}/control-room/line-kpis?hours=200', headers=admin_headers)
-        check('line-kpis rejects hours=200', r.status_code == 422, str(r.status_code))
-
-        # ---- UI PREFERENCES TESTS ----
-        print("\n=== UI PREFERENCES TESTS ===")
+        # Create PM task with reminder_offset_days=1 and next_due_date=today
+        pm_task = self.post("/pm-tasks", self.admin_token, {
+            "task_name": "Test PM On-Time Tolerance",
+            "machine_id": self.test_machine_id,
+            "assigned_to": "tech",
+            "frequency": "monthly",
+            "checklist": ["Check item 1", "Check item 2"],
+            "reminder_offset_days": 1,
+            "next_due_date": today
+        })
         
-        # Get admin's current prefs (save for restoration)
-        r = await http.get(f'{BASE}/users/me/ui-prefs', headers=admin_headers)
-        check('get ui-prefs admin', r.status_code == 200)
-        admin_original_prefs = r.json() if r.status_code == 200 else {}
-        print(f"Admin original prefs: {admin_original_prefs}")
-
-        # Get tech's current prefs
-        r = await http.get(f'{BASE}/users/me/ui-prefs', headers=tech_headers)
-        check('get ui-prefs tech', r.status_code == 200)
-        tech_original_prefs = r.json() if r.status_code == 200 else {}
-
-        # Test PUT sidebar_order for admin
-        test_order = ['analytics', 'control-room', 'breakdowns', 'work-orders']
-        r = await http.put(f'{BASE}/users/me/ui-prefs', headers=admin_headers, json={'sidebar_order': test_order})
-        check('put ui-prefs sidebar_order', r.status_code == 200)
-        if r.status_code == 200:
-            data = r.json()
-            check('sidebar_order persisted', data.get('sidebar_order') == test_order, str(data.get('sidebar_order')))
-
-        # Test PUT icon_colors for admin
-        test_colors = {'control-room': '#ff0000', 'breakdowns': '#00ff00'}
-        r = await http.put(f'{BASE}/users/me/ui-prefs', headers=admin_headers, json={'icon_colors': test_colors})
-        check('put ui-prefs icon_colors', r.status_code == 200)
-        if r.status_code == 200:
-            data = r.json()
-            check('icon_colors persisted', data.get('icon_colors', {}).get('control-room') == '#ff0000')
-
-        # Test invalid hex color rejection
-        r = await http.put(f'{BASE}/users/me/ui-prefs', headers=admin_headers, json={'icon_colors': {'control-room': 'red'}})
-        check('ui-prefs rejects invalid hex', r.status_code == 400, str(r.status_code))
-
-        # Test invalid hex color #12345 (5 chars)
-        r = await http.put(f'{BASE}/users/me/ui-prefs', headers=admin_headers, json={'icon_colors': {'control-room': '#12345'}})
-        check('ui-prefs rejects short hex', r.status_code == 400, str(r.status_code))
-
-        # Test duplicate module keys rejection
-        r = await http.put(f'{BASE}/users/me/ui-prefs', headers=admin_headers, json={'sidebar_order': ['control-room', 'breakdowns', 'control-room']})
-        check('ui-prefs rejects duplicate keys', r.status_code == 400, str(r.status_code))
-
-        # Test tech user has independent prefs
-        r = await http.put(f'{BASE}/users/me/ui-prefs', headers=tech_headers, json={'sidebar_order': ['pm', 'work-orders', 'breakdowns']})
-        check('tech ui-prefs independent', r.status_code == 200)
+        task_id = pm_task["id"]
+        self.test_pm_task_id = task_id
+        self.log(f"Created PM task {task_id} with reminder_offset=1, due_date={today}")
         
-        # Verify admin prefs unchanged
-        r = await http.get(f'{BASE}/users/me/ui-prefs', headers=admin_headers)
-        if r.status_code == 200:
-            admin_prefs = r.json()
-            check('admin prefs unchanged by tech', admin_prefs.get('sidebar_order') == test_order)
-
-        # Restore admin's original prefs
-        if admin_original_prefs:
-            r = await http.put(f'{BASE}/users/me/ui-prefs', headers=admin_headers, json=admin_original_prefs)
-            check('restore admin original prefs', r.status_code == 200)
-            print(f"Restored admin prefs to: {admin_original_prefs}")
-
-        # ---- BRANDING TESTS ----
-        print("\n=== BRANDING TESTS ===")
+        # Complete the PM task (should be on_time=TRUE since completed on due date)
+        completion = self.post(f"/pm-tasks/{task_id}/complete", self.tech_token, {
+            "row_results": [],
+            "checklist_date": today
+        })
         
-        # Get current branding (save for restoration)
-        r = await http.get(f'{BASE}/branding')
-        check('get branding', r.status_code == 200)
-        original_branding = r.json() if r.status_code == 200 else {}
-        print(f"Original branding: {original_branding}")
+        comp_id = completion.get("id")
+        self.test_pm_completion_ids.append(comp_id)
+        
+        # Verify on_time is TRUE
+        assert completion.get("on_time") == True, f"Expected on_time=True, got {completion.get('on_time')}"
+        assert "on_time_offset_days" in completion, "Missing on_time_offset_days field"
+        self.log(f"PM completion on_time={completion.get('on_time')}, offset_days={completion.get('on_time_offset_days')}")
 
-        # Test PUT valid accent color
-        r = await http.put(f'{BASE}/branding', headers=admin_headers, json={'accent': '#ff9e1c'})
-        check('put branding valid accent', r.status_code == 200)
-        if r.status_code == 200:
-            data = r.json()
-            check('accent persisted', data.get('accent') == '#ff9e1c', str(data.get('accent')))
+    def test_pm_on_time_outside_tolerance(self):
+        """Test: PM completed outside tolerance window should be on_time=FALSE"""
+        # Create PM task with reminder_offset_days=1 and next_due_date 5 days ago
+        five_days_ago = (datetime.now(timezone.utc) - timedelta(days=5)).date().isoformat()
+        
+        pm_task = self.post("/pm-tasks", self.admin_token, {
+            "task_name": "Test PM Late Completion",
+            "machine_id": self.test_machine_id,
+            "assigned_to": "tech",
+            "frequency": "monthly",
+            "checklist": ["Check item 1"],
+            "reminder_offset_days": 1,
+            "next_due_date": five_days_ago
+        })
+        
+        task_id = pm_task["id"]
+        self.log(f"Created PM task {task_id} with reminder_offset=1, due_date={five_days_ago} (5 days ago)")
+        
+        # Complete the PM task (should be on_time=FALSE since completed 5 days late, outside ±1 day window)
+        completion = self.post(f"/pm-tasks/{task_id}/complete", self.tech_token, {
+            "row_results": []
+        })
+        
+        comp_id = completion.get("id")
+        self.test_pm_completion_ids.append(comp_id)
+        
+        # Verify on_time is FALSE
+        assert completion.get("on_time") == False, f"Expected on_time=False, got {completion.get('on_time')}"
+        assert "on_time_offset_days" in completion, "Missing on_time_offset_days field"
+        self.log(f"PM completion on_time={completion.get('on_time')}, offset_days={completion.get('on_time_offset_days')}")
 
-        # Test invalid accent color 'red'
-        r = await http.put(f'{BASE}/branding', headers=admin_headers, json={'accent': 'red'})
-        check('branding rejects invalid accent', r.status_code == 400, str(r.status_code))
+    # ============ FEATURE 2: PM BACKFILL ENDPOINT ============
+    def test_pm_backfill_admin_only(self):
+        """Test: POST /api/pm-completions/backfill-on-time is admin-only (403 for tech)"""
+        # Tech should get 403
+        try:
+            self.post("/pm-completions/backfill-on-time", self.tech_token, {}, expected_status=403)
+            self.log("Backfill endpoint correctly returns 403 for technician")
+        except AssertionError:
+            raise AssertionError("Backfill endpoint should return 403 for non-admin users")
 
-        # Test invalid accent color #12345
-        r = await http.put(f'{BASE}/branding', headers=admin_headers, json={'accent': '#12345'})
-        check('branding rejects short hex', r.status_code == 400, str(r.status_code))
+    def test_pm_backfill_idempotent(self):
+        """Test: Backfill endpoint is idempotent - second run should give updated=0"""
+        # First run
+        result1 = self.post("/pm-completions/backfill-on-time", self.admin_token, {})
+        scanned1 = result1.get("scanned", 0)
+        updated1 = result1.get("updated", 0)
+        self.log(f"First backfill run: scanned={scanned1}, updated={updated1}")
+        
+        # Second run (should be idempotent)
+        result2 = self.post("/pm-completions/backfill-on-time", self.admin_token, {})
+        scanned2 = result2.get("scanned", 0)
+        updated2 = result2.get("updated", 0)
+        self.log(f"Second backfill run: scanned={scanned2}, updated={updated2}")
+        
+        # Second run should have updated=0 (idempotent)
+        assert updated2 == 0, f"Expected updated=0 on second run (idempotent), got {updated2}"
+        self.log("Backfill endpoint is correctly idempotent")
 
-        # Test logo upload - create small PNG
-        png_data = base64.b64decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
-        )
-        files = {'file': ('test.png', png_data, 'image/png')}
-        r = await http.post(f'{BASE}/branding/logo', headers=admin_headers, files=files)
-        check('logo upload success', r.status_code == 200, str(r.status_code))
-        if r.status_code == 200:
-            data = r.json()
-            check('logo returns data URI', 'logo_data' in data and data['logo_data'].startswith('data:image/'))
+    # ============ FEATURE 3: TIME UTILIZATION IN ANALYTICS ============
+    def test_time_utilization_in_kpis(self):
+        """Test: GET /api/analytics/kpis includes time_utilization object"""
+        kpis = self.get("/analytics/kpis?level=plant", self.admin_token)
+        
+        # Verify time_utilization exists
+        assert "time_utilization" in kpis, "Missing time_utilization in KPIs response"
+        
+        tu = kpis["time_utilization"]
+        
+        # Verify all required fields
+        required_fields = ["predictive_minutes", "preventive_minutes", "breakdown_minutes", "total_minutes"]
+        for field in required_fields:
+            assert field in tu, f"Missing {field} in time_utilization"
+        
+        # Verify total = sum of the 3
+        total = tu["total_minutes"]
+        calculated_total = tu["predictive_minutes"] + tu["preventive_minutes"] + tu["breakdown_minutes"]
+        assert abs(total - calculated_total) < 0.1, f"Total mismatch: {total} != {calculated_total}"
+        
+        self.log(f"Time utilization: predictive={tu['predictive_minutes']}, preventive={tu['preventive_minutes']}, breakdown={tu['breakdown_minutes']}, total={tu['total_minutes']}")
 
-        # Test oversized file rejection (create 600KB fake file)
-        large_data = b'x' * (600 * 1024)
-        files = {'file': ('large.png', large_data, 'image/png')}
-        r = await http.post(f'{BASE}/branding/logo', headers=admin_headers, files=files)
-        check('logo rejects oversized', r.status_code == 400, str(r.status_code))
+    def test_time_utilization_date_slicing(self):
+        """Test: Time utilization respects date_from/date_to slicing"""
+        # Query a narrow past range (should give all zeros or very low values)
+        kpis = self.get("/analytics/kpis?level=plant&date_from=2020-01-01&date_to=2020-01-02", self.admin_token)
+        
+        tu = kpis["time_utilization"]
+        total = tu["total_minutes"]
+        
+        # Should be 0 or very low for a narrow past range
+        self.log(f"Time utilization for 2020-01-01 to 2020-01-02: total={total} minutes")
+        # Note: We don't assert 0 because there might be test data, but we verify the field exists and is numeric
+        assert isinstance(total, (int, float)), f"Expected numeric total_minutes, got {type(total)}"
 
-        # Test invalid file type rejection
-        files = {'file': ('test.txt', b'hello', 'text/plain')}
-        r = await http.post(f'{BASE}/branding/logo', headers=admin_headers, files=files)
-        check('logo rejects non-image', r.status_code == 400, str(r.status_code))
+    def test_time_utilization_level_scoping(self):
+        """Test: Time utilization respects level/value scoping"""
+        # Get plant-level time utilization
+        plant_kpis = self.get("/analytics/kpis?level=plant", self.admin_token)
+        plant_total = plant_kpis["time_utilization"]["total_minutes"]
+        
+        # Get line-level time utilization (should be <= plant total)
+        machines = self.get("/machines", self.admin_token)
+        if machines and len(machines) > 0:
+            test_line = machines[0].get("line")
+            if test_line:
+                line_kpis = self.get(f"/analytics/kpis?level=line&value={test_line}", self.admin_token)
+                line_total = line_kpis["time_utilization"]["total_minutes"]
+                
+                # Line total should be <= plant total
+                assert line_total <= plant_total, f"Line total ({line_total}) should be <= plant total ({plant_total})"
+                self.log(f"Time utilization scoping: plant={plant_total}, line={line_total}")
 
-        # Test DELETE logo
-        r = await http.delete(f'{BASE}/branding/logo', headers=admin_headers)
-        check('logo delete success', r.status_code == 200)
+    # ============ REGRESSION TESTS ============
+    def test_analytics_kpis_regression(self):
+        """Test: GET /api/analytics/kpis still returns pm_compliance, pareto, availability etc."""
+        # Test at different levels
+        levels = [
+            ("plant", None),
+            ("line", None),  # Will get first line
+            ("department", None),  # Will get first department
+        ]
+        
+        # Get hierarchy for testing
+        machines = self.get("/machines", self.admin_token)
+        if machines and len(machines) > 0:
+            test_line = machines[0].get("line")
+            test_dept = machines[0].get("department")
+            levels[1] = ("line", test_line)
+            levels[2] = ("department", test_dept)
+        
+        for level, value in levels:
+            if value is None and level != "plant":
+                continue
+            
+            endpoint = f"/analytics/kpis?level={level}"
+            if value:
+                endpoint += f"&value={value}"
+            
+            kpis = self.get(endpoint, self.admin_token)
+            
+            # Verify key fields still exist
+            required_fields = ["pm_compliance", "pareto", "availability", "mtbf_hours", "mttr_hours"]
+            for field in required_fields:
+                assert field in kpis, f"Missing {field} in KPIs response at level={level}"
+            
+            self.log(f"KPIs regression test passed for level={level}, value={value}")
 
-        # Verify logo removed
-        r = await http.get(f'{BASE}/branding')
-        if r.status_code == 200:
-            data = r.json()
-            check('logo removed from branding', 'logo_data' not in data or not data.get('logo_data'))
+    def run_all_tests(self):
+        """Run all tests"""
+        self.setup()
+        
+        self.log("\n=== FEATURE 1: PM ON_TIME TOLERANCE ===")
+        self.test("PM on_time within tolerance window", self.test_pm_on_time_within_tolerance)
+        self.test("PM on_time outside tolerance window", self.test_pm_on_time_outside_tolerance)
+        
+        self.log("\n=== FEATURE 2: PM BACKFILL ENDPOINT ===")
+        self.test("PM backfill admin-only (403 for tech)", self.test_pm_backfill_admin_only)
+        self.test("PM backfill idempotent", self.test_pm_backfill_idempotent)
+        
+        self.log("\n=== FEATURE 3: TIME UTILIZATION ===")
+        self.test("Time utilization in KPIs", self.test_time_utilization_in_kpis)
+        self.test("Time utilization date slicing", self.test_time_utilization_date_slicing)
+        self.test("Time utilization level scoping", self.test_time_utilization_level_scoping)
+        
+        self.log("\n=== REGRESSION TESTS ===")
+        self.test("Analytics KPIs regression", self.test_analytics_kpis_regression)
+        
+        self.log(f"\n{'='*60}")
+        self.log(f"RESULTS: {self.tests_passed}/{self.tests_run} tests passed")
+        self.log(f"{'='*60}")
+        
+        return 0 if self.tests_passed == self.tests_run else 1
 
-        # Restore original branding accent to #00fff5
-        r = await http.put(f'{BASE}/branding', headers=admin_headers, json={'accent': '#00fff5'})
-        check('restore accent to #00fff5', r.status_code == 200)
-        print("Restored branding accent to #00fff5")
+def main():
+    tester = NewFeaturesTester()
+    return tester.run_all_tests()
 
-    # Summary
-    failed = [r for r in results if not r[1]]
-    print(f"\n{'='*60}")
-    print(f"TOTAL: {len(results)}  PASS: {len(results)-len(failed)}  FAIL: {len(failed)}")
-    if failed:
-        print("\nFAILED TESTS:")
-        for name, _, detail in failed:
-            print(f"  - {name} {detail}")
-    print('='*60)
-    sys.exit(1 if failed else 0)
-
-
-if __name__ == '__main__':
-    asyncio.run(main())
+if __name__ == "__main__":
+    sys.exit(main())

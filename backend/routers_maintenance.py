@@ -1066,6 +1066,22 @@ async def claim_pm_task(task_id: str, req: PMClaim, user: dict = Depends(require
     return {'ok': True, 'assigned_to': assignee}
 
 
+def _pm_on_time(due_date, completion_date, offset_days):
+    """PM Compliance tolerance rule (± reminder offset window).
+    A completion counts as ON-TIME when its date falls inside the window
+        [due − offset_days, due + offset_days]   (whole calendar days)
+    where offset_days = the PM task's reminder_offset_days. Completing far
+    ahead of schedule OR after the grace window are BOTH off-schedule.
+    Missing/unparseable due dates count as on-time (nothing to be late against)."""
+    try:
+        due = datetime.strptime(str(due_date)[:10], '%Y-%m-%d').date()
+        comp = datetime.strptime(str(completion_date)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return True
+    off = max(int(offset_days or 0), 0)
+    return -off <= (comp - due).days <= off
+
+
 class PMComplete(BaseModel):
     remarks: Optional[str] = None
     checklist_results: Optional[dict] = None
@@ -1112,7 +1128,10 @@ async def complete_pm_task(task_id: str, req: PMComplete, user: dict = Depends(r
         'checked_by': req.checked_by, 'spares_consumed': spares,
         'checklist_date': req.checklist_date or now_iso()[:10],
         'due_date': task.get('next_due_date'), 'completed_at': now_iso(),
-        'on_time': task.get('next_due_date', '9999') >= now_iso()[:10],
+        # ± reminder-offset tolerance window (see _pm_on_time). Uses the sheet's
+        # checklist date (when the PM was actually performed), falling back to today.
+        'on_time': _pm_on_time(task.get('next_due_date'), req.checklist_date or now_iso(), task.get('reminder_offset_days')),
+        'on_time_offset_days': max(int(task.get('reminder_offset_days') or 0), 0),
     }
     await db.pm_completions.insert_one(dict(completion))
     freq_days = FREQ_DAYS.get(task.get('frequency', 'monthly'), 30)
@@ -1165,6 +1184,28 @@ async def complete_pm_task(task_id: str, req: PMComplete, user: dict = Depends(r
 async def list_pm_completions(machine_id: Optional[str] = None, limit: int = Query(200, le=2000), user: dict = Depends(get_current_user)):
     q = {'machine_id': machine_id} if machine_id else {}
     return await db.pm_completions.find(q, {'_id': 0}).sort('completed_at', -1).limit(limit).to_list(limit)
+
+
+@router.post('/pm-completions/backfill-on-time')
+async def backfill_pm_on_time(user: dict = Depends(require_admin)):
+    """ADMIN one-shot: recompute pm_completions.on_time for ALL historical records
+    under the ± reminder-offset tolerance rule (idempotent — safe to re-run).
+    Each completion's own due_date snapshot + checklist_date are used; the offset
+    comes from the parent PM task's reminder_offset_days (0 if the task is gone)."""
+    tasks = {}
+    async for t in db.pm_tasks.find({}, {'_id': 0, 'id': 1, 'reminder_offset_days': 1}):
+        tasks[t['id']] = t
+    scanned = updated = 0
+    async for c in db.pm_completions.find({}, {'_id': 0, 'id': 1, 'pm_task_id': 1, 'due_date': 1,
+                                               'checklist_date': 1, 'completed_at': 1, 'on_time': 1}):
+        scanned += 1
+        offset = (tasks.get(c.get('pm_task_id')) or {}).get('reminder_offset_days', 0)
+        new_val = _pm_on_time(c.get('due_date'), c.get('checklist_date') or c.get('completed_at'), offset)
+        if bool(c.get('on_time')) != new_val:
+            await db.pm_completions.update_one({'id': c['id']}, {'$set': {
+                'on_time': new_val, 'on_time_offset_days': max(int(offset or 0), 0)}})
+            updated += 1
+    return {'scanned': scanned, 'updated': updated}
 
 
 @router.get('/pm-templates')

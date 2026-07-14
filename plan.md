@@ -86,12 +86,13 @@
   - **Machine-level MTBF in Analytics matches AWS MTBF exactly** (same reliability-engine metric), via `/api/analytics/kpis?level=machine` reading from `reliability_metrics.mtbf`.
   - Response includes `mtbf_source` (`reliability_engine` | `aggregate`) for transparency.
 
-- **PM Compliance KPI correctness objective (Phase AF, completed)**:
+- **PM Compliance KPI correctness objective (Phase AF, completed; now being redefined for tolerance)**:
   - PM Compliance card must never render blank.
   - PM Compliance = **(Completed PM Tasks ÷ Scheduled PM Tasks) × 100**, scoped to the Analytics slicer and hierarchy.
   - Scheduled = completions within range + active pending tasks due by end-of-range cutoff (overdue backlog counts; future-dated does not).
   - Department/PG scopes resolve via machine-id sets because `pm_completions` does not store department/PG fields.
   - Card renders **0%** for 0 completed of N scheduled, and **N/A** when 0 scheduled.
+  - **Update requested (P0):** redefine `pm_completions.on_time` using ± `reminder_offset` days tolerance and **backfill** historical `pm_completions`.
 
 ### Control Room KPI/range objectives
 - Control Room line KPIs support presets **Shift=8h, Day=24h, Week=168h** plus a **custom date range** slicer.
@@ -142,6 +143,14 @@
 - **AWS/reliability runtime usage**:
   - For a logged line-day: per-machine run-hours inherit `max(Planned − derived line downtime, 0)` (prorated by overlap).
   - For unlogged days: retain 24/7 fallback.
+
+- **New Analytics requirement (P0): Time Utilization (maintenance time invested)**
+  - Add a new Analytics card showing **sum of maintenance minutes** by category:
+    - **AWS/Predictive**
+    - **PM/Preventive**
+    - **Breakdown/Corrective**
+  - Must respect the same Analytics slicer: date range + Line/Department/Process Group/Machine scopes.
+  - UI must be a **donut/pie chart** (Recharts) styled to match Cyberpunk theme.
 
 ---
 
@@ -315,7 +324,7 @@
 #### AB0) Decisions locked (from user)
 - ✅ Control Room windows: keep current live 24/7 fallback (**planned=24h**) only for **unlogged** days.
 - ✅ Migration: **discard old runtime logs**; start fresh.
-- ✅ Reliability: logged line-day per-machine run-hours inherit `max(Planned − derived downtime, 0)`.
+- ✅ Reliability: logged line-day per-machine run-hours inherit `max(planned − derived downtime, 0)`.
 - ✅ Derived downtime freshness: always computed **live from breakdown records**.
 
 #### AB1) Backend: data model + API contract changes
@@ -433,7 +442,7 @@
 ---
 
 ### Phase AF — Bugfix: PM Compliance KPI blank card (P0)
-**Status:** ✅ COMPLETE — VERIFIED
+**Status:** ✅ COMPLETE — VERIFIED *(PM on_time definition now requires an enhancement below)*
 
 #### AF1) Root causes
 - ✅ `pm_completions` documents do **not** store `department` / `process_group`; after hierarchy change, department/PG scopes silently matched nothing.
@@ -462,35 +471,89 @@
   - Severity accent: green ≥ 80, yellow ≥ 50, red < 50.
 
 #### AF3) Verification
-- ✅ Verified across:
-  - plant, line, department, machine scopes (counts always present).
-  - edge cases:
-    - 0 scheduled → `pm_compliance=None` (UI shows N/A)
-    - 0 completed of N → `0.0%` (never blank)
-    - all completed → `100%`
-  - Visual confirmation screenshot: card renders `20% · 4/20 scheduled PMs completed`.
-- ✅ Scenario data fully cleaned.
+- ✅ Verified across plant/line/department/machine scopes; never blank.
 
 ---
 
 ## 3) Next Actions
 
-### Immediate (P0)
-- ✅ None — all requested follow-ups through Phase AF are complete.
+### Immediate (P0) — NEW (User-confirmed)
+
+#### AG1) AWS Tab — Category filter must **strictly hide** non-matching pools + KPI recalc
+**Status:** ⏳ IN PROGRESS
+- **Frontend file:** `/app/frontend/src/pages/AWSPage.jsx`
+- Implement behavior:
+  - Filter ribbon options: **All / Mechanical / Electrical / PLC(Control)**.
+  - When a category is selected:
+    - Hide (do not render) the other pool columns entirely.
+    - Recalculate the AWS top KPI cards based **only** on the selected pool’s dataset.
+  - “All” behaves as today (shows all pools, blended/overall metrics as currently implemented).
+- Testing:
+  - Frontend: verify column presence/absence + KPI counts change with selection.
+  - Backend: no change expected unless UI depends on blended response shape.
+
+#### AG2) PM Compliance — redefine `on_time` using ± reminder_offset **and backfill historical records**
+**Status:** ⏳ IN PROGRESS
+- **Backend file:** `/app/backend/routers_maintenance.py` (inside `complete_pm_task`, ~line 1115)
+- Implement new `on_time` definition:
+  - Completion counts as on-time if completion date ∈ `[due_date − offset_days, due_date + offset_days]`.
+  - `offset_days` = `pm_task.reminder_offset` (default 0 if missing).
+  - Ensure robust date parsing (ISO vs `YYYY-MM-DD`); compare using date-only or normalized UTC midnight.
+
+- **Backfill requirement (user-confirmed):**
+  - Add an admin-safe backfill path to recompute `pm_completions.on_time` for existing records using the same rule.
+  - Preferred implementation options (choose safest for current architecture):
+    1) **New admin endpoint** (recommended): `POST /api/admin/backfill/pm-completions-on-time` with optional scope/date filters, runs recompute with progress logging.
+    2) **Startup script** (less ideal): one-time job run manually in container.
+  - Backfill algorithm:
+    - For each `pm_completion`, load its `pm_task` (via `pm_task_id`).
+    - Determine the due date associated with that completion:
+      - If completion stores a due snapshot field, use it.
+      - Else infer from `pm_task.next_due_date` at time of completion (if history not persisted, document limitation).
+    - Recompute `on_time` and update document.
+
+- Testing:
+  - Backend unit/integration:
+    - New completion: verify `on_time` true for within window and false outside.
+    - Backfill: create a few seeded completions, run backfill, confirm updates.
+
+#### AG3) Analytics — add **Time Utilization** donut/pie chart
+**Status:** ⏳ NOT STARTED
+- Backend:
+  - **File:** `/app/backend/routers_ops.py` (`GET /api/analytics/kpis`)
+  - Add aggregation that sums `duration_minutes` (or best available field) from **closed/completed** work orders in the selected window.
+  - Group into 3 buckets:
+    - **AWS/Predictive** (`wo_type == 'Predictive'`)
+    - **PM/Preventive** (`wo_type == 'Preventive'`)
+    - **Breakdown/Corrective** (`wo_type == 'Corrective'`)
+  - Respect the same slicers/scopes:
+    - date range (`date_from`, `date_to`)
+    - hierarchy scope (plant/line/department/process_group/machine)
+  - Return shape (example):
+    - `time_utilization: { predictive_minutes, preventive_minutes, corrective_minutes, total_minutes }`
+
+- Frontend:
+  - **File:** `/app/frontend/src/pages/Analytics.jsx`
+  - Render a new **donut/pie chart** (Recharts) using returned minutes.
+  - Cyberpunk styling:
+    - pure-black panel background
+    - neon accent strokes
+    - thin borders, high-contrast labels
+    - tooltip consistent with existing charts
+
+- Testing:
+  - Backend: endpoint returns correct sums and respects slicers.
+  - Frontend: donut renders for 0 values (show “No data” state) and non-zero; legend colors consistent.
+
+### Validation / Regression (P0)
+- After implementing AG1–AG3:
+  - Run testing agent for **both backend and frontend**.
+  - Create new test report: `/app/test_reports/iteration_14.json` (or next available).
 
 ### Optional follow-ups (P0/P1)
 - **P0 (requires approval)**: reliability engine data-quality fix for backdated failures predating commissioning (skip invalid TBF intervals rather than clamp to 0.1; guard minimum predicted life).
 - **P1**: add UI hint for `mtbf_source` if needed.
 - **P1**: E2E regression tests asserting AWS MTBF === machine analytics MTBF.
-
-### Validation evidence
-- Existing test reports:
-  - `/app/test_reports/iteration_9.json` — Backend verification **100%**.
-  - `/app/test_reports/iteration_11.json` — Corrections Part 4 regression **100%**.
-  - `/app/test_reports/iteration_12.json` — Phase Z backend regression **100%**.
-  - `/app/test_reports/iteration_13.json` — Phase AB planned-runtime regression **100% (backend+frontend)**.
-- Local verification scripts:
-  - `/app/tests/test_enforcement.py` — Phase AC enforcement + attribution checks.
 
 ---
 
@@ -536,6 +599,11 @@
 - ✅ 3-pool engine + threshold config.
 - ✅ Reliability consumes the planned-runtime model for logged days.
 
+- **NEW (P0) AWS tab category filter strictness**
+  - Selecting **Mechanical/Electrical/PLC** hides the other pools’ columns entirely (no greyed placeholders).
+  - AWS KPI cards (Machines Tracked, Watch, Inspection Due, Overdue, Weibull Active) recalculate using **only the selected pool**.
+  - “All” shows all pools and existing blended behavior.
+
 ### Analytics + Runtime
 - ✅ Date slicer exists.
 - ✅ Closure rate + Pareto exist.
@@ -546,6 +614,12 @@
   - 0 completed of N → 0%
   - 0 scheduled → N/A
   - Department/PG scopes work after hierarchy change
+
+- **NEW (P0) PM on-time definition**
+  - New completions compute `pm_completions.on_time` using the tolerance window:
+    - `completion_date ∈ [due_date − reminder_offset, due_date + reminder_offset]`.
+  - Historical `pm_completions.on_time` is backfilled/recomputed and KPI reflects the new definition.
+
 - ✅ Runtime is single source of truth.
 - ✅ **MTBF consistency**: Machine-level analytics MTBF matches AWS MTBF exactly.
 - ✅ **Planned Runtime model (Phase AB)** fully live:
@@ -554,3 +628,11 @@
   - Availability uses `((Planned − Downtime)/Planned) × 100` and clamps at 0% with a visible warning.
   - Unlogged days are visibly marked and do not produce misleading figures.
   - Control Room, Analytics, Plant totals, machine detail runtime, and reliability all read the same authoritative model.
+
+- **NEW (P0) Time Utilization (donut/pie)**
+  - Analytics shows a donut/pie chart of maintenance time invested by category:
+    - AWS/Predictive minutes
+    - PM/Preventive minutes
+    - Breakdown/Corrective minutes
+  - Respects date slicer + hierarchy scope filters.
+  - Handles empty ranges gracefully (explicit “No data” state).

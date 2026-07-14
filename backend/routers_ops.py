@@ -396,6 +396,35 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
                        'downtime_hours': round(t['downtime'] / 60, 1),
                        'cumulative_pct': round(cum / total_downtime * 100, 1)})
 
+    # ---- Time Utilization: maintenance minutes invested, by category ----
+    # Buckets: AWS/Predictive + PM/Preventive read completed/closed WO durations;
+    # Breakdown/Corrective uses the ACTUAL repair minutes captured on closed
+    # breakdowns plus standalone Corrective WOs. Corrective WOs auto-linked to a
+    # breakdown (source_breakdown_id) are EXCLUDED — their repair time is already
+    # counted on the breakdown itself (no double counting). Respects the same
+    # date slicer + hierarchy scope as every other KPI on this endpoint.
+    tu = {'predictive_minutes': 0.0, 'preventive_minutes': 0.0, 'breakdown_minutes': 0.0}
+    wo_scope = dict(comp_q)  # same scope shape as pm_completions: {}, {line}, {machine_id}, {machine_id: {$in: mids}}
+    wo_scope['wo_type'] = {'$in': ['Predictive', 'Preventive', 'Corrective']}
+    wo_scope['status'] = {'$in': ['COMPLETED', 'PENDING_ADMIN_CLOSURE', 'CLOSED']}
+    async for w in db.work_orders.find(wo_scope, {'_id': 0, 'wo_type': 1, 'completed_at': 1,
+                                                  'duration_minutes': 1, 'source_breakdown_id': 1}):
+        if (date_from or date_to) and not in_range_date(w.get('completed_at')):
+            continue
+        t = w.get('wo_type')
+        if t == 'Corrective':
+            if w.get('source_breakdown_id'):
+                continue  # repair time already counted via the breakdown record
+            tu['breakdown_minutes'] += w.get('duration_minutes') or 0
+        elif t == 'Predictive':
+            tu['predictive_minutes'] += w.get('duration_minutes') or 0
+        else:
+            tu['preventive_minutes'] += w.get('duration_minutes') or 0
+    for b in closed:
+        tu['breakdown_minutes'] += b.get('repair_duration_minutes') or b.get('downtime_minutes') or 0
+    time_utilization = {k: round(v, 1) for k, v in tu.items()}
+    time_utilization['total_minutes'] = round(sum(tu.values()), 1)
+
     return {
         'level': level, 'value': value, 'date_from': date_from, 'date_to': date_to,
         'mtbf_hours': mtbf, 'mtbf_source': mtbf_source, 'mttr_hours': mttr_hours, 'availability': availability,
@@ -407,6 +436,7 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         'downtime_trend': downtime_trend, 'failure_trend': failure_trend,
         'availability_trend': availability_trend, 'top_failing_machines': top_failing,
         'failure_modes': failure_modes, 'pareto': pareto, 'pareto_total_machines': len(pareto_rows),
+        'time_utilization': time_utilization,
     }
 
 

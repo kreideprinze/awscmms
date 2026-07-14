@@ -1,18 +1,30 @@
 [
   {
-    "content": "Pareto: backend downtime-based sort/cumulative + Analytics.jsx chart labels/axes",
-    "status": "completed"
+    "content": "Explore AWSPage.jsx, routers_maintenance.py (complete_pm_task), routers_ops.py (analytics/kpis), Analytics.jsx",
+    "status": "in_progress"
   },
   {
-    "content": "Action Taken mandatory: backend enforcement (BD complete/close + WO complete) + inline validation UI (Repair page, WO modal)",
-    "status": "completed"
+    "content": "Backend: PM Compliance on_time = within ±reminder_offset window in complete_pm_task",
+    "status": "pending"
   },
   {
-    "content": "PM NOT OK remarks required: ClosePMTask inline validation + backend 400",
-    "status": "completed"
+    "content": "Backend: Backfill on_time flag for existing pm_completions",
+    "status": "pending"
   },
   {
-    "content": "Verify (build + API checks + screenshots), test regression",
-    "status": "completed"
+    "content": "Backend: Add time_utilization aggregation (duration by wo_type) to analytics KPIs endpoint",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: AWSPage category filter hides non-matching pool columns + recalculates KPI cards",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Time Utilization donut chart in Analytics.jsx with date/line/dept filters",
+    "status": "pending"
+  },
+  {
+    "content": "Run testing agent (backend + frontend) and fix any issues",
+    "status": "pending"
   }
 ]

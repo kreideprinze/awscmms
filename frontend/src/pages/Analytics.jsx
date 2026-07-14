@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, AreaChart, Area, ComposedChart, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts';
-import { ShieldCheck, Trophy, X } from 'lucide-react';
+import { ShieldCheck, Trophy, X, Timer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Input } from '@/components/ui/input';
@@ -28,6 +28,14 @@ const LEVELS = [
 const WO_TYPES = ['all', 'Corrective', 'Preventive', 'Inspection', 'RCA'];
 const fmtMin = (v) => (v == null ? '—' : `${v} min`);
 const fmtPct = (v) => (v == null ? '—' : `${v}%`);
+const minToH = (m) => `${((m || 0) / 60).toFixed(1)}h`;
+
+// Time Utilization buckets — where maintenance minutes were actually invested.
+const TU_SLICES = [
+  { key: 'breakdown_minutes', name: 'Breakdown / Corrective', color: '#ff2e63' },
+  { key: 'preventive_minutes', name: 'PM / Preventive', color: '#05ffa1' },
+  { key: 'predictive_minutes', name: 'AWS / Predictive', color: '#00fff5' },
+];
 
 // Admin-only technician performance section. The API itself is role-guarded (403 for non-admins).
 function TechnicianAnalytics({ hierarchy }) {
@@ -295,6 +303,50 @@ export default function Analytics() {
                   ))}
                 </div>
               )}
+            </div>
+            <div className="cyber-panel p-4" data-testid="analytics-time-utilization">
+              <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                <Timer className="h-3.5 w-3.5 text-[hsl(var(--primary))]" /> Time Utilization — maintenance time invested
+              </div>
+              {(() => {
+                const tu = kpis.time_utilization || {};
+                const total = tu.total_minutes || 0;
+                const data = TU_SLICES.map((s) => ({ ...s, minutes: tu[s.key] || 0 })).filter((d) => d.minutes > 0);
+                if (!total || data.length === 0) {
+                  return <div className="py-10 text-center text-sm text-muted-foreground" data-testid="time-utilization-empty">No maintenance time logged in the selected range</div>;
+                }
+                return (
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="relative h-[200px] w-[200px] shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={data} dataKey="minutes" nameKey="name" cx="50%" cy="50%" innerRadius={58} outerRadius={88}
+                            paddingAngle={3} stroke="hsl(220 16% 8%)" strokeWidth={2}>
+                            {data.map((d) => <Cell key={d.key} fill={d.color} />)}
+                          </Pie>
+                          <RTooltip contentStyle={chartTheme.tooltip} formatter={(v, name) => [`${minToH(v)} (${Math.round((v / total) * 100)}%)`, name]} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="font-mono text-lg font-semibold tabular-nums" data-testid="time-utilization-total">{minToH(total)}</span>
+                        <span className="text-[9px] uppercase tracking-widest text-muted-foreground">Total</span>
+                      </div>
+                    </div>
+                    <div className="min-w-[180px] flex-1 space-y-1.5">
+                      {TU_SLICES.map((s) => {
+                        const mins = tu[s.key] || 0;
+                        return (
+                          <div key={s.key} data-testid={`time-utilization-${s.key}`} className="flex items-center justify-between border border-border bg-[hsl(var(--panel-2))] px-3 py-2">
+                            <span className="flex items-center gap-2 text-xs"><span className="h-2 w-2" style={{ backgroundColor: s.color }} />{s.name}</span>
+                            <span className="tabular-nums font-mono text-xs">{minToH(mins)} <span className="text-muted-foreground">· {total ? Math.round((mins / total) * 100) : 0}%</span></span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+              <p className="mt-2 text-[10px] text-muted-foreground">Breakdown = actual repair minutes on closed breakdowns (+ standalone corrective WOs) · PM / AWS = completed work-order durations. Respects the date range and hierarchy scope above.</p>
             </div>
             <div className="cyber-panel p-4 xl:col-span-2">
               <div className="mb-3 flex items-center justify-between">
