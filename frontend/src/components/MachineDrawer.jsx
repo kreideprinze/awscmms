@@ -274,7 +274,7 @@ function BreakdownsTab({ machineId, machine }) {
         </Button>
         <Button data-testid="drawer-report-warning-button" onClick={() => setWarningOpen(true)}
           className="w-full border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10 hover:shadow-[0_0_14px_rgba(249,248,113,0.35)]">
-          Report Warning
+          Report Red Tag
         </Button>
       </div>
       <ReportBreakdownDialog open={reportOpen} setOpen={setReportOpen} prefillMachine={machine} onCreated={load} />
@@ -406,7 +406,7 @@ function TimelineTab({ machineId }) {
     <div className="space-y-3">
       <Select value={filter} onValueChange={setFilter}>
         <SelectTrigger className="bg-[hsl(var(--panel-2))]" data-testid="timeline-filter-select"><SelectValue /></SelectTrigger>
-        <SelectContent>{EVENT_TYPES.map((t) => <SelectItem key={t} value={t}>{t === 'all' ? 'All events' : t.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
+        <SelectContent>{EVENT_TYPES.map((t) => <SelectItem key={t} value={t}>{t === 'all' ? 'All events' : t === 'warning_created' ? 'red tag created' : t.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
       </Select>
       {events.length === 0 ? <Empty text="No timeline events" /> : (
         <div className="relative space-y-0 border-l border-border pl-4">
@@ -415,7 +415,7 @@ function TimelineTab({ machineId }) {
               <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full border-2 border-background bg-[hsl(var(--primary))]" />
               <div className="text-sm font-medium">{e.title}</div>
               {e.description && <div className="text-xs text-muted-foreground">{e.description}</div>}
-              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{fmtDate(e.created_at)} · {e.user} · {e.event_type}</div>
+              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{fmtDate(e.created_at)} · {e.user} · {e.event_type === 'warning_created' ? 'red_tag_created' : e.event_type}</div>
             </div>
           ))}
         </div>

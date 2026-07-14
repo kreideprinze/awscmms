@@ -1,0 +1,73 @@
+{
+  "summary": "Completed testing of Red Tag renaming feature (Warning → Red Tag). Verified user-facing text updated while internal API routes/fields remain unchanged. All features working correctly.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Login page mobile responsive (390x844) - no horizontal scroll",
+    "Login page - no default credentials hint (admin123/Default access removed)",
+    "Login page - public section with Breakdown and Red Tag buttons present",
+    "Red Tag button - yellow theme (#f9f871) with Tag icon",
+    "Red Tag button - text says 'RED TAG' not 'Warning'",
+    "Login flow works - navigates to Control Room",
+    "Public Red Tag kiosk dialog opens (mobile, no login)",
+    "Dialog title is 'Report Red Tag'",
+    "Dialog has 'RED TAG TYPE' label",
+    "Dialog note mentions 'this red tag'",
+    "Submit button says 'Raise Red Tag'",
+    "No horizontal scroll with dialog open on mobile",
+    "Form submission works - creates red tag WRN-00005",
+    "Success toast shows 'Red Tag WRN-... raised' message",
+    "Breakdowns page - 'Report Red Tag' button present (yellow, Tag icon)",
+    "Breakdowns page - view tabs show 'Breakdowns' / 'Red Tags'",
+    "Red Tags tab displays warnings table with WRN- numbers",
+    "Red tag detail dialog opens with Tag icon",
+    "No user-facing 'Warning' word found (except AWS sidebar)",
+    "Sidebar 'AWS — Advance Warning' module unchanged (intentional)",
+    "Machine drawer - Breakdowns tab has 'Report Red Tag' button",
+    "Machine drawer - Timeline filter shows 'red tag created' option",
+    "Backend route /api/warnings still works (unchanged)",
+    "Backend field names unchanged (tag_number, warning_type, etc.)",
+    "Timeline entries show 'Red Tag' wording",
+    "Timeline entries show 'WO auto-dispatched from red tag' wording",
+    "Internal event_type='warning_created' still used (unchanged)",
+    "Error message: 'Red tag work order must be Inspection or Corrective' (400)",
+    "Error message: 'Red tag not found' (404)",
+    "Analytics endpoint /api/analytics/kpis works (time_utilization, pm_compliance)",
+    "Reliability endpoint /api/reliability/metrics works",
+    "deploy.sh passes bash -n syntax check",
+    "deploy.sh contains systemd service configuration",
+    "deploy.sh contains nginx site with /api proxy + WebSocket headers",
+    "deploy.sh contains MongoDB repo selection for jammy(7.0)/noble(8.0)",
+    "Breakdowns list renders correctly",
+    "No critical console errors"
+  ],
+  "test_report_links": [
+    "/app/test_red_tag_renaming.py",
+    "/app/.screenshots/login-mobile.png",
+    "/app/.screenshots/red-tag-dialog-mobile.png",
+    "/app/.screenshots/red-tag-dialog-filled.png",
+    "/app/.screenshots/breakdowns-red-tags-tab.png",
+    "/app/.screenshots/red-tag-detail-dialog.png",
+    "/app/.screenshots/machine-drawer-breakdowns.png",
+    "/app/.screenshots/machine-drawer-timeline.png",
+    "/app/.screenshots/regression-breakdowns.png"
+  ],
+  "action_item_for_main_agent": "",
+  "updated_files": [
+    "/app/test_red_tag_renaming.py"
+  ],
+  "success_percentage": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "100% (all UI tests passed)",
+    "static_analysis": "100% (deploy.sh syntax valid)"
+  },
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false
+}

@@ -64,7 +64,7 @@ function FuzzyPicker({ value, display, options, onSelect, placeholder, testId, e
         onFocus={() => { setOpen(true); setQuery(''); }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        className={`bg-[hsl(var(--panel-2))] ${error ? 'input-error' : ''}`}
+        className={`h-11 bg-[hsl(var(--panel-2))] text-base sm:h-10 sm:text-sm ${error ? 'input-error' : ''}`}
         autoComplete="off"
       />
       {open && (
@@ -187,7 +187,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
           wo_type: woType,
           assigned_to: technician || undefined,
         });
-        toast.warning(`Warning ${res.data.tag_number} raised — ${res.data.work_order_number} ${assignedMsg} (no downtime recorded)`);
+        toast.warning(`Red Tag ${res.data.tag_number} raised — ${res.data.work_order_number} ${assignedMsg} (no downtime recorded)`);
       } else {
         res = await api.post(publicMode ? '/public/breakdowns' : '/breakdowns', {
           machine_id: machineId,
@@ -211,7 +211,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
-        className="max-h-[90vh] gap-0 overflow-y-auto border-border bg-[#0a0a0f] p-0 sm:max-w-lg"
+        className="max-h-[92vh] w-[calc(100%-1rem)] gap-0 overflow-y-auto border-border bg-[#0a0a0f] p-0 sm:w-full sm:max-w-lg"
         data-testid={isWarning ? 'report-warning-dialog' : 'report-breakdown-dialog'}
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
@@ -221,7 +221,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
         {/* Header bar */}
         <div className={`flex items-center justify-between border-b px-5 py-4 ${isWarning ? 'border-[#f9f871]/30 bg-[#f9f871]/[0.04]' : 'border-border bg-[#08080c]'}`}>
           <DialogTitle className={`text-base font-semibold uppercase tracking-[0.3em] ${isWarning ? 'text-[#f9f871]' : 'text-foreground'}`}>
-            {isWarning ? 'Report Warning' : 'Report Breakdown'}
+            {isWarning ? 'Report Red Tag' : 'Report Breakdown'}
           </DialogTitle>
         </div>
 
@@ -284,20 +284,20 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
               value={reporterName}
               onChange={(e) => setReporterName(e.target.value)}
               placeholder="Who is reporting this?"
-              className={`bg-[hsl(var(--panel-2))] ${errors.reporter ? 'input-error' : ''}`}
+              className={`h-11 bg-[hsl(var(--panel-2))] text-base sm:h-10 sm:text-sm ${errors.reporter ? 'input-error' : ''}`}
             />
           </div>
 
           {/* Type */}
           <div>
-            <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{isWarning ? 'Warning Type' : 'Breakdown Type'}</Label>
+            <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{isWarning ? 'Red Tag Type' : 'Breakdown Type'}</Label>
             <Segmented options={BREAKDOWN_TYPES} value={breakdownType} onChange={setBreakdownType} testPrefix="bd-type" accent={isWarning ? 'yellow' : 'primary'} />
           </div>
 
           {/* Warning: an INSPECTION work order is always dispatched (fixed type) */}
           {isWarning && (
             <div className="border border-border bg-[hsl(var(--panel-2))] px-3 py-2 text-[11px] text-muted-foreground" data-testid="bd-wo-type-note">
-              An <span className="text-[#f9f871]">Inspection</span> work order is always dispatched with this warning.
+              An <span className="text-[#f9f871]">Inspection</span> work order is always dispatched with this red tag.
             </div>
           )}
 
@@ -323,7 +323,7 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
           <div>
             <Label className="mb-1.5 block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Assign Technician (optional)</Label>
             <Select value={technician || 'none'} onValueChange={(v) => setTechnician(v === 'none' ? '' : v)}>
-              <SelectTrigger data-testid="bd-technician-select" className="bg-[hsl(var(--panel-2))]">
+              <SelectTrigger data-testid="bd-technician-select" className="h-11 bg-[hsl(var(--panel-2))] sm:h-10">
                 <SelectValue placeholder="Unassigned — any technician can claim" />
               </SelectTrigger>
               <SelectContent>
@@ -343,10 +343,10 @@ export function ReportBreakdownDialog({ open, setOpen, prefillMachine = null, on
             disabled={submitting}
             data-testid="bd-submit-button"
             className={isWarning
-              ? 'w-full border border-[#f9f871]/60 bg-transparent font-semibold text-[#f9f871] hover:bg-[#f9f871]/10 hover:shadow-[0_0_14px_rgba(249,248,113,0.3)]'
-              : 'cyber-primary w-full'}
+              ? 'h-11 w-full border border-[#f9f871]/60 bg-transparent font-semibold text-[#f9f871] hover:bg-[#f9f871]/10 hover:shadow-[0_0_14px_rgba(249,248,113,0.3)] sm:h-10'
+              : 'cyber-primary h-11 w-full sm:h-10'}
           >
-            {submitting ? 'Transmitting…' : isWarning ? 'Raise Warning' : 'Report Breakdown'}
+            {submitting ? 'Transmitting…' : isWarning ? 'Raise Red Tag' : 'Report Breakdown'}
           </Button>
         </div>
       </DialogContent>

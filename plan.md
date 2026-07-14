@@ -110,9 +110,10 @@
   - Clicking a line’s live DOWN timer ribbon opens `/breakdowns?bd=<breakdown_id>`.
   - Breakdowns page expands + highlights + scrolls to the referenced breakdown, then cleans the URL.
 
-- **Universal “jump to Warning” deep linking**:
-  - Clicking a warning reference opens `/breakdowns?warning=<warning_id>`.
-  - Breakdowns switches to Warnings view and opens the exact warning detail dialog.
+- **Universal “jump to Red Tag” deep linking** (rename from Warning; Phase AH):
+  - Clicking a Red Tag reference opens `/breakdowns?warning=<warning_id>`.
+  - Breakdowns switches to Red Tags view and opens the exact warning detail dialog.
+  - **Note:** API/query parameter names remain unchanged for compatibility; UI labels change only.
 
 - **Universal “jump to PM Task” deep linking**:
   - Clicking a PM task reference opens `/preventive-maintenance?task=<pm_task_id>`.
@@ -122,34 +123,34 @@
   - Clicking any Live Event Feed entry deep-links to the *exact* referenced record:
     - Work Orders → WO popout
     - Breakdowns → Breakdown row expansion
-    - Warnings → Warning detail dialog
+    - Red Tags (Warnings) → Warning detail dialog
     - PM Tasks → PM row highlight
     - Fallback → Machine drawer
 
 - **Global “My Tasks” filter** for technicians across: Breakdowns, Work Orders (Kanban), PMs.
 - **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
-- **Warnings are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
+- **Red Tags (Warnings) are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
 
-### Analytics + runtime objectives (CURRENT — Planned Runtime model)
-- Analytics supports a date range slicer applied to all KPIs/charts.
-- Add closure-rate KPI + Pareto analysis.
-- **Runtime is the single source of truth** (authoritative per line-day):
-  - **Input**: one manual value per **Line × Date**: **Planned Runtime (hours)**.
-  - **Downtime**: derived automatically and **live** from **Breakdowns only** for that line-day (Warnings never count).
-  - **Availability** (line-day): `((Planned − Downtime) ÷ Planned) × 100`.
-  - **Clamp rule**: if Downtime > Planned, Availability clamps at **0%**, and a visible **data-quality flag** is surfaced.
-  - **Unlogged days**: visibly marked missing in calendar; **Control Room windows** keep the current live 24/7 fallback (**planned=24h**) only for unlogged days to keep live KPIs ticking.
-  - **No other module may recompute availability independently**; all must read from the shared engine.
-- **AWS/reliability runtime usage**:
-  - For a logged line-day: per-machine run-hours inherit `max(Planned − derived line downtime, 0)` (prorated by overlap).
-  - For unlogged days: retain 24/7 fallback.
+### UX + Security objectives (NEW — Phase AH)
+- **Mobile-friendly login & public kiosk UX**:
+  - Login card fully responsive on phone widths (no horizontal scroll, tap-friendly controls, legible without zoom).
+  - Remove the dev/demo **default-credentials hint block** from the login page.
+  - Keep public entry points (Report Breakdown + Report Red Tag) visible on login page.
+  - Make public kiosk forms (Report Breakdown / Report Red Tag) mobile-friendly too.
 
-- **Time Utilization (maintenance time invested) (P0, implemented in Phase AG)**
-  - Analytics shows a donut/pie chart of **maintenance minutes** by category:
-    - **AWS/Predictive**
-    - **PM/Preventive**
-    - **Breakdown/Corrective**
-  - Respects Analytics slicer: date range + Line/Department/Process Group/Machine scopes.
+- **Terminology + icon consistency**:
+  - Rename user-facing “Warning” → **“Red Tag”** everywhere.
+  - Keep **existing yellow theme** for this feature (do not change to red).
+  - Swap the Warning icon (exclamation) to a **Tag** icon everywhere it appears.
+
+### Deployment objectives (NEW — Phase AH)
+- Produce a **single-script, one-step deployment** for Ubuntu Server (22.04/24.04 LTS), LAN-only.
+  - Nginx on **port 80** serving built frontend.
+  - Reverse proxy `/api` to backend on `127.0.0.1:8001`.
+  - MongoDB 7.0 installed via apt.
+  - Backend runs as a **systemd service** (auto-start, auto-restart).
+  - Install path: `/opt/factory-ops`.
+  - Script is **idempotent where reasonable** and logs each stage clearly.
 
 ---
 
@@ -202,7 +203,7 @@
 ---
 
 ### Phase I — Warnings + Workflow Changes + Kanban/Repair Dedicated Pages
-**Status:** ✅ COMPLETE *(workflow rules updated/superseded by newer governance rules)*
+**Status:** ✅ COMPLETE *(workflow rules updated/superseded by newer governance rules; terminology will be renamed in Phase AH)*
 
 **Phase I Testing:** ✅ COMPLETE
 - `/app/test_reports/iteration_5.json`
@@ -320,123 +321,22 @@
 ### Phase AB — Runtime Module Rework: Planned Runtime + Derived Downtime + Corrected Availability (P0)
 **Status:** ✅ COMPLETE — VERIFIED
 
-#### AB0) Decisions locked (from user)
-- ✅ Control Room windows: keep current live 24/7 fallback (**planned=24h**) only for **unlogged** days.
-- ✅ Migration: **discard old runtime logs**; start fresh.
-- ✅ Reliability: logged line-day per-machine run-hours inherit `max(planned − derived downtime, 0)`.
-- ✅ Derived downtime freshness: always computed **live from breakdown records**.
-
-#### AB1) Backend: data model + API contract changes
-- ✅ Runtime models updated:
-  - `line_runtime_logs`: now stores `{planned_hours}` only.
-  - Deprecated `{calendar_hours, run_hours}` model removed.
-  - Deprecated per-machine persisted `runtime_logs` removed from runtime source-of-truth (no longer written by server clock; endpoints now expose derived line-days).
-- ✅ Endpoints in `/app/backend/routers_ops.py`:
-  - `POST /runtime-logs`: accepts `{line, date, planned_hours}` only (0 < planned_hours ≤ 24).
-  - `GET /line-runtime-logs`: returns planned_hours plus **derived** downtime_hours, run_hours, availability, `clamped`.
-  - `DELETE /line-runtime-logs`: removes planned entry (day becomes unlogged).
-  - CSV import: `line,date,planned_hours` (legacy columns rejected).
-
-#### AB2) Backend: shared KPI engine is authoritative (single source of truth)
-- ✅ `/app/backend/kpi_engine.py` rewritten:
-  - Helpers: `derive_line_day_rows`, `derive_day`, `load_line_breakdown_intervals`, `build_line_runtime_ctx`.
-  - `compute_line_kpis()` window availability = `(Σplanned − Σdowntime)/Σplanned` with:
-    - planned minutes prorated per day-overlap;
-    - 24/7 fallback planned=24h for **unlogged** days only;
-    - downtime minutes derived live as union-merged breakdown overlap;
-    - `planned_minutes` and `clamped` exposed per line.
-
-#### AB3) Backend: analytics + summaries use the engine (no independent formulas)
-- ✅ `/app/backend/routers_ops.py` `analytics_kpis` updated:
-  - runtime keys: `planned_hours` and `run_hours` (legacy `calendar_hours` removed).
-  - `availability_trend` derived from planned model.
-  - machine/PG/department scopes map to parent line(s) and inherit line-day planned runtime.
-- ✅ `/app/backend/routers_core.py` machine detail runtime block updated:
-  - runtime derived from line planned days (planned_hours, downtime_hours, run_hours, logged_days, availability).
-
-#### AB4) Backend: reliability runtime consumption
-- ✅ `/app/backend/reliability.py` updated:
-  - `run_hours_between()` is now ctx-based and synchronous:
-    - logged line-day effective run = `max(planned − line downtime, 0)` prorated;
-    - unlogged days use 24/7 fallback.
-  - `recompute_machine_reliability()` builds ctx using `kpi_engine.build_line_runtime_ctx(line)`.
-
-#### AB5) Backend: remove deprecated auto-ticker writes
-- ✅ `/app/backend/server.py` runtime clock no longer writes deprecated per-machine `runtime_logs` increments.
-  - Plant clock still ticks.
-  - `machines.total_run_hours` continues to tick for UI counters.
-
-#### AB6) Data operations
-- ✅ Fresh start enforced:
-  - `runtime_logs` and `line_runtime_logs` purged (user-approved).
-- ✅ `/app/backend/routers_admin.py` sample seeder updated to seed `planned_hours` logs.
-
-#### AB7) Frontend: Runtime calendar UI changes
-- ✅ `/app/frontend/src/pages/Runtime.jsx` rebuilt:
-  - Single Planned Runtime input per line-day (day dialog + entry dialog + CSV).
-  - Derived display: Downtime, Effective Run, Availability.
-  - Clamp flag: AlertTriangle + tooltip “Downtime exceeds Planned Runtime — check breakdown records for this day”.
-  - Calendar cells label unlogged days as `unlogged`.
-  - Table columns updated (Planned / Derived Downtime / Run / Availability).
-
-#### AB8) Testing
-- ✅ `/app/test_reports/iteration_13.json`:
-  - Backend: **100% (60/60)**
-  - Frontend: **100%**
+*(Phase AB details unchanged; runtime model is single source of truth.)*
 
 ---
 
 ### Phase AC — Assignment Enforcement + Closure Attribution (P0)
 **Status:** ✅ COMPLETE — VERIFIED
 
-- ✅ Backend (`/app/backend/routers_maintenance.py`): hard 403 on Breakdown/WOs start/complete/close for non-assigned technicians; admins exempt.
-- ✅ Correct attribution: `assigned_to` = performer, `closed_by` = actor; RCA locks to actual performer; WOs record `completed_by`/`started_by`.
-- ✅ Timeline makes assigned-vs-actor mismatch explicit.
-- ✅ Frontend gating: Repair page + WO modal + Breakdown actions show locked messages and hide action buttons.
-- ✅ Verified via `/app/tests/test_enforcement.py` (21/21).
-
 ---
 
 ### Phase AD — Mandatory-field Validation Pack + Pareto Correction (P0)
 **Status:** ✅ COMPLETE — VERIFIED
 
-#### AD1) Action Taken mandatory (Breakdowns + Work Orders)
-- ✅ Backend (`/app/backend/routers_maintenance.py`):
-  - Breakdowns: reject `complete/close` without non-empty `action_taken` (400).
-  - Work Orders: reject `complete` without non-empty `action_taken` for **Corrective / Inspection / Predictive** (PM closes via checklist flow; RCA via 5-Why — exempt).
-- ✅ Frontend:
-  - `RepairBreakdown.jsx`: required-field styling + inline error `repair-action-taken-error`.
-  - `WorkOrderModal.jsx`: required-field styling + inline error `wo-complete-action-taken-error`.
-
-#### AD2) PM NOT OK remarks mandatory
-- ✅ Backend: `POST /pm-tasks/{task_id}/complete` returns 400 if any NOT_OK row has empty remarks.
-- ✅ Frontend: `ClosePMTask.jsx` blocks submit and shows per-row inline error `close-pm-remarks-error-<key>`.
-
-#### AD3) Pareto corrected to plot DOWNTIME (not count)
-- ✅ Downtime metric used (hours), cumulative percentage computed against cumulative downtime share.
-
-#### AD4) Verification
-- ✅ API verification (Action Taken 400s; PM remarks 400s; Pareto downtime math); UI verification via screenshots.
-
 ---
 
 ### Phase AE — Analytics Pareto regrouped MACHINE-WISE (P0 amendment)
 **Status:** ✅ COMPLETE — VERIFIED
-
-- ✅ Backend (`/app/backend/routers_ops.py`):
-  - Pareto now groups by **Machine** (not Mechanical/Electrical/PLC breakdown category).
-  - Built from the per-machine downtime map; sorted by **total downtime desc**; machines with zero downtime excluded.
-  - `cumulative_pct` computed from cumulative downtime share across machines.
-  - Returns up to **100** rows and `pareto_total_machines`.
-  - Item shape: `{machine_id, machine, count, downtime_hours, cumulative_pct}`.
-  - Respects the same date slicer.
-- ✅ Frontend (`/app/frontend/src/pages/Analytics.jsx`):
-  - Chart title: **“Downtime Pareto — by Machine (cumulative %)”**.
-  - X-axis: machine names.
-  - Shows **Top 15** by default; toggle appears when >15 machines:
-    - `analytics-pareto-expand` toggles **Show All N** / **Show Top 15**.
-  - Tooltip and footer updated to reference machine-wise downtime.
-- ✅ Verified via API assertions and screenshot.
 
 ---
 
@@ -448,50 +348,112 @@
 ### Phase AG — AWS strict category filter + PM on-time tolerance + Analytics Time Utilization donut (P0)
 **Status:** ✅ COMPLETE — VERIFIED
 
-#### AG1) AWS Tab — Category filter must **strictly hide** non-matching pools + KPI recalc
-- **Frontend file:** `/app/frontend/src/pages/AWSPage.jsx`
-- Implemented behavior:
-  - Selecting **Mechanical / Electrical / PLC(Control)**:
-    - Hides other pools entirely (`PoolBars` renders only the selected pool).
-    - Table figures (Level, Tier, MTBF, Predicted Life, Hours Since Failure, Health, Weibull) are read from the **selected pool’s own metrics**.
-    - KPI cards (Machines Tracked, Watch, Inspection Due, Overdue, Weibull Active) recalc from **pool-scoped rows**.
-    - When a category is active, health filter applies **client-side** to the pool health (prevents “blended-health” mismatch).
-  - **All Pools** preserves existing blended behavior.
-- Verified (example data): All=15, Mechanical=13, Electrical=2, PLC=1; **0 leaked pools**.
+- ✅ AWS category filter now strictly hides other pools and recalculates KPIs from the selected pool.
+- ✅ PM completion `on_time` uses ± reminder offset window + admin backfill endpoint exists.
+- ✅ Analytics Time Utilization donut added + backend aggregation added.
+- ✅ Testing: `/app/test_reports/iteration_14.json`.
 
-#### AG2) PM Compliance — redefine `on_time` using ± reminder_offset **and backfill historical records**
-- **Backend file:** `/app/backend/routers_maintenance.py`
-- Implemented:
-  - Added helper `_pm_on_time(due_date, completion_date, offset_days)`.
-  - `POST /api/pm-tasks/{task_id}/complete` now stores:
-    - `on_time = completion_date within [due − offset, due + offset]` using `checklist_date` (fallback today)
-    - `on_time_offset_days`
-  - Added admin-only, idempotent backfill endpoint:
-    - `POST /api/pm-completions/backfill-on-time` → `{scanned, updated}`
+---
 
-#### AG3) Analytics — Time Utilization donut/pie chart
-- **Backend file:** `/app/backend/routers_ops.py` (`GET /api/analytics/kpis`)
-  - Returns `time_utilization = {predictive_minutes, preventive_minutes, breakdown_minutes, total_minutes}`.
-  - Predictive/Preventive minutes from completed WO durations.
-  - Breakdown minutes from closed breakdown `repair_duration_minutes` (fallback `downtime_minutes`) + standalone Corrective WOs.
-  - Corrective WOs linked to breakdowns are excluded to prevent double-counting.
-  - Respects date range + hierarchy scopes.
-- **Frontend file:** `/app/frontend/src/pages/Analytics.jsx`
-  - Renders donut/pie with center total, per-slice legend (hours + %), and explicit empty state.
+### Phase AH — Mobile login cleanup + single-script deployment + “Warning”→“Red Tag” rename (P0)
+**Status:** ⏳ NOT STARTED (user confirmed requirements)
 
-#### AG Testing
-- ✅ `/app/test_reports/iteration_14.json`
-  - Backend: **100% (8/8)**
-  - Frontend: AWS strict filter + Time Utilization donut + empty state verified; KPI/Pareto regression confirmed.
+#### AH1) Mobile-responsive Login page + remove default credentials block
+- **Frontend files to inspect:**
+  - Login page component (e.g. `/app/frontend/src/pages/Login.jsx` or wherever the login route renders).
+  - Any shared auth layout components.
+- Implement:
+  - Responsive layout for ~360px width:
+    - No horizontal scroll
+    - Inputs/buttons ≥44px height or equivalent tap target
+    - Text legible without browser zoom
+    - Avoid fixed widths; use `max-w`, `w-full`, responsive padding.
+  - Remove the **default credentials** help block entirely.
+  - Keep public entry points: **Report Breakdown** and **Report Red Tag**.
+- Testing:
+  - Frontend: emulate phone viewport; verify no scroll-x; all CTA buttons visible.
+
+#### AH2) Mobile-friendly public kiosk report forms (Breakdown + Red Tag)
+- **Frontend files to inspect:**
+  - Report Breakdown page
+  - Report Warning/Red Tag page
+- Implement:
+  - Responsive form fields/selects and submit buttons.
+  - Ensure dropdowns/search fields are usable on mobile.
+  - Maintain no-login requirement.
+- Testing:
+  - Frontend: phone viewport screenshot + basic submission flow.
+
+#### AH3) Rename “Warning” → “Red Tag” everywhere (UI + new backend strings)
+- **Constraints:**
+  - Behavior unchanged (non-downtime; auto-generates Inspection WO; no breakdown).
+  - Keep existing **yellow theme**.
+  - Replace warning/exclamation icon with a **Tag** icon.
+  - Leave historical DB text as-is.
+  - Keep API routes/internal field names unchanged.
+- **Frontend sweep:**
+  - Sidebar label
+  - Buttons (Report Warning → Report Red Tag)
+  - Filters/tabs
+  - Badges/tags
+  - Live Event Feed labels
+  - Notifications UI labels
+  - Any helper text / tooltips
+- **Backend sweep (newly generated strings only):**
+  - Notification titles/bodies
+  - Timeline event titles
+  - Work order titles/descriptions that mention warnings
+- Testing:
+  - Frontend: global search to ensure “Warning” no longer appears in user-facing UI.
+  - Backend: trigger a new warning/red-tag creation and verify strings.
+
+#### AH4) Single-script deployment (`/app/deploy.sh`)
+- Create `/app/deploy.sh` that performs (idempotently where possible):
+  1. Preconditions checks (Ubuntu 22.04/24.04, root, ports 80/443 availability)
+  2. Install system packages: nginx, mongodb-org (7.0), python3-venv, nodejs (LTS), build essentials
+  3. Create deploy user/group and `/opt/factory-ops`
+  4. Pull/copy app source (assumes script run inside repo; copies to `/opt/factory-ops/current`)
+  5. Backend:
+     - create venv, install requirements
+     - write `.env`/settings file(s)
+     - install systemd unit `factory-ops-backend.service` listening on 127.0.0.1:8001
+  6. MongoDB:
+     - start/enable mongod
+     - create DB and ensure indexes
+     - run seeding: only if seed marker/collections empty
+  7. Frontend:
+     - `npm ci`
+     - build (`npm run build`)
+     - place build output at `/var/www/factory-ops` or `/opt/factory-ops/www`
+  8. Nginx:
+     - site config to serve static frontend and proxy `/api` to backend
+     - `nginx -t` then reload
+  9. Post-checks:
+     - curl `/api/health` (or equivalent)
+     - print final URL and credentials note (do **not** print passwords)
+- Script UX:
+  - Clear stage headers and success/failure logging
+  - Safe re-run behavior (do not clobber existing configs without backup)
+- Documentation:
+  - Prerequisites, ports, and configuration knobs included as comments at top.
+
+#### AH5) Phase AH verification
+- Create test report: `/app/test_reports/iteration_15.json`
+- Verify:
+  - Login page mobile layout OK; no credential hint shown.
+  - Public Breakdown/Red Tag forms mobile layout OK.
+  - “Red Tag” terminology and Tag icon consistent.
+  - Deployment script runs through on a clean Ubuntu VM (documented manual validation steps).
 
 ---
 
 ## 3) Next Actions
 
+### P0 (Active)
+- **Phase AH** (mobile login + single-script deployment + Red Tag rename): implement AH1–AH5.
+
 ### P0 (Pending approval)
 - **Reliability data-quality guard**: prevent breakdown start-times from predating a machine’s `commissioned_at` (or otherwise ignore invalid negative TBF intervals) to avoid Weibull/MTBF poisoning.
-  - Backend validation on breakdown create/edit.
-  - Optional cleanup/backfill for existing bad records.
 
 ### P1
 - UI hint for `mtbf_source` (show whether MTBF is from reliability engine vs aggregate).
@@ -559,3 +521,15 @@
   - Analytics shows donut/pie minutes by AWS/Predictive, PM/Preventive, Breakdown/Corrective.
   - Respects date slicer + hierarchy scope.
   - Handles empty ranges with explicit “No maintenance time logged…” state.
+
+### NEW (Phase AH)
+- ⏳ **Mobile login + public kiosk UX**
+  - Login page is fully usable on phone screens; no credential hint block.
+  - Public Report Breakdown + Report Red Tag remain accessible from login.
+  - Public forms are mobile-friendly.
+- ⏳ **Red Tag rename + Tag icon**
+  - No user-facing “Warning” text remains; “Red Tag” used consistently.
+  - Yellow theme preserved; Tag icon used everywhere.
+- ⏳ **Single-script deployment**
+  - `/app/deploy.sh` performs one-step install + seed + build + service setup + nginx reverse proxy.
+  - Safe to re-run (idempotent where reasonable) and logs each stage clearly.

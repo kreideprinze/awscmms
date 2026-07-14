@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Search, AlertTriangle, GitBranch, UserRound, ChevronRight } from 'lucide-react';
+import { Plus, Search, Tag, GitBranch, UserRound, ChevronRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -50,7 +50,7 @@ function WarningDialog({ warning, open, setOpen, onDone }) {
       <DialogContent data-testid="warning-detail-dialog" className="border-[#f9f871]/30 bg-[hsl(var(--panel-1))]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-[#f9f871]" />
+            <Tag className="h-4 w-4 text-[#f9f871]" />
             <span className="font-mono text-sm text-[#f9f871]">{warning.tag_number}</span>
             <span className={`border px-1.5 py-0.5 font-mono text-[10px] uppercase ${warning.status === 'OPEN' ? 'border-[#f9f871]/50 text-[#f9f871]' : 'border-border text-muted-foreground'}`}>{warning.status}</span>
           </DialogTitle>
@@ -133,13 +133,13 @@ function WarningsView({ initialWarningId, onInitialConsumed }) {
         </TableHeader>
         <TableBody>
           {data.items.length === 0 && (
-            <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No warnings raised yet</TableCell></TableRow>
+            <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No red tags raised yet</TableCell></TableRow>
           )}
           {data.items.map((w) => (
             <TableRow key={w.id} data-testid={`warning-row-${w.tag_number}`} onClick={() => { setSelected(w); setDialogOpen(true); }}
               className="cursor-pointer border-border hover:bg-white/[0.03]">
               <TableCell className="font-mono text-xs text-[#f9f871]">
-                <AlertTriangle className="mr-1 inline h-3 w-3" />{w.tag_number}
+                <Tag className="mr-1 inline h-3 w-3" />{w.tag_number}
                 {w.submitted_via === 'public_kiosk' && (
                   <span className="ml-1.5 border border-[#f9f871]/50 px-1 py-px text-[8px] uppercase tracking-wide text-[#f9f871]">Public</span>
                 )}
@@ -235,7 +235,7 @@ export default function Breakdowns() {
         </div>
         <div className="flex gap-2">
           <Button data-testid="breakdowns-report-warning-button" onClick={() => setWarningOpen(true)} className="border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10">
-            <AlertTriangle className="mr-1 h-4 w-4" /> Report Warning
+            <Tag className="mr-1 h-4 w-4" /> Report Red Tag
           </Button>
           <Button data-testid="breakdowns-create-button" onClick={() => setCreateOpen(true)} className="border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10">
             <Plus className="mr-1 h-4 w-4" /> Report Breakdown
@@ -244,7 +244,7 @@ export default function Breakdowns() {
       </div>
 
       <div className="mb-4 flex gap-2">
-        {[['breakdowns', 'Breakdowns'], ['warnings', 'Warnings']].map(([k, lbl]) => (
+        {[['breakdowns', 'Breakdowns'], ['warnings', 'Red Tags']].map(([k, lbl]) => (
           <button key={k} data-testid={`breakdowns-view-${k}`} onClick={() => setView(k)}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${view === k
               ? (k === 'warnings' ? 'power-on border-[#f9f871] bg-transparent text-[#f9f871] shadow-[0_0_8px_rgba(249,248,113,0.25)]' : 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]')

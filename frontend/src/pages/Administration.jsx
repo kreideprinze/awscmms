@@ -433,7 +433,7 @@ function DataManagement({ onDone }) {
     try {
       const r = await api.post('/data/seed-sample');
       const c = r.data.seeded;
-      toast.success(`Sample data seeded: ${c.work_orders} WOs (incl. ${c.rca_work_orders} RCA), ${c.breakdowns} breakdowns, ${c.warnings} warnings, ${c.pm_tasks} PM task, ${c.line_runtime_days} days of line runtime`);
+      toast.success(`Sample data seeded: ${c.work_orders} WOs (incl. ${c.rca_work_orders} RCA), ${c.breakdowns} breakdowns, ${c.warnings} red tags, ${c.pm_tasks} PM task, ${c.line_runtime_days} days of line runtime`);
       onDone && onDone();
     } catch (e) { toast.error(errMsg(e)); }
     setSeeding(false);
@@ -459,7 +459,7 @@ function DataManagement({ onDone }) {
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[hsl(var(--primary))]">Seed Sample Data</div>
           <p className="text-xs text-muted-foreground">
             Generates realistic demo data against your <b>existing machines</b>: work orders in every Kanban stage,
-            closed breakdowns with varied downtimes (including RCA-triggering ones), warnings, a sample PM task
+            closed breakdowns with varied downtimes (including RCA-triggering ones), red tags, a sample PM task
             with completion, and 7 days of line runtime. All records are tagged <span className="font-mono">sample</span>.
           </p>
           <Button onClick={seed} disabled={seeding} data-testid="admin-seed-sample"
@@ -470,7 +470,7 @@ function DataManagement({ onDone }) {
         <div className="space-y-2 border border-[#ff2e63]/40 bg-[#ff2e63]/[0.03] p-3">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#ff2e63]">Purge Operational Data</div>
           <p className="text-xs text-muted-foreground">
-            <b>Destructive.</b> Removes ALL work orders, breakdowns, warnings, PM completions, runtime logs
+            <b>Destructive.</b> Removes ALL work orders, breakdowns, red tags, PM completions, runtime logs
             (machine + line), timeline, notifications, repair history, spare transactions and reliability metrics.
             <b> Machines, hierarchy, users, spares catalog, PM definitions and branding are kept.</b> Ticket counters reset.
           </p>

@@ -1398,18 +1398,18 @@ async def generate_warning_wo(warning_id: str, req: WarningWOGenerate, user: dic
     (for warnings without a linked WO, or when an additional dispatch is needed)."""
     warning = await db.warnings.find_one({'id': warning_id}, {'_id': 0})
     if not warning:
-        raise HTTPException(status_code=404, detail='Warning not found')
+        raise HTTPException(status_code=404, detail='Red tag not found')
     assigned_to = await _validate_technician(req.assigned_to)
     if warning.get('work_order_id'):
         existing = await db.work_orders.find_one({'id': warning['work_order_id']}, {'_id': 0, 'status': 1, 'wo_number': 1})
         if existing and existing.get('status') not in ('CLOSED',):
-            raise HTTPException(status_code=400, detail=f"Warning already has an open work order ({existing['wo_number']})")
+            raise HTTPException(status_code=400, detail=f"Red tag already has an open work order ({existing['wo_number']})")
     wo_type = req.wo_type if req.wo_type in ('Inspection', 'Corrective') else 'Inspection'
     wo_num = await next_counter('work_orders', 'WO')
     wo = {
         'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': wo_type,
         'title': f"{wo_type} \u2014 {warning['machine_name']} ({warning['tag_number']})",
-        'description': f"Generated from warning {warning['tag_number']} [{warning.get('warning_type', 'MECHANICAL')}]: {warning['description']}",
+        'description': f"Generated from red tag {warning['tag_number']} [{warning.get('warning_type', 'MECHANICAL')}]: {warning['description']}",
         'machine_id': warning['machine_id'], 'machine_name': warning['machine_name'],
         'department': warning.get('department'), 'line': warning.get('line'),
         'assigned_to': assigned_to, 'priority': 'medium', 'status': 'ASSIGNED' if assigned_to else 'OPEN',
@@ -1420,7 +1420,7 @@ async def generate_warning_wo(warning_id: str, req: WarningWOGenerate, user: dic
     await db.work_orders.insert_one(dict(wo))
     await db.warnings.update_one({'id': warning_id}, {'$set': {'work_order_id': wo['id'], 'work_order_number': wo_num}})
     await create_timeline_event('wo_created', machine_id=warning['machine_id'], machine_name=warning['machine_name'],
-                                title=f"WO {wo_num} generated from warning {warning['tag_number']} \u2192 {assigned_to or 'UNASSIGNED'}",
+                                title=f"WO {wo_num} generated from red tag {warning['tag_number']} \u2192 {assigned_to or 'UNASSIGNED'}",
                                 user=user['username'], reference_id=wo['id'], reference_type='work_order',
                                 department=warning.get('department'), line=warning.get('line'))
     await create_notification('work_order', f"Work Order Dispatched: {warning['machine_name']}",
@@ -1482,7 +1482,7 @@ async def _create_warning_internal(machine_id: str, description: str, warning_ty
     if warning_type not in BREAKDOWN_TYPES:
         raise HTTPException(status_code=400, detail=f'Invalid warning_type. Valid: {BREAKDOWN_TYPES}')
     if wo_type not in ('Inspection', 'Corrective'):
-        raise HTTPException(status_code=400, detail='Warning work order must be Inspection or Corrective')
+        raise HTTPException(status_code=400, detail='Red tag work order must be Inspection or Corrective')
     tag = await next_counter('warnings', 'WRN')
     warning = {
         'id': str(uuid.uuid4()), 'tag_number': tag,
@@ -1501,10 +1501,10 @@ async def _create_warning_internal(machine_id: str, description: str, warning_ty
         await broadcast_machine_update(machine)
 
     await create_timeline_event('warning_created', machine_id=machine['id'], machine_name=machine['name'],
-                                title=f"Warning {tag} raised", description=description, user=reporter,
+                                title=f"Red Tag {tag} raised", description=description, user=reporter,
                                 reference_id=warning['id'], reference_type='warning',
                                 department=machine['department'], line=machine['line'])
-    await create_notification('warning', f"Warning: {machine['name']}",
+    await create_notification('warning', f"Red Tag: {machine['name']}",
                               f"{tag} — [{warning_type}] {description}", severity='warning',
                               machine_id=machine['id'], machine_name=machine['name'],
                               reference_id=warning['id'], reference_type='warning')
@@ -1515,7 +1515,7 @@ async def _create_warning_internal(machine_id: str, description: str, warning_ty
     wo = {
         'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': wo_type,
         'title': f"{wo_type} — {machine['name']} ({tag})",
-        'description': f"Auto-dispatched from warning {tag} [{warning_type}]: {description}",
+        'description': f"Auto-dispatched from red tag {tag} [{warning_type}]: {description}",
         'machine_id': machine['id'], 'machine_name': machine['name'],
         'department': machine['department'], 'line': machine['line'],
         'assigned_to': assigned, 'priority': 'medium',
@@ -1529,7 +1529,7 @@ async def _create_warning_internal(machine_id: str, description: str, warning_ty
     warning['work_order_id'] = wo['id']
     warning['work_order_number'] = wo_num
     await create_timeline_event('wo_created', machine_id=machine['id'], machine_name=machine['name'],
-                                title=f"WO {wo_num} auto-dispatched from warning {tag}", user='system',
+                                title=f"WO {wo_num} auto-dispatched from red tag {tag}", user='system',
                                 reference_id=wo['id'], reference_type='work_order',
                                 department=machine['department'], line=machine['line'])
     warning.pop('_id', None)

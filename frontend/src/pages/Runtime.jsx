@@ -209,7 +209,7 @@ export default function Runtime() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Runtime Tracking — Planned Runtime Per Line</h1>
-          <p className="text-sm text-muted-foreground">One Planned Runtime entry per line per day · Downtime auto-derived from Breakdowns (Warnings excluded) · Availability = (Planned − Downtime) ÷ Planned × 100</p>
+          <p className="text-sm text-muted-foreground">One Planned Runtime entry per line per day · Downtime auto-derived from Breakdowns (Red Tags excluded) · Availability = (Planned − Downtime) ÷ Planned × 100</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" data-testid="runtime-view-toggle" onClick={() => setView(view === 'calendar' ? 'table' : 'calendar')} className="border-border bg-[hsl(var(--panel-2))]">
@@ -347,7 +347,7 @@ export default function Runtime() {
           </DialogHeader>
           <p className="text-[11px] text-muted-foreground">
             {isAdmin ? 'Enter the scheduled production hours per line. ' : 'View-only — planned runtime is managed by Admins. '}
-            Downtime and Availability are derived automatically from Breakdowns (Warnings never count).
+            Downtime and Availability are derived automatically from Breakdowns (Red Tags never count).
           </p>
           <div className="space-y-2">
             {lines.map((l) => (
