@@ -40,7 +40,20 @@ export default function Login() {
         style={{ backgroundImage: 'radial-gradient(900px 500px at 20% 10%, rgba(var(--accent-rgb),0.08), transparent 60%), radial-gradient(700px 420px at 80% 0%, rgba(255,46,99,0.05), transparent 55%)' }}
       />
       <div className="login-grid" aria-hidden="true" />
-      <div className="relative w-full max-w-md border border-border bg-[hsl(var(--panel-1))]/90 p-5 backdrop-blur-md sm:p-8" style={{ boxShadow: '0 0 0 1px rgba(var(--accent-rgb),0.1), 0 0 60px rgba(var(--accent-rgb),0.06), 0 30px 80px rgba(0,0,0,0.85)' }}>
+      <div className="relative w-full max-w-md">
+        {/* Public kiosk reporting — no login required (above the login card) */}
+        <div className="mb-3 grid grid-cols-2 gap-2" data-testid="public-report-section">
+          <Button type="button" data-testid="public-report-breakdown-button" onClick={() => setReportOpen(true)}
+            className="h-11 border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10 sm:h-10">
+            <CrackedGear className="mr-1 h-4 w-4" /> Breakdown
+          </Button>
+          <Button type="button" data-testid="public-report-warning-button" onClick={() => setWarningOpen(true)}
+            className="h-11 border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10 sm:h-10">
+            <Tag className="mr-1 h-4 w-4" /> Red Tag
+          </Button>
+        </div>
+
+        <div className="relative border border-border bg-[hsl(var(--panel-1))]/90 p-5 backdrop-blur-md sm:p-8" style={{ boxShadow: '0 0 0 1px rgba(var(--accent-rgb),0.1), 0 0 60px rgba(var(--accent-rgb),0.06), 0 30px 80px rgba(0,0,0,0.85)' }}>
         <div className="mb-6 flex items-center gap-3 sm:mb-8">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/10">
             {branding?.logo_data ? (
@@ -68,25 +81,7 @@ export default function Login() {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign in to Control Room'}
           </Button>
         </form>
-        {/* Public kiosk reporting — no login required */}
-        <div className="mt-4 border border-[#ff2e63]/30 p-3" data-testid="public-report-section">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-xs font-semibold text-foreground">Machine issue? No login needed.</div>
-              <div className="text-[11px] text-muted-foreground">Breakdown = machine down · Red Tag = concern, still running</div>
-            </div>
-            <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
-              <Button type="button" data-testid="public-report-breakdown-button" onClick={() => setReportOpen(true)}
-                className="h-11 border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10 sm:h-10">
-                <CrackedGear className="mr-1 h-4 w-4" /> Breakdown
-              </Button>
-              <Button type="button" data-testid="public-report-warning-button" onClick={() => setWarningOpen(true)}
-                className="h-11 border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10 sm:h-10">
-                <Tag className="mr-1 h-4 w-4" /> Red Tag
-              </Button>
-            </div>
-          </div>
-        </div>
+      </div>
       </div>
 
       <ReportBreakdownDialog open={reportOpen} setOpen={setReportOpen} publicMode />
