@@ -368,44 +368,17 @@
 - ✅ `/app/test_reports/iteration_13.json`:
   - Backend: **100% (60/60)**
   - Frontend: **100%**
-  - Verified:
-    - formula correctness (16h planned − 2h breakdown → 87.5%),
-    - clamp behavior (1h planned + 2h downtime → 0% + flag),
-    - warnings-exclusion,
-    - 24/7 live fallback for unlogged days,
-    - single source-of-truth across Control Room/Analytics/machine detail/reliability.
-- ✅ All test data cleaned; DB restored to fresh-start state (0 runtime entries).
 
 ---
 
 ### Phase AC — Assignment Enforcement + Closure Attribution (P0)
 **Status:** ✅ COMPLETE — VERIFIED
 
-#### AC1) Backend enforcement (hard 403)
-- ✅ `/app/backend/routers_maintenance.py`:
-  - Breakdowns: if a breakdown is assigned, **technicians who are not the assignee** cannot `start` / `complete` / `close` (403). Admins are exempt.
-  - Work Orders: if a WO is assigned, **technicians who are not the assignee** cannot `start` / `complete` / `close` (403). Admins are exempt.
-  - Error messages instruct: claim (if unassigned) or request transfer.
-
-#### AC2) Correct attribution (actor vs performer)
-- ✅ Breakdowns:
-  - `assigned_to` represents the **repairing technician (performer)**; `closed_by` is the actor.
-  - RCA trigger locks RCA WO to the **actual performer** (`rca_assigned_to`).
-- ✅ Work Orders:
-  - `started_by` and `completed_by` recorded for actor attribution.
-
-#### AC3) Audit trail
-- ✅ Timeline descriptions explicitly record mismatches:
-  - Breakdown close: `Repaired by <tech>; closed by <actor>` and override reassignment when applicable.
-  - Work order completion: performer-vs-actor mismatch when applicable.
-
-#### AC4) Frontend gating
-- ✅ RepairBreakdown shows `repair-locked-banner` and hides completion controls for non-assigned techs.
-- ✅ WorkOrderModal shows `wo-detail-locked-note` and hides start/complete controls for non-assigned techs.
-- ✅ MachineDrawer BreakdownActions hides Start Repair/Open Repair Page for non-assigned techs and shows a locked note.
-
-#### AC5) Verification
-- ✅ `/app/tests/test_enforcement.py` — 21/21 passed; UI verified; all test artifacts cleaned.
+- ✅ Backend (`/app/backend/routers_maintenance.py`): hard 403 on Breakdown/WOs start/complete/close for non-assigned technicians; admins exempt.
+- ✅ Correct attribution: `assigned_to` = performer, `closed_by` = actor; RCA locks to actual performer; WOs record `completed_by`/`started_by`.
+- ✅ Timeline makes assigned-vs-actor mismatch explicit.
+- ✅ Frontend gating: Repair page + WO modal + Breakdown actions show locked messages and hide action buttons.
+- ✅ Verified via `/app/tests/test_enforcement.py` (21/21).
 
 ---
 
@@ -417,34 +390,45 @@
   - Breakdowns: reject `complete/close` without non-empty `action_taken` (400).
   - Work Orders: reject `complete` without non-empty `action_taken` for **Corrective / Inspection / Predictive** (PM closes via checklist flow; RCA via 5-Why — exempt).
 - ✅ Frontend:
-  - `/app/frontend/src/pages/RepairBreakdown.jsx`: required-field styling (red asterisk, red border, inline error `repair-action-taken-error`) and submission blocked.
-  - `/app/frontend/src/components/WorkOrderModal.jsx`: completion form has required-field styling and inline error `wo-complete-action-taken-error`; submission blocked.
+  - `RepairBreakdown.jsx`: required-field styling + inline error `repair-action-taken-error`.
+  - `WorkOrderModal.jsx`: required-field styling + inline error `wo-complete-action-taken-error`.
 
 #### AD2) PM NOT OK remarks mandatory
-- ✅ Backend (`/app/backend/routers_maintenance.py`):
-  - `POST /pm-tasks/{task_id}/complete` returns 400 if any `NOT_OK` row has empty remarks; OK rows optional.
-- ✅ Frontend (`/app/frontend/src/pages/ClosePMTask.jsx`):
-  - Rows marked `NOT_OK` require remarks: placeholder includes `*`, red border and inline per-row error `close-pm-remarks-error-<key>`.
-  - Final submit blocked until all NOT OK rows have remarks; toast shows missing count.
+- ✅ Backend: `POST /pm-tasks/{task_id}/complete` returns 400 if any NOT_OK row has empty remarks.
+- ✅ Frontend: `ClosePMTask.jsx` blocks submit and shows per-row inline error `close-pm-remarks-error-<key>`.
 
-#### AD3) Pareto chart corrected to plot downtime (not count)
-- ✅ Backend (`/app/backend/routers_ops.py`):
-  - Pareto is sorted by **total downtime** per failure mode; cumulative % computed from cumulative downtime share.
-  - Same date slicer + same failure-mode grouping retained.
-- ✅ Frontend (`/app/frontend/src/pages/Analytics.jsx`):
-  - Pareto bars now plot `downtime_hours` with left axis in hours; tooltip/labels/footer updated.
+#### AD3) Pareto corrected to plot DOWNTIME (not count)
+- ✅ Downtime metric used (hours), cumulative percentage computed against cumulative downtime share.
 
 #### AD4) Verification
-- ✅ API verification (11/11): correct 400s for missing action_taken; PM NOT_OK remarks enforcement; Pareto sorted by downtime and cumulative % ends at 100.
-- ✅ UI verification via screenshots: inline required styling on Repair page + WO modal + PM checklist; Pareto chart shows downtime.
-- ✅ Test artifacts cleaned (incl. any prior synthetic “Test Failure Mode” breakdowns removed from Pareto).
+- ✅ API verification (Action Taken 400s; PM remarks 400s; Pareto downtime math); UI verification via screenshots.
+
+---
+
+### Phase AE — Analytics Pareto regrouped MACHINE-WISE (P0 amendment)
+**Status:** ✅ COMPLETE — VERIFIED
+
+- ✅ Backend (`/app/backend/routers_ops.py`):
+  - Pareto now groups by **Machine** (not Mechanical/Electrical/PLC breakdown category).
+  - Built from the per-machine downtime map; sorted by **total downtime desc**; machines with zero downtime excluded.
+  - `cumulative_pct` computed from cumulative downtime share across machines.
+  - Returns up to **100** rows (for API + optional UI expansion) and `pareto_total_machines`.
+  - Item shape: `{machine_id, machine, count, downtime_hours, cumulative_pct}`.
+  - Respects the same date slicer.
+- ✅ Frontend (`/app/frontend/src/pages/Analytics.jsx`):
+  - Chart title: **“Downtime Pareto — by Machine (cumulative %)”**.
+  - X-axis: machine names.
+  - Shows **Top 15** by default; toggle appears when >15 machines:
+    - `analytics-pareto-expand` toggles **Show All N** / **Show Top 15**.
+  - Tooltip and footer updated to reference machine-wise downtime.
+- ✅ Verified via API assertions and screenshot.
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ None — Phase AD completed and verified.
+- ✅ None — all requested follow-ups through Phase AE are complete.
 
 ### Optional follow-ups (P0/P1)
 - **P0 (requires approval)**: reliability engine data-quality fix for backdated failures predating commissioning (skip invalid TBF intervals rather than clamp to 0.1; guard minimum predicted life).
@@ -508,6 +492,7 @@
 - ✅ Date slicer exists.
 - ✅ Closure rate + Pareto exist.
 - ✅ **Pareto plots downtime (not count)** with cumulative % based on downtime.
+- ✅ **Pareto groups by Machine** (machine-wise downtime offenders; top-N view with expand).
 - ✅ Runtime is single source of truth.
 - ✅ **MTBF consistency**: Machine-level analytics MTBF matches AWS MTBF exactly.
 - ✅ **Planned Runtime model (Phase AB)** fully live:

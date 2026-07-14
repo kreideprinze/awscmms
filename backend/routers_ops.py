@@ -361,17 +361,21 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         fm['downtime'] += b.get('downtime_minutes') or 0
     failure_modes = [{'mode': m, 'count': v['count']} for m, v in sorted(fm_map.items(), key=lambda kv: -kv[1]['count'])[:10]]
 
-    # ---- Pareto analysis: failure modes desc by TOTAL DOWNTIME + cumulative % overlay ----
-    # Bars = downtime contribution per failure mode (NOT occurrence count); the
-    # cumulative line = cumulative downtime share — classic 80/20 against downtime.
-    pareto_rows = sorted(fm_map.items(), key=lambda kv: (-kv[1]['downtime'], -kv[1]['count']))
-    total_downtime = sum(v['downtime'] for _, v in pareto_rows) or 1
+    # ---- Pareto analysis: MACHINE-WISE, desc by TOTAL DOWNTIME + cumulative % ----
+    # Bars = each machine's total downtime (worst offender first); cumulative line =
+    # cumulative downtime share across machines in that order (classic 80/20 vs
+    # downtime). Full sorted list is returned with pareto_total_machines — the
+    # frontend shows the top N and can expand to the full list. Respects the same
+    # date range slicer as everything else on this endpoint.
+    pareto_rows = sorted(top_map.items(), key=lambda kv: (-kv[1]['downtime'], -kv[1]['failures']))
+    pareto_rows = [(mid, t) for mid, t in pareto_rows if t['downtime'] > 0]
+    total_downtime = sum(t['downtime'] for _, t in pareto_rows) or 1
     cum = 0.0
     pareto = []
-    for mode, v in pareto_rows[:15]:
-        cum += v['downtime']
-        pareto.append({'mode': mode, 'count': v['count'],
-                       'downtime_hours': round(v['downtime'] / 60, 1),
+    for mid, t in pareto_rows[:100]:
+        cum += t['downtime']
+        pareto.append({'machine_id': mid, 'machine': t['name'], 'count': t['failures'],
+                       'downtime_hours': round(t['downtime'] / 60, 1),
                        'cumulative_pct': round(cum / total_downtime * 100, 1)})
 
     return {
@@ -383,7 +387,7 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         'run_hours': run_hours, 'planned_hours': planned_hours,
         'downtime_trend': downtime_trend, 'failure_trend': failure_trend,
         'availability_trend': availability_trend, 'top_failing_machines': top_failing,
-        'failure_modes': failure_modes, 'pareto': pareto,
+        'failure_modes': failure_modes, 'pareto': pareto, 'pareto_total_machines': len(pareto_rows),
     }
 
 

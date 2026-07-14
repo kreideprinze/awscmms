@@ -154,6 +154,7 @@ export default function Analytics() {
   const [hierarchy, setHierarchy] = useState({ departments: [], lines: [], process_groups: [] });
   const [kpis, setKpis] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [paretoExpanded, setParetoExpanded] = useState(false); // top 15 by default, expandable
 
   useEffect(() => { api.get('/hierarchy').then((r) => setHierarchy(r.data)); }, []);
 
@@ -293,21 +294,29 @@ export default function Analytics() {
               )}
             </div>
             <div className="cyber-panel p-4 xl:col-span-2">
-              <div className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Failure Modes — Pareto (downtime + cumulative %)</div>
-              {(kpis.pareto || []).length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No failures recorded</div> : (
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Downtime Pareto — by Machine (cumulative %)</div>
+                {(kpis.pareto || []).length > 15 && (
+                  <button data-testid="analytics-pareto-expand" onClick={() => setParetoExpanded((v) => !v)}
+                    className="border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground transition-colors hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]">
+                    {paretoExpanded ? 'Show Top 15' : `Show All ${kpis.pareto_total_machines || kpis.pareto.length}`}
+                  </button>
+                )}
+              </div>
+              {(kpis.pareto || []).length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">No downtime recorded</div> : (
                 <ResponsiveContainer width="100%" height={260}>
-                  <ComposedChart data={kpis.pareto} data-testid="analytics-pareto-chart">
+                  <ComposedChart data={paretoExpanded ? kpis.pareto : kpis.pareto.slice(0, 15)} data-testid="analytics-pareto-chart">
                     <CartesianGrid stroke={chartTheme.grid} vertical={false} />
-                    <XAxis dataKey="mode" tick={{ ...chartTheme.tick, fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={50} />
+                    <XAxis dataKey="machine" tick={{ ...chartTheme.tick, fontSize: 9 }} interval={0} angle={-25} textAnchor="end" height={60} />
                     <YAxis yAxisId="downtime" tick={chartTheme.tick} width={45} unit="h" />
                     <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={chartTheme.tick} width={40} unit="%" />
-                    <RTooltip contentStyle={chartTheme.tooltip} formatter={(v, name) => name === 'cumulative_pct' ? [`${v}%`, 'Cumulative downtime'] : name === 'downtime_hours' ? [`${v}h`, 'Downtime'] : [v, name]} />
+                    <RTooltip contentStyle={chartTheme.tooltip} formatter={(v, name) => name === 'cumulative_pct' ? [`${v}%`, 'Cumulative downtime'] : name === 'downtime_hours' ? [`${v}h`, 'Downtime'] : [v, name === 'count' ? 'Breakdowns' : name]} />
                     <Bar yAxisId="downtime" dataKey="downtime_hours" fill="#00fff5" radius={[3, 3, 0, 0]} maxBarSize={42} />
                     <Line yAxisId="pct" type="monotone" dataKey="cumulative_pct" stroke="#ff9e1c" strokeWidth={2} dot={{ r: 3 }} />
                   </ComposedChart>
                 </ResponsiveContainer>
               )}
-              <p className="mt-1 text-[10px] text-muted-foreground">80/20 view — bars are TOTAL DOWNTIME (hours) per failure mode (sorted), the line is the cumulative share of all downtime.</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">80/20 view — bars are each MACHINE's total downtime (hours, worst first{paretoExpanded ? '' : ', top 15 shown'}); the line is the cumulative share of all downtime across machines.</p>
             </div>
           </div>
         </>
