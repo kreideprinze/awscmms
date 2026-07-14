@@ -106,15 +106,15 @@
 - **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
 - **Warnings are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
 
-### Analytics + runtime objectives (UPDATED — Planned Runtime model)
+### Analytics + runtime objectives (CURRENT — Planned Runtime model)
 - Analytics supports a date range slicer applied to all KPIs/charts.
 - Add closure-rate KPI + Pareto analysis.
 - **Runtime is the single source of truth** (authoritative per line-day):
   - **Input**: one manual value per **Line × Date**: **Planned Runtime (hours)**.
-  - **Downtime**: derived automatically from **Breakdowns only** for that line-day (Warnings never count).
+  - **Downtime**: derived automatically and **live** from **Breakdowns only** for that line-day (Warnings never count).
   - **Availability** (line-day): `((Planned − Downtime) ÷ Planned) × 100`.
   - **Clamp rule**: if Downtime > Planned, Availability clamps at **0%**, and a visible **data-quality flag** is surfaced.
-  - **Unlogged days**: visually marked missing in calendar; **Control Room windows** keep the current live 24/7 fallback (**planned=24h**) only for unlogged days to keep live KPIs ticking.
+  - **Unlogged days**: visibly marked missing in calendar; **Control Room windows** keep the current live 24/7 fallback (**planned=24h**) only for unlogged days to keep live KPIs ticking.
   - **No other module may recompute availability independently**; all must read from the shared engine.
 - **AWS/reliability runtime usage**:
   - For a logged line-day: per-machine run-hours inherit `max(Planned − derived line downtime, 0)` (prorated by overlap).
@@ -211,7 +211,7 @@
 ---
 
 ### Phase N — Plant bugfix pack (Breakdown/WO sync + Time edits + Availability + Warnings + Spares + PM PDF) (P0)
-**Status:** ✅ COMPLETE *(availability + runtime now unified via kpi_engine.py; superseded by Phase AB runtime model)*
+**Status:** ✅ COMPLETE *(availability + runtime unified; superseded by Phase AB runtime model)*
 
 **Phase N Testing:** ✅ COMPLETE
 - Backend: **15/15 tests passed (100%)**
@@ -287,7 +287,7 @@
 ---
 
 ### Phase AB — Runtime Module Rework: Planned Runtime + Derived Downtime + Corrected Availability (P0)
-**Status:** ⏳ IN PROGRESS (design locked; implementation pending)
+**Status:** ✅ COMPLETE — VERIFIED
 
 #### AB0) Decisions locked (from user)
 - ✅ Control Room windows: keep current live 24/7 fallback (**planned=24h**) only for **unlogged** days.
@@ -296,73 +296,76 @@
 - ✅ Derived downtime freshness: always computed **live from breakdown records**.
 
 #### AB1) Backend: data model + API contract changes
-- Update runtime models:
-  - `line_runtime_logs`: replace `{calendar_hours, run_hours}` with `{planned_hours}`.
-  - Remove fixed 24h calendar-hour assumption from line-day logs.
-  - Remove/retire per-machine `runtime_logs` as a persisted source of truth.
-- Update endpoints in `/app/backend/routers_ops.py`:
-  - `POST /runtime-logs`: accept `{line, date, planned_hours}` only.
-  - `GET /line-runtime-logs`: return planned_hours plus **derived** downtime_hours, run_hours, availability, clamped flag.
-  - `DELETE /line-runtime-logs`: remove planned entry.
-  - CSV import: `line,date,planned_hours`.
+- ✅ Runtime models updated:
+  - `line_runtime_logs`: now stores `{planned_hours}` only.
+  - Deprecated `{calendar_hours, run_hours}` model removed.
+  - Deprecated per-machine persisted `runtime_logs` removed from runtime source-of-truth (no longer written by server clock; endpoints now expose derived line-days).
+- ✅ Endpoints in `/app/backend/routers_ops.py`:
+  - `POST /runtime-logs`: accepts `{line, date, planned_hours}` only (0 < planned_hours ≤ 24).
+  - `GET /line-runtime-logs`: returns planned_hours plus **derived** downtime_hours, run_hours, availability, `clamped`.
+  - `DELETE /line-runtime-logs`: removes planned entry (day becomes unlogged).
+  - CSV import: `line,date,planned_hours` (legacy columns rejected).
 
-#### AB2) Backend: shared KPI engine becomes authoritative for availability
-- Rewrite `/app/backend/kpi_engine.py`:
-  - Add a shared helper to derive per-line per-day rows: planned + merged breakdown downtime (breakdowns only).
-  - Rewrite `compute_line_kpis()` to compute window availability using:
-    - planned minutes (prorated per day overlap; fallback planned=24h for unlogged days)
-    - downtime minutes = merged breakdown overlap for that line/day
-    - availability = (Σplanned − Σdowntime) / Σplanned (clamped at 0%)
-  - Expose `planned_minutes`, `downtime_minutes`, `availability`, and `clamped_days` / `quality_flags` per line.
+#### AB2) Backend: shared KPI engine is authoritative (single source of truth)
+- ✅ `/app/backend/kpi_engine.py` rewritten:
+  - Helpers: `derive_line_day_rows`, `derive_day`, `load_line_breakdown_intervals`, `build_line_runtime_ctx`.
+  - `compute_line_kpis()` window availability = `(Σplanned − Σdowntime)/Σplanned` with:
+    - planned minutes prorated per day-overlap;
+    - 24/7 fallback planned=24h for **unlogged** days only;
+    - downtime minutes derived live as union-merged breakdown overlap;
+    - `planned_minutes` and `clamped` exposed per line.
 
 #### AB3) Backend: analytics + summaries use the engine (no independent formulas)
-- Update `/app/backend/routers_ops.py` `analytics_kpis`:
-  - line/plant availability must come from the KPI engine (already partly true) but now using planned-runtime model.
-  - availability trend based on planned/downtime model.
-- Update `/app/backend/routers_core.py` machine detail runtime block:
-  - machine runtime summary derived from its line’s planned/downtime model.
+- ✅ `/app/backend/routers_ops.py` `analytics_kpis` updated:
+  - runtime keys: `planned_hours` and `run_hours` (legacy `calendar_hours` removed).
+  - `availability_trend` derived from planned model.
+  - machine/PG/department scopes map to parent line(s) and inherit line-day planned runtime.
+- ✅ `/app/backend/routers_core.py` machine detail runtime block updated:
+  - runtime derived from line planned days (planned_hours, downtime_hours, run_hours, logged_days, availability).
 
 #### AB4) Backend: reliability runtime consumption
-- Update `/app/backend/reliability.py` `run_hours_between()` to use planned/downtime:
-  - for logged line-days: effective run = max(planned − downtime, 0) prorated by overlap
-  - unlogged: 24/7 fallback
+- ✅ `/app/backend/reliability.py` updated:
+  - `run_hours_between()` is now ctx-based and synchronous:
+    - logged line-day effective run = `max(planned − line downtime, 0)` prorated;
+    - unlogged days use 24/7 fallback.
+  - `recompute_machine_reliability()` builds ctx using `kpi_engine.build_line_runtime_ctx(line)`.
 
 #### AB5) Backend: remove deprecated auto-ticker writes
-- Update `/app/backend/server.py` runtime clock:
-  - stop writing per-machine `runtime_logs` increments.
-  - keep plant clock mechanism if needed for non-runtime features, and keep machine `total_run_hours` ticking (UI-only runtime counter).
+- ✅ `/app/backend/server.py` runtime clock no longer writes deprecated per-machine `runtime_logs` increments.
+  - Plant clock still ticks.
+  - `machines.total_run_hours` continues to tick for UI counters.
 
 #### AB6) Data operations
-- Purge/reset runtime collections per the new model:
-  - `runtime_logs` and `line_runtime_logs` cleared (fresh start).
-- Update sample seeders (`routers_admin.py`) to seed `planned_hours` (optional).
+- ✅ Fresh start enforced:
+  - `runtime_logs` and `line_runtime_logs` purged (user-approved).
+- ✅ `/app/backend/routers_admin.py` sample seeder updated to seed `planned_hours` logs.
 
 #### AB7) Frontend: Runtime calendar UI changes
-- Update `/app/frontend/src/pages/Runtime.jsx`:
-  - Replace inputs: **single Planned Runtime** per line-day.
-  - Display derived: Downtime, Effective Run, Availability.
-  - Show clamp flag + tooltip: “Downtime exceeds Planned Runtime — check breakdown records for this day”.
-  - Keep existing logged/missing indicator behavior; missing should not display misleading KPIs.
-  - Update KPI cards and table headers accordingly.
+- ✅ `/app/frontend/src/pages/Runtime.jsx` rebuilt:
+  - Single Planned Runtime input per line-day (day dialog + entry dialog + CSV).
+  - Derived display: Downtime, Effective Run, Availability.
+  - Clamp flag: AlertTriangle + tooltip “Downtime exceeds Planned Runtime — check breakdown records for this day”.
+  - Calendar cells label unlogged days as `unlogged`.
+  - Table columns updated (Planned / Derived Downtime / Run / Availability).
 
 #### AB8) Testing
-- Run testing agent (backend + frontend) and generate new report:
-  - Availability matches formula
-  - Warnings excluded from downtime
-  - Clamp behavior visible + correct
-  - Unlogged day handling correct
-  - Control Room/Analytics/AWS all read from the shared model
+- ✅ `/app/test_reports/iteration_13.json`:
+  - Backend: **100% (60/60)**
+  - Frontend: **100%**
+  - Verified:
+    - formula correctness (16h planned − 2h breakdown → 87.5%),
+    - clamp behavior (1h planned + 2h downtime → 0% + flag),
+    - warnings-exclusion,
+    - 24/7 live fallback for unlogged days,
+    - single source-of-truth across Control Room/Analytics/machine detail/reliability.
+- ✅ All test data cleaned; DB restored to fresh-start state (0 runtime entries).
 
 ---
 
 ## 3) Next Actions
 
 ### Immediate (P0)
-- Implement Phase AB end-to-end:
-  - backend model + API + kpi_engine rewrite + reliability integration
-  - frontend Runtime page adjustments
-  - data reset (fresh start)
-  - full regression test
+- ✅ None — Phase AB complete and verified.
 
 ### Optional follow-ups (P0/P1)
 - **P0 (requires approval)**: reliability engine data-quality fix for backdated failures predating commissioning (skip invalid TBF intervals rather than clamp to 0.1; guard minimum predicted life).
@@ -374,13 +377,14 @@
   - `/app/test_reports/iteration_9.json` — Backend verification **100%**.
   - `/app/test_reports/iteration_11.json` — Corrections Part 4 regression **100%**.
   - `/app/test_reports/iteration_12.json` — Phase Z backend regression **100%**.
+  - `/app/test_reports/iteration_13.json` — Phase AB planned-runtime regression **100% (backend+frontend)**.
 
 ---
 
 ## 4) Success Criteria
 
 ### Hierarchy + Admin
-- ✅ Backend hierarchy is **Line → Department → Process Group → Machine**, implemented as an in-place migration preserving all operational history.
+- ✅ Backend hierarchy is **Line → Department → Process Group → Machine**, implemented as an in-place DB migration preserving all operational history.
 - ✅ Frontend Admin pages render and edit hierarchy without crashes.
 
 ### Control Room
@@ -410,16 +414,16 @@
 
 ### AWS / Predictive
 - ✅ 3-pool engine + threshold config.
-- ✅ Reliability uses the shared runtime model.
+- ✅ Reliability consumes the planned-runtime model for logged days.
 
 ### Analytics + Runtime
 - ✅ Date slicer exists.
 - ✅ Closure rate + Pareto exist.
 - ✅ Runtime is single source of truth.
 - ✅ **MTBF consistency**: Machine-level analytics MTBF matches AWS MTBF exactly.
-- ⏳ **Planned Runtime model (Phase AB)**:
+- ✅ **Planned Runtime model (Phase AB)** fully live:
   - Planned Runtime is the only manual input per line-day.
   - Downtime derived from Breakdowns only (Warnings excluded).
   - Availability uses `((Planned − Downtime)/Planned) × 100` and clamps at 0% with a visible warning.
   - Unlogged days are visibly marked and do not produce misleading figures.
-  - Control Room, Analytics, Plant totals, and reliability all read the same authoritative model.
+  - Control Room, Analytics, Plant totals, machine detail runtime, and reliability all read the same authoritative model.
