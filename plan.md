@@ -35,6 +35,10 @@
   - If a technician closes an unassigned breakdown, the system records that technician automatically.
   - If an admin closes an unassigned breakdown, an **assigned technician must be selected** (otherwise 400).
 
+- **Assignment-based action enforcement (P0, implemented)**:
+  - For **Breakdowns** and **Work Orders**: only the **current assignee** (or an **Admin**) can perform **Start / Complete / Close** actions.
+  - Other technicians must **claim** (if unassigned) or receive a **transfer** first; they cannot complete someone else’s assigned task.
+
 - **PM Tasks support Unassigned creation universally** (same philosophy as WOs/Breakdowns).
   - A PM Task can be created with no technician.
   - Unassigned PM Tasks are visible to all technicians (not hidden).
@@ -60,6 +64,13 @@
 - **Immediate RCA completion flow**:
   - When a breakdown is closed and downtime exceeds threshold (default 30 min), the **5-Why RCA form opens immediately in-flow**.
   - If the user dismisses the immediate RCA popup, the RCA **remains as a locked pending task** assigned to that technician (prevents data loss).
+
+- **Correct action attribution + audit trail (P0, implemented)**:
+  - Breakdown repairs now accurately record:
+    - `assigned_to` = **repairing technician** (actual performer),
+    - `closed_by` = **actor** who executed the close call,
+    - timeline event describes **Repaired by X; closed by Y**, and records admin override reassignment when applicable.
+  - Work orders now record `completed_by` / `started_by` for actor attribution; timeline event describes performer-vs-actor mismatch where applicable.
 
 - **AWS / Predictive Maintenance Engine** is per-category:
   - Track separate health/life pools per machine for **Mechanical / Electrical / PLC(Control)**.
@@ -362,10 +373,49 @@
 
 ---
 
+### Phase AC — Assignment Enforcement + Closure Attribution (P0)
+**Status:** ✅ COMPLETE — VERIFIED
+
+#### AC1) Backend enforcement (hard 403)
+- ✅ `/app/backend/routers_maintenance.py`:
+  - Breakdowns: if a breakdown is assigned, **technicians who are not the assignee** cannot `start` / `complete` / `close` (403). Admins are exempt.
+  - Work Orders: if a WO is assigned, **technicians who are not the assignee** cannot `start` / `complete` / `close` (403). Admins are exempt.
+  - Error messages instruct: claim (if unassigned) or request transfer.
+
+#### AC2) Correct attribution (actor vs performer)
+- ✅ Breakdowns:
+  - `assigned_to` now correctly represents the **repairing technician (performer)**:
+    - technician close → performer = logged-in technician (enforcement guarantees ownership)
+    - admin close → performer = explicit dropdown pick (validated) else current assignee
+  - `closed_by` is always the **actor** who executed the close.
+  - RCA trigger now locks RCA WO to the **actual performer** (`rca_assigned_to`).
+- ✅ Work Orders:
+  - `started_by` and `completed_by` recorded for actor attribution.
+
+#### AC3) Audit trail
+- ✅ Timeline descriptions explicitly record mismatches:
+  - Breakdown close event: `Repaired by <tech>; closed by <actor>` and `Reassigned from <prev> at closure...` when admin overrides.
+  - Work order completion event: `Performed by <assignee>; completed by <actor>` when they differ.
+
+#### AC4) Frontend gating
+- ✅ `/app/frontend/src/pages/RepairBreakdown.jsx`:
+  - Non-assigned technicians see `repair-locked-banner`; completion controls hidden.
+- ✅ `/app/frontend/src/components/WorkOrderModal.jsx`:
+  - Non-assigned technicians see `wo-detail-locked-note`; start/complete buttons hidden.
+- ✅ `/app/frontend/src/components/MachineDrawer.jsx` BreakdownActions:
+  - Start Repair / Open Repair Page hidden for non-assigned techs; locked note shown.
+
+#### AC5) Verification
+- ✅ `/app/tests/test_enforcement.py` — 21/21 passed (403 enforcement, correct RCA assignee, correct `closed_by`, timeline strings verified).
+- ✅ UI verified via screenshots: locked banner present; action buttons absent for non-assigned techs.
+- ✅ All test artifacts cleaned.
+
+---
+
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ None — Phase AB complete and verified.
+- ✅ None — Phase AC completed and verified.
 
 ### Optional follow-ups (P0/P1)
 - **P0 (requires approval)**: reliability engine data-quality fix for backdated failures predating commissioning (skip invalid TBF intervals rather than clamp to 0.1; guard minimum predicted life).
@@ -378,6 +428,8 @@
   - `/app/test_reports/iteration_11.json` — Corrections Part 4 regression **100%**.
   - `/app/test_reports/iteration_12.json` — Phase Z backend regression **100%**.
   - `/app/test_reports/iteration_13.json` — Phase AB planned-runtime regression **100% (backend+frontend)**.
+- Local verification scripts:
+  - `/app/tests/test_enforcement.py` — Phase AC enforcement + attribution checks.
 
 ---
 
@@ -398,11 +450,14 @@
 - ✅ Unassigned supported + claim.
 - ✅ Admins assign via dropdown.
 - ✅ Transfer works (assignee/admin only).
+- ✅ **Assigned action enforcement**: non-assigned technicians cannot start/complete/close assigned WOs.
 - ✅ RCA lock enforced.
 
 ### Breakdowns + Governance
 - ✅ Cannot close without technician.
 - ✅ Claim/assign/transfer supported.
+- ✅ **Assigned action enforcement**: non-assigned technicians cannot start/complete/close assigned breakdowns.
+- ✅ **Correct closure attribution**: repaired-by vs closed-by is accurate and visible in timeline.
 
 ### Preventive Maintenance (PM Tasks) + Governance
 - ✅ Unassigned supported + claim.
@@ -411,6 +466,7 @@
 ### Immediate RCA Flow
 - ✅ Closing a >threshold breakdown returns `rca_required` + `rca_task_id`.
 - ✅ Repair flow pops embedded 5-Why RCA form immediately.
+- ✅ RCA locks to the technician who actually triggered closure.
 
 ### AWS / Predictive
 - ✅ 3-pool engine + threshold config.

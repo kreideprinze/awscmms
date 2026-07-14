@@ -159,6 +159,9 @@ export function WorkOrderModal() {
   const dirty = wo && (startT !== toLocalInput(wo.started_at) || endT !== toLocalInput(wo.completed_at));
   const isUnassigned = wo && !wo.assigned_to && ['OPEN', 'ASSIGNED'].includes(wo.status);
   const adminGated = wo && needsAdminClosure(wo.wo_type);
+  // ENFORCEMENT: an assigned WO can only be worked (start/complete) by its current
+  // assignee or an admin — other technicians must claim/receive a transfer first.
+  const canWork = wo && (isAdmin || !wo.assigned_to || wo.assigned_to === user?.username);
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) closeWorkOrder(); }}>
@@ -324,13 +327,18 @@ export function WorkOrderModal() {
                     onTransfer={(t) => act('assign', { assigned_to: t })} />
                 )
               )}
-              {['OPEN', 'ASSIGNED'].includes(wo.status) && !isUnassigned && (
+              {['OPEN', 'ASSIGNED'].includes(wo.status) && !isUnassigned && canWork && (
                 <Button size="sm" variant="outline" data-testid="wo-detail-start-btn" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs"
                   onClick={() => act('start')}>Start</Button>
               )}
-              {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && !isUnassigned && (
+              {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && !isUnassigned && canWork && (
                 <Button size="sm" data-testid="wo-detail-complete-btn" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10"
                   onClick={startComplete}>{adminGated ? 'Complete' : 'Complete & Close'}</Button>
+              )}
+              {['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(wo.status) && !isUnassigned && !canWork && (
+                <span className="w-full border border-[#ff9e1c]/40 bg-[#ff9e1c]/5 px-2 py-1.5 text-[10px] text-[#ff9e1c]" data-testid="wo-detail-locked-note">
+                  Assigned to {wo.assigned_to} — only they or an admin can start/complete this work order. Ask {wo.assigned_to} or an admin to transfer it to you.
+                </span>
               )}
               {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
                 <Button size="sm" data-testid="wo-detail-admin-close-btn" className="h-7 border border-[#ff9e1c]/60 bg-transparent text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/10"

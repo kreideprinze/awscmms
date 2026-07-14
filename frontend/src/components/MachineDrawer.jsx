@@ -232,11 +232,17 @@ export function BreakdownActions({ bd, onDone, compact }) {
         <TransferControl current={bd.assigned_to} testId={`bd-transfer-${bd.ticket_number}`}
           onTransfer={(t) => act({ action: 'assign', assigned_to: t }, `${bd.ticket_number} transferred to ${t}`)} />
       )}
+      {/* ENFORCEMENT: only the current assignee or an admin can work an assigned breakdown */}
+      {active && bd.assigned_to && !isAdmin && bd.assigned_to !== user?.username && (
+        <div className="border border-[#ff9e1c]/40 bg-[#ff9e1c]/5 px-2 py-1.5 text-[10px] text-[#ff9e1c]" data-testid={`bd-locked-note-${bd.ticket_number}`}>
+          Assigned to {bd.assigned_to} — only they or an admin can start/complete this repair. Ask {bd.assigned_to} or an admin to transfer it to you.
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5">
-        {['OPEN', 'ASSIGNED'].includes(bd.status) && (
+        {['OPEN', 'ASSIGNED'].includes(bd.status) && (isAdmin || !bd.assigned_to || bd.assigned_to === user?.username) && (
           <Button size="sm" variant="outline" className="h-7 border-border bg-[hsl(var(--panel-2))] text-xs" data-testid={`bd-start-${bd.ticket_number}`} onClick={(e) => { e.stopPropagation(); startRepair(); }}>Start Repair</Button>
         )}
-        {bd.status === 'IN_PROGRESS' && (
+        {bd.status === 'IN_PROGRESS' && (isAdmin || !bd.assigned_to || bd.assigned_to === user?.username) && (
           <Button size="sm" className="h-7 border border-[#05ffa1]/60 bg-transparent text-xs text-[#05ffa1] hover:bg-[#05ffa1]/10" data-testid={`bd-open-repair-${bd.ticket_number}`} onClick={() => navigate(`/breakdowns/repair/${bd.id}`)}>Open Repair Page</Button>
         )}
         {bd.status === 'COMPLETED' && (

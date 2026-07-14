@@ -115,6 +115,8 @@ export default function RepairBreakdown() {
   if (!bd) return <div className="p-10"><div className="cyber-loading w-64" /></div>;
 
   const active = ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(bd.status);
+  // ENFORCEMENT: only the current assignee (or an admin) may work an assigned breakdown
+  const canWork = isAdmin || !bd.assigned_to || bd.assigned_to === user?.username;
 
   return (
     <div className="mx-auto max-w-4xl p-6" data-testid="repair-page">
@@ -164,7 +166,16 @@ export default function RepairBreakdown() {
 
       {!isTech && <div className="mb-4 border border-[#f9f871]/40 p-3 text-xs text-[#f9f871]">Read-only — repairs are recorded by technicians/admins.</div>}
 
-      {active && isTech ? (
+      {/* ENFORCEMENT (P0): only the assigned technician or an admin can complete this
+          repair. Other technicians see a locked notice instead of the completion form. */}
+      {active && isTech && !canWork && (
+        <div className="mb-4 border border-[#ff9e1c]/50 bg-[#ff9e1c]/5 p-3 text-xs text-[#ff9e1c]" data-testid="repair-locked-banner">
+          This breakdown is assigned to <span className="font-semibold">{bd.assigned_to}</span> — only {bd.assigned_to} or an admin can start or complete the repair.
+          Ask {bd.assigned_to} or an admin to transfer it to you first; completion controls are disabled.
+        </div>
+      )}
+
+      {active && isTech && canWork ? (
         <div className="space-y-4">
           <div className="cyber-panel space-y-3 p-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Repair record</div>

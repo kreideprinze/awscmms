@@ -316,8 +316,18 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
                                       machine_id=bd['machine_id'], machine_name=bd['machine_name'], reference_id=bd_id, reference_type='breakdown')
         return {'ok': True, 'status': updates['status'], 'assigned_to': assignee}
 
+    # ENFORCEMENT (P0): an ASSIGNED breakdown can only be WORKED — start / complete /
+    # close — by its CURRENT ASSIGNEE or an admin. Any other technician must first
+    # take ownership (claim if unassigned, or receive a transfer); they can never
+    # act on a breakdown assigned to someone else.
+    if req.action in ('start', 'complete', 'close'):
+        holder = bd.get('assigned_to')
+        if holder and user.get('role') == 'technician' and user['username'] != holder:
+            raise HTTPException(status_code=403,
+                                detail=f"{bd['ticket_number']} is assigned to {holder} — only {holder} or an admin can {req.action} it. Ask {holder} or an admin to transfer it to you first.")
+
     if req.action == 'start':
-        updates = {'status': 'IN_PROGRESS', 'repair_started_at': now_iso()}
+        updates = {'status': 'IN_PROGRESS', 'repair_started_at': now_iso(), 'repair_started_by': user['username']}
         # Only a TECHNICIAN starting the repair takes ownership automatically.
         # Admins/managers starting a repair do NOT get auto-assigned — they must pick
         # a technician from the dropdown (the closure gate enforces it regardless).
@@ -335,11 +345,18 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
 
     if req.action in ('complete', 'close'):
         # GOVERNANCE: a breakdown can NEVER be closed without a technician on record.
-        # - already assigned            -> keep that technician
-        # - explicit assigned_to in req -> admin picked a technician at closure time
-        # - closing user is a tech      -> auto-assign the completing technician
-        # - otherwise                   -> reject
-        closing_tech = bd.get('assigned_to') or req.assigned_to or (user['username'] if user.get('role') == 'technician' else None)
+        # ATTRIBUTION (P0 fix): the technician credited with the repair is whoever
+        # ACTUALLY performs/authorises it — never a stale original assignee:
+        #   - closing user is a tech  -> enforcement above guarantees they own it (or
+        #                                are self-claiming an unassigned one) -> credit THEM
+        #   - closing user is admin   -> explicit dropdown pick wins; else the current assignee
+        #   - otherwise               -> reject
+        if user.get('role') == 'technician':
+            closing_tech = user['username']
+        elif req.assigned_to:
+            closing_tech = await _validate_technician(req.assigned_to)
+        else:
+            closing_tech = bd.get('assigned_to')
         if not closing_tech:
             raise HTTPException(status_code=400, detail='A technician must be assigned before closing — select the technician who performed the repair')
         # Corrected/edited times take precedence over the raw elapsed timer — downtime,
@@ -427,9 +444,15 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
             await db.machines.update_one({'id': machine['id']}, {'$set': {'status': 'running', 'inspection_recommended': False}})
             machine['status'] = 'running'
             await broadcast_machine_update(machine)
+        # AUDIT TRAIL: record exactly who repaired vs who performed the closure action;
+        # any admin override of the original assignee is spelled out, never silent.
+        prev_holder = bd.get('assigned_to')
+        attribution = f"Repaired by {closing_tech}; closed by {user['username']}."
+        if prev_holder and prev_holder != closing_tech:
+            attribution += f" Reassigned from {prev_holder} at closure by {user['username']}."
         await create_timeline_event('breakdown_closed', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
                                     title=f"Breakdown {bd['ticket_number']} {new_status.lower()}",
-                                    description=f"Downtime {downtime:.0f} min. {req.action_taken or ''}",
+                                    description=f"Downtime {downtime:.0f} min. {attribution} {req.action_taken or ''}",
                                     user=user['username'], reference_id=bd_id, reference_type='breakdown',
                                     department=bd['department'], line=bd['line'])
         await create_notification('breakdown', f"Breakdown {new_status.title()}: {bd['machine_name']}",
@@ -599,8 +622,17 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                                     reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
         return {'ok': True, 'status': 'ASSIGNED', 'assigned_to': user['username']}
 
+    # ENFORCEMENT (P0): an ASSIGNED work order can only be WORKED — start / complete /
+    # close — by its CURRENT ASSIGNEE or an admin. Other technicians must claim
+    # (unassigned) or receive a transfer first.
+    if req.action in ('start', 'complete', 'close'):
+        holder = wo.get('assigned_to')
+        if holder and user.get('role') == 'technician' and user['username'] != holder:
+            raise HTTPException(status_code=403,
+                                detail=f"{wo['wo_number']} is assigned to {holder} — only {holder} or an admin can {req.action} it. Ask {holder} or an admin to transfer it to you first.")
+
     if req.action == 'start':
-        updates = {'status': 'IN_PROGRESS', 'started_at': now_iso()}
+        updates = {'status': 'IN_PROGRESS', 'started_at': now_iso(), 'started_by': user['username']}
         # Only technicians take ownership implicitly on start; admins assign explicitly
         if not wo.get('assigned_to') and user.get('role') == 'technician':
             updates['assigned_to'] = user['username']
@@ -644,6 +676,7 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
             new_status = 'CLOSED'
         updates = {
             'status': new_status, 'completed_at': ended,
+            'completed_by': user['username'],  # AUDIT: who actually performed the completion action
             'root_cause': req.root_cause or wo.get('root_cause'),
             'action_taken': req.action_taken or wo.get('action_taken'),
             'duration_minutes': duration if req.action == 'complete' else (wo.get('duration_minutes') or duration),
@@ -732,9 +765,13 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                     if wo.get('source_breakdown_id'):
                         await db.breakdowns.update_one({'id': wo['source_breakdown_id']}, {'$set': {'rca_task_id': rca_wo['id']}})
 
+        # AUDIT TRAIL: make any assigned-vs-actor mismatch explicit (admin completing
+        # on behalf of the assigned technician), never silently overwritten.
+        performer = updates.get('assigned_to') or wo.get('assigned_to') or user['username']
+        attribution = f"Performed by {performer}; completed by {user['username']}. " if performer != user['username'] else ''
         await create_timeline_event('wo_completed', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
                                     title=f"WO {wo['wo_number']} {'completed — awaiting admin closure' if new_status == 'PENDING_ADMIN_CLOSURE' else 'closed'}",
-                                    description=req.action_taken or '', user=user['username'],
+                                    description=f"{attribution}{req.action_taken or ''}".strip(), user=user['username'],
                                     reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
         if new_status == 'PENDING_ADMIN_CLOSURE':
             await create_notification('work_order', f"Admin Review Required: {wo['machine_name']}",
