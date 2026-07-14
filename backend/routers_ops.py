@@ -309,16 +309,34 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         mtbf = round(run_hours / failures, 1)
     failure_rate = round(failures / run_hours * 1000, 3) if run_hours else None  # failures per 1000 run-hours
 
-    # PM compliance
-    pm_q = dict(q)
-    completions = await db.pm_completions.find(pm_q, {'_id': 0}).to_list(100000)
+    # ---- PM Compliance = (Completed PM tasks ÷ Scheduled PM tasks) × 100 ----
+    # Scheduled = completions inside the range + active tasks still PENDING that were
+    # due by the end of the range (overdue backlog counts as scheduled-not-done).
+    # NOTE: pm_completions documents carry line/machine_id but NOT department or
+    # process_group — those scopes must resolve via machine ids, otherwise the
+    # query silently matches nothing (the old blank-card bug).
+    if level == 'plant' or not value:
+        comp_q, task_q = {}, {}
+    elif level == 'line':
+        comp_q, task_q = {'line': value}, {'line': value}
+    elif level == 'machine':
+        comp_q, task_q = {'machine_id': value}, {'machine_id': value}
+    else:  # department / process_group
+        mids = [m['id'] for m in await db.machines.find({level: value}, {'_id': 0, 'id': 1}).to_list(100000)]
+        comp_q = task_q = {'machine_id': {'$in': mids}}
+    completions = await db.pm_completions.find(comp_q, {'_id': 0, 'completed_at': 1, 'on_time': 1}).to_list(100000)
     if date_from or date_to:
         completions = [c for c in completions if in_range_date(c.get('completed_at'))]
+    pm_completed = len(completions)
     on_time = len([c for c in completions if c.get('on_time')])
     today = now_iso()[:10]
-    overdue_now = await db.pm_tasks.count_documents({**q, 'active': True, 'next_due_date': {'$lt': today}})
-    denom = len(completions) + overdue_now
-    pm_compliance = round(on_time / denom * 100, 1) if denom else None
+    # a pending task only counts as "scheduled" once its due date has actually passed
+    # (or fell inside the selected window) — never for future-dated schedules
+    due_cutoff = min(date_to, today) if date_to else today
+    pending_due = await db.pm_tasks.count_documents({**task_q, 'active': True, 'next_due_date': {'$lte': due_cutoff}})
+    pm_scheduled = pm_completed + pending_due
+    # 0 completed of N scheduled -> 0.0 (never blank); 0 scheduled -> None (UI shows N/A)
+    pm_compliance = round(pm_completed / pm_scheduled * 100, 1) if pm_scheduled else None
 
     # monthly trends (downtime + failures)
     downtime_by_month = defaultdict(float)
@@ -382,6 +400,7 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         'level': level, 'value': value, 'date_from': date_from, 'date_to': date_to,
         'mtbf_hours': mtbf, 'mtbf_source': mtbf_source, 'mttr_hours': mttr_hours, 'availability': availability,
         'failure_rate_per_1000h': failure_rate, 'pm_compliance': pm_compliance,
+        'pm_completed_count': pm_completed, 'pm_scheduled_count': pm_scheduled, 'pm_on_time_count': on_time,
         'failures_total': failures, 'downtime_hours_total': round(total_downtime_min / 60, 1),
         'breakdowns_reported': failures, 'breakdowns_closed': closed_in_range, 'closure_rate': closure_rate,
         'run_hours': run_hours, 'planned_hours': planned_hours,

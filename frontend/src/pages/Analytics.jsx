@@ -229,7 +229,10 @@ export default function Analytics() {
             <KpiCard testId="analytics-kpi-mttr" label="MTTR" value={kpis.mttr_hours != null ? `${kpis.mttr_hours}h` : '—'} />
             <KpiCard testId="analytics-kpi-availability" label="Availability" value={kpis.availability != null ? `${kpis.availability}%` : '—'} accent="text-[hsl(var(--primary))]" />
             <KpiCard testId="analytics-kpi-failure-rate" label="Failure Rate" value={kpis.failure_rate_per_1000h != null ? kpis.failure_rate_per_1000h : '—'} sub="per 1000 run-h" />
-            <KpiCard testId="analytics-kpi-pm-compliance" label="PM Compliance" value={kpis.pm_compliance != null ? `${kpis.pm_compliance}%` : '—'} />
+            <KpiCard testId="analytics-kpi-pm-compliance" label="PM Compliance"
+              value={kpis.pm_compliance != null ? `${kpis.pm_compliance}%` : 'N/A'}
+              accent={kpis.pm_compliance != null ? (kpis.pm_compliance >= 80 ? 'text-[#05ffa1]' : kpis.pm_compliance >= 50 ? 'text-[#f9f871]' : 'text-[#ff2e63]') : ''}
+              sub={kpis.pm_scheduled_count ? `${kpis.pm_completed_count}/${kpis.pm_scheduled_count} scheduled PMs completed` : 'No PMs scheduled in range'} />
             <KpiCard testId="analytics-kpi-closure-rate" label="Closure Rate" value={kpis.closure_rate != null ? `${kpis.closure_rate}%` : '—'}
               accent={kpis.closure_rate != null ? (kpis.closure_rate >= 80 ? 'text-[#05ffa1]' : kpis.closure_rate >= 50 ? 'text-[#f9f871]' : 'text-[#ff2e63]') : ''}
               sub={`${kpis.breakdowns_closed ?? 0}/${kpis.breakdowns_reported ?? 0} closed`} />

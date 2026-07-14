@@ -86,6 +86,13 @@
   - **Machine-level MTBF in Analytics matches AWS MTBF exactly** (same reliability-engine metric), via `/api/analytics/kpis?level=machine` reading from `reliability_metrics.mtbf`.
   - Response includes `mtbf_source` (`reliability_engine` | `aggregate`) for transparency.
 
+- **PM Compliance KPI correctness objective (Phase AF, completed)**:
+  - PM Compliance card must never render blank.
+  - PM Compliance = **(Completed PM Tasks ÷ Scheduled PM Tasks) × 100**, scoped to the Analytics slicer and hierarchy.
+  - Scheduled = completions within range + active pending tasks due by end-of-range cutoff (overdue backlog counts; future-dated does not).
+  - Department/PG scopes resolve via machine-id sets because `pm_completions` does not store department/PG fields.
+  - Card renders **0%** for 0 completed of N scheduled, and **N/A** when 0 scheduled.
+
 ### Control Room KPI/range objectives
 - Control Room line KPIs support presets **Shift=8h, Day=24h, Week=168h** plus a **custom date range** slicer.
 - Control Room visual cleanup:
@@ -412,7 +419,7 @@
   - Pareto now groups by **Machine** (not Mechanical/Electrical/PLC breakdown category).
   - Built from the per-machine downtime map; sorted by **total downtime desc**; machines with zero downtime excluded.
   - `cumulative_pct` computed from cumulative downtime share across machines.
-  - Returns up to **100** rows (for API + optional UI expansion) and `pareto_total_machines`.
+  - Returns up to **100** rows and `pareto_total_machines`.
   - Item shape: `{machine_id, machine, count, downtime_hours, cumulative_pct}`.
   - Respects the same date slicer.
 - ✅ Frontend (`/app/frontend/src/pages/Analytics.jsx`):
@@ -425,10 +432,51 @@
 
 ---
 
+### Phase AF — Bugfix: PM Compliance KPI blank card (P0)
+**Status:** ✅ COMPLETE — VERIFIED
+
+#### AF1) Root causes
+- ✅ `pm_completions` documents do **not** store `department` / `process_group`; after hierarchy change, department/PG scopes silently matched nothing.
+- ✅ Old compliance definition used `on_time ÷ (completions + overdue)` which:
+  - did not match the desired KPI (Completed ÷ Scheduled), and
+  - could yield `None` and render blank/“—”.
+- ✅ Frontend KPI card lacked a robust fallback/subline, making the issue appear as a blank card.
+
+#### AF2) Fixes
+- ✅ Backend (`/app/backend/routers_ops.py` → `analytics_kpis`):
+  - PM Compliance is now:
+    - `pm_compliance = (Completed PM Tasks ÷ Scheduled PM Tasks) × 100`.
+  - Scheduled = completions in range + active pending PM tasks due by `min(date_to, today)` (overdue backlog counts; future due dates do not).
+  - Scope resolution:
+    - plant → `{}`
+    - line → `{line}`
+    - machine → `{machine_id}`
+    - department/process_group → resolve machine ids then query by `machine_id ∈ mids`
+  - Response includes:
+    - `pm_completed_count`, `pm_scheduled_count`, `pm_on_time_count`.
+- ✅ Frontend (`/app/frontend/src/pages/Analytics.jsx`):
+  - KPI card renders:
+    - `%` when scheduled > 0 (including **0%**),
+    - **N/A** when scheduled == 0,
+    - subline: `X/Y scheduled PMs completed` or `No PMs scheduled in range`.
+  - Severity accent: green ≥ 80, yellow ≥ 50, red < 50.
+
+#### AF3) Verification
+- ✅ Verified across:
+  - plant, line, department, machine scopes (counts always present).
+  - edge cases:
+    - 0 scheduled → `pm_compliance=None` (UI shows N/A)
+    - 0 completed of N → `0.0%` (never blank)
+    - all completed → `100%`
+  - Visual confirmation screenshot: card renders `20% · 4/20 scheduled PMs completed`.
+- ✅ Scenario data fully cleaned.
+
+---
+
 ## 3) Next Actions
 
 ### Immediate (P0)
-- ✅ None — all requested follow-ups through Phase AE are complete.
+- ✅ None — all requested follow-ups through Phase AF are complete.
 
 ### Optional follow-ups (P0/P1)
 - **P0 (requires approval)**: reliability engine data-quality fix for backdated failures predating commissioning (skip invalid TBF intervals rather than clamp to 0.1; guard minimum predicted life).
@@ -493,6 +541,11 @@
 - ✅ Closure rate + Pareto exist.
 - ✅ **Pareto plots downtime (not count)** with cumulative % based on downtime.
 - ✅ **Pareto groups by Machine** (machine-wise downtime offenders; top-N view with expand).
+- ✅ **PM Compliance KPI is non-blank and correct**:
+  - Completed ÷ Scheduled × 100
+  - 0 completed of N → 0%
+  - 0 scheduled → N/A
+  - Department/PG scopes work after hierarchy change
 - ✅ Runtime is single source of truth.
 - ✅ **MTBF consistency**: Machine-level analytics MTBF matches AWS MTBF exactly.
 - ✅ **Planned Runtime model (Phase AB)** fully live:
