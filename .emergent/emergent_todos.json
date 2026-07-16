@@ -1,42 +1,42 @@
 [
   {
     "content": "Explore RCA flow, transfer endpoints, technician analytics, WO modal + RcaForm frontend",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "AI1 backend: POST /work-orders/{id}/rca-reject (admin, reason required) + timeline + notification",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AI1 frontend: Reject button + reason in admin RCA review; rejected banner + prefilled resubmission for tech",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AI2 backend: breakdown_types aggregation (count + downtime) in analytics kpis",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AI2 frontend: Breakdown Type pie card with Count/Downtime toggle",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AI3 backend: extend technician analytics (rca_completed, per-metric ranks, overall composite)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AI3 frontend: Leaderboard with metric tabs + Overall, technician drill-down card (admin only)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AI4 backend: IN_PROGRESS transfer requires pass_on_note; handoffs array; timeline; integrity checks",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AI4 frontend: Pass-On Note field on transfer of in-progress WO; handoff history display",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Testing agent (both) + fix issues",
-    "status": "pending"
+    "status": "completed"
   }
 ]

@@ -138,11 +138,16 @@
 ### Deployment objectives (Phase AH — completed)
 - One-step deployment script `/app/deploy.sh` for Ubuntu 22.04/24.04 (done)
 
-### NEW Objectives (Phase AI — current)
+### Phase AG objectives (completed)
+- AWS strict category filtering + KPI recalculation (done)
+- PM compliance tolerance window + historical backfill endpoint (done)
+- Analytics Time Utilization donut (done)
+
+### Phase AI objectives (completed)
 - **RCA rejection loop**: Admins can reject a submitted RCA with a reason; RCA reopens and returns to the same locked technician; rejection/resubmission is tracked in Timeline + notifications.
-- **Analytics: Breakdown Type Pie**: Add breakdown-type pie chart (Mechanical/Electrical/PLC) with toggle **Count vs Downtime-weighted**, respecting existing slicers.
-- **Admin-only Technician Leaderboard**: Extend Technician Analytics with leaderboard, metric tabs + **Overall composite** toggle, and technician drill-down card.
-- **Mid-repair Work Order handoff**: Allow transfer of **IN_PROGRESS** work orders with mandatory **Pass-On Note**, multiple handoffs, timeline/audit trail, and ensure MTTR/MTBF/AWS integrity.
+- **Analytics: Breakdown Type Pie**: Breakdown-type pie chart (Mechanical/Electrical/PLC) with toggle **Count vs Downtime-weighted**, respecting existing slicers.
+- **Admin-only Technician Leaderboard**: Leaderboard with metric tabs + **Overall composite** toggle, and technician drill-down card.
+- **Mid-repair Work Order handoff**: Transfer of **IN_PROGRESS** work orders/breakdowns with mandatory **Pass-On Note**, multiple handoffs, timeline/audit trail, MTTR/MTBF/AWS integrity preserved.
 
 ---
 
@@ -169,130 +174,112 @@
 ---
 
 ### Phase AI — RCA Rejection + Breakdown-Type Pie + Technician Leaderboard + Mid-repair Handoff (P0)
-**Status:** ⏳ NOT STARTED
+**Status:** ✅ COMPLETE — VERIFIED (`/app/test_reports/iteration_16.json` + live UI verification by main agent)
 
 #### AI1) Admin can reject a submitted 5-Why RCA
-**Goal:** Add a Reject action for Admins reviewing RCA work orders.
-
-**Backend (primary):** `/app/backend/routers_maintenance.py`
-- Add new RCA lifecycle states or flags (recommended minimal change):
-  - `status` remains `PENDING_ADMIN_CLOSURE` when technician submits.
-  - On reject: set `status='IN_PROGRESS'` (or `ASSIGNED`) and keep `assigned_to` unchanged.
-  - Add fields:
-    - `rca_rejected: bool`
-    - `rca_rejection_reason: str`
-    - `rca_rejected_at: iso`
-    - `rca_rejected_by: username`
-    - optional: `rca_resubmissions_count`
-- Add endpoint: `POST /api/work-orders/{wo_id}/rca-reject` (admin-only)
-  - Requires non-empty `reason`.
-  - Verifies WO is `wo_type='RCA'` and `status='PENDING_ADMIN_CLOSURE'`.
-  - Writes rejection fields + returns updated WO.
-  - Timeline event: `rca_rejected` (“RCA rejected by Admin — reason: …”).
-  - Notification to the assigned technician (targeted): “RCA rejected — resubmission required”.
-
-**Frontend:** `/app/frontend/src/pages/RcaForm.jsx` and admin WO closure UX
-- In admin review area for RCA:
-  - Add **Reject** button next to Approve/Close.
-  - Prompt for rejection reason (modal or inline textarea).
-  - On success: WO returns to technician’s task list.
-- Technician reopens RCA:
-  - **Prefill previous answers** for editing/resubmission (choice 2a).
-  - Add “Rejected by Admin” banner with reason.
-
-**Testing:**
-- Admin rejects → WO status back to technician, reason saved.
-- Technician resubmits → status back to `PENDING_ADMIN_CLOSURE`.
-- Timeline shows both events; technician receives notification.
-
-#### AI2) Breakdown-type pie chart in Analytics (count + downtime toggle)
-**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/kpis`)
-- Add aggregation for breakdowns in current scope/date range:
-  - buckets: `MECHANICAL`, `ELECTRICAL`, `CONTROL_PLC`
-  - return both:
-    - `breakdown_type_share_count: [{type, count}]`
-    - `breakdown_type_share_downtime: [{type, downtime_minutes}]`
-
-**Frontend:** `/app/frontend/src/pages/Analytics.jsx`
-- Add new Cyberpunk panel with pie chart.
-- Toggle control: **Count / Downtime** (choice 1c).
-- Tooltip: show value + percentage.
-- Respect existing slicers (date range + hierarchy level/value).
-
-**Testing:**
-- With empty range → “No breakdowns in range”.
-- With data → sums match KPI totals.
-
-#### AI3) Technician Leaderboard + Technician drill-down card (Admin-only)
-**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/technicians`)
-- Extend response:
-  - `leaderboard` computed server-side.
-  - Rankings by metric tabs:
-    - Breakdowns Closed
-    - Avg MTTR
-    - PM Compliance
-    - WO On-Time
-  - Add **Overall composite** option (user request):
-    - Provide normalized score formula (documented), e.g. weighted z-scores or min-max.
-- Add endpoint for drill-down:
-  - `GET /api/analytics/technicians/{username}` (admin-only)
-  - returns detailed card stats:
-    - breakdowns handled, breakdowns closed
-    - avg MTTR
-    - avg WO duration
-    - PM count + compliance
-    - RCA completion count
-    - total hours
-
-**Frontend:** `/app/frontend/src/pages/Analytics.jsx` (TechnicianAnalytics section)
-- Add Leaderboard view:
-  - Metric tabs + “Overall” toggle.
-  - Click technician row → open Technician card panel/modal.
-- Ensure entire section remains admin-only (already gated by backend; keep UI hide).
-
-**Testing:**
-- Non-admin gets 403.
-- Leaderboard order changes per metric tab.
-- Drill-down card matches list numbers.
-
-#### AI4) Mid-repair Work Order handoff with Pass-On Notes
-**Goal:** Allow transfer while `IN_PROGRESS` with mandatory pass-on note.
+**Status:** ✅ DONE
 
 **Backend:** `/app/backend/routers_maintenance.py`
-- Extend existing transfer endpoint to accept optional `pass_on_note`.
-- Rule:
-  - If WO status is `IN_PROGRESS`, `pass_on_note` is **required** (choice 4a).
-  - If WO not yet started (OPEN/ASSIGNED), transfer remains as-is (note optional).
-- Persist handoffs:
-  - Add array field `handoffs: [{from,to,note,at,by}]` to work_orders.
-  - Timeline event per handoff: “WO handed off from A → B” + note.
-  - Notification to incoming technician.
-- Integrity constraints:
-  - Do **not** change `started_at` on handoff.
-  - Do **not** touch breakdown start_time / downtime.
-  - Do **not** trigger reliability/AWS reset logic (handoff is assignee-only change).
+- Added `PUT /api/work-orders/{wo_id}/rca-reject` (admin-only)
+  - Requires non-empty `reason`
+  - Only for `wo_type='RCA'` and `status='PENDING_ADMIN_CLOSURE'`
+  - Reopens to `status='IN_PROGRESS'` and keeps the same locked `assigned_to`
+  - Stores `rca_rejection={reason,rejected_by,rejected_at}` + increments `rca_rejections_count`
+  - Clears `completed_at`, `completed_by`, `duration_minutes` (so it must be completed again)
+  - Logs timeline event `rca_rejected` and sends a warning severity notification
+- Updated `PUT /api/work-orders/{wo_id}/rca` submission logic:
+  - If resubmitting after rejection, clears `rca_rejection` and logs the event as **re-submitted**
 
-**Frontend:** Work order modal / transfer UI
-- When transferring an IN_PROGRESS WO:
-  - show required Pass-On Note textarea.
-  - show history of previous handoffs.
+**Frontend:**
+- `/app/frontend/src/components/WorkOrderModal.jsx`
+  - Added **Reject RCA** action for admins on `PENDING_ADMIN_CLOSURE` RCAs
+  - Inline rejection reason form + disabled confirm until reason present
+  - Added a visible **RCA Rejected** banner when `wo.rca_rejection` exists
+- `/app/frontend/src/pages/RcaForm.jsx`
+  - Added rejection banner with reason
+  - Previous 5-Why answers stay **prefilled** (RCA content is retained)
 
 **Testing:**
-- Transfer IN_PROGRESS without note → 400.
-- Multiple handoffs record multiple entries.
-- Completion duration remains from original start to final completion.
-- No duplicate AWS reset events.
+- Full reject → resubmit → complete → admin close cycle verified.
+
+#### AI2) Breakdown-type pie chart in Analytics (count + downtime toggle)
+**Status:** ✅ DONE
+
+**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/kpis`)
+- Added `breakdown_types: [{type, count, downtime_minutes}]`
+- Respects date range and hierarchy scope.
+
+**Frontend:** `/app/frontend/src/pages/Analytics.jsx`
+- Added **Breakdowns by Type** donut card (`analytics-breakdown-types`)
+- Toggle: **Downtime / Count**
+- Cyberpunk styling + empty-state for no data.
+
+#### AI3) Technician Leaderboard + Technician drill-down card (Admin-only)
+**Status:** ✅ DONE
+
+**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/technicians`, admin-only)
+- Added:
+  - `rca_completed`
+  - `overall_score` (0–100) via min-max normalized composite of:
+    - breakdowns resolved ↑
+    - WOs completed ↑
+    - avg repair minutes ↓ (inverted)
+    - WO on-time ↑
+    - PM compliance ↑
+
+**Frontend:** `/app/frontend/src/pages/Analytics.jsx`
+- Added leaderboard panel (`tech-leaderboard`) with metric tabs:
+  - Overall / Breakdowns Closed / Best Avg MTTR / PM Compliance / WO On-Time
+- Clicking a row opens the Technician Card modal (`tech-card-modal`)
+- Clicking a table row also opens the same card.
+- Section remains **admin-only** (`isAdmin && <TechnicianAnalytics />`).
+
+#### AI4) Mid-repair Work Order handoff with Pass-On Notes
+**Status:** ✅ DONE
+
+**Backend:** `/app/backend/routers_maintenance.py`
+- Extended models:
+  - `WOUpdate.pass_on_note`
+  - `BreakdownUpdate.pass_on_note`
+- Enforced rule:
+  - If transferring an **IN_PROGRESS** WO or breakdown, `pass_on_note` is **required** (400 otherwise).
+  - Pre-start transfers (OPEN/ASSIGNED) remain unchanged (note optional).
+- Stored handoff history:
+  - Appends into `handoffs[] = [{from,to,note,at,by,mid_repair}]`
+  - Timeline + notification include verb **“handed off mid-repair”** and Pass-On Note.
+- Integrity:
+  - `started_at` / `start_time` not modified
+  - completion duration remains original start → final completion
+  - no AWS/reliability resets triggered (handoff is assignee change only)
+
+**Frontend:**
+- `/app/frontend/src/components/Shared.jsx`
+  - `TransferControl(requireNote)` shows Pass-On Note textarea and gates “Hand Off”.
+- `/app/frontend/src/components/WorkOrderModal.jsx`
+  - Requires note only when `wo.status==='IN_PROGRESS'`
+  - Displays Pass-On Notes history (`wo-detail-handoffs`).
+- `/app/frontend/src/components/MachineDrawer.jsx`
+  - Breakdown transfer requires note when IN_PROGRESS.
+- `/app/frontend/src/pages/RepairBreakdown.jsx`
+  - Displays Pass-On Notes history (`repair-handoffs`).
 
 #### AI5) Phase AI testing + report
-- Create `/app/test_reports/iteration_16.json`.
-- Run both backend + frontend verification.
+**Status:** ✅ DONE
+- Automated test report: `/app/test_reports/iteration_16.json` (backend 100%)
+- Frontend verified by:
+  - testing agent code-review
+  - main agent live Playwright screenshots
+- Test artifacts cleaned:
+  - test breakdowns/WOs/RCAs deleted
+  - machine statuses restored
+  - reliability recomputed
 
 ---
 
 ## 3) Next Actions
 
-### Current (P0)
-- Implement Phase AI (AI1–AI5).
+### Current
+- No P0 remaining from Phase AI.
 
 ### P0 (Pending approval)
 - Reliability data-quality guard: prevent breakdown start-times predating commissioned date.
@@ -308,7 +295,7 @@
 ### Existing (already satisfied)
 - Governance rules, runtime model, AWS strict pool filtering, PM tolerance, Time Utilization, Red Tag rename, mobile login, deploy script.
 
-### Phase AI (NEW)
+### Phase AI (now satisfied)
 - ✅ **RCA rejection**:
   - Admin can reject submitted RCA with reason.
   - RCA returns to locked technician; resubmission required with prefilled data.
