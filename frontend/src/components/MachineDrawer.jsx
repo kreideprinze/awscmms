@@ -230,7 +230,8 @@ export function BreakdownActions({ bd, onDone, compact }) {
           technician by its CURRENT HOLDER or an admin (server enforces governance) */}
       {active && bd.assigned_to && (isAdmin || bd.assigned_to === user?.username) && (
         <TransferControl current={bd.assigned_to} testId={`bd-transfer-${bd.ticket_number}`}
-          onTransfer={(t) => act({ action: 'assign', assigned_to: t }, `${bd.ticket_number} transferred to ${t}`)} />
+          requireNote={bd.status === 'IN_PROGRESS'}
+          onTransfer={(t, note) => act({ action: 'assign', assigned_to: t, pass_on_note: note }, `${bd.ticket_number} ${bd.status === 'IN_PROGRESS' ? 'handed off' : 'transferred'} to ${t}`)} />
       )}
       {/* ENFORCEMENT: only the current assignee or an admin can work an assigned breakdown */}
       {active && bd.assigned_to && !isAdmin && bd.assigned_to !== user?.username && (

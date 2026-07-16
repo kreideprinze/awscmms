@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { X, Plus, ArrowRightLeft } from 'lucide-react';
 
@@ -194,24 +195,39 @@ export function TechnicianSelect({ value, onChange, testId = 'technician-select'
 // Transfer an assigned task to another technician — shared by the WO modal,
 // PM table and breakdown views. Governance is enforced server-side (current
 // holder or admin only); RCA tasks reject transfers entirely.
-export function TransferControl({ current, onTransfer, testId = 'transfer-control', label = 'Transfer To' }) {
+// MID-REPAIR HANDOFF: pass requireNote for IN_PROGRESS tasks — a Pass-On Note
+// becomes mandatory and is forwarded as the 2nd argument of onTransfer.
+export function TransferControl({ current, onTransfer, testId = 'transfer-control', label = 'Transfer To', requireNote = false }) {
   const [tech, setTech] = useState('');
+  const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const noteMissing = requireNote && !note.trim();
   const go = async () => {
-    if (!tech) return;
+    if (!tech || noteMissing) return;
     setBusy(true);
-    try { await onTransfer(tech); setTech(''); } finally { setBusy(false); }
+    try { await onTransfer(tech, note.trim() || undefined); setTech(''); setNote(''); } finally { setBusy(false); }
   };
   return (
-    <div className="flex w-full flex-wrap items-center gap-2" data-testid={testId} onClick={(e) => e.stopPropagation()}>
-      <div className="min-w-[200px] flex-1">
-        <TechnicianSelect value={tech} onChange={setTech} exclude={current} testId={`${testId}-select`} placeholder={`${label}…`} />
+    <div className="w-full space-y-2" data-testid={testId} onClick={(e) => e.stopPropagation()}>
+      <div className="flex w-full flex-wrap items-center gap-2">
+        <div className="min-w-[200px] flex-1">
+          <TechnicianSelect value={tech} onChange={setTech} exclude={current} testId={`${testId}-select`} placeholder={`${label}…`} />
+        </div>
+        <Button size="sm" disabled={!tech || busy || noteMissing} data-testid={`${testId}-btn`}
+          className="h-9 border border-[hsl(var(--primary))]/60 bg-transparent text-xs text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 disabled:opacity-40"
+          onClick={go}
+          title={noteMissing ? 'A Pass-On Note is required to hand off an in-progress task' : undefined}>
+          <ArrowRightLeft className="mr-1 h-3 w-3" /> {busy ? 'Transferring…' : requireNote ? 'Hand Off' : 'Transfer'}
+        </Button>
       </div>
-      <Button size="sm" disabled={!tech || busy} data-testid={`${testId}-btn`}
-        className="h-9 border border-[hsl(var(--primary))]/60 bg-transparent text-xs text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/10 disabled:opacity-40"
-        onClick={go}>
-        <ArrowRightLeft className="mr-1 h-3 w-3" /> {busy ? 'Transferring…' : 'Transfer'}
-      </Button>
+      {requireNote && (
+        <div>
+          <Label className="text-[10px] uppercase tracking-widest text-[#ff9e1c]">Pass-On Note <span className="text-[#ff2e63]">*</span></Label>
+          <Textarea data-testid={`${testId}-note`} value={note} onChange={(e) => setNote(e.target.value)} rows={2}
+            placeholder="Required — what has been done so far, current state of the repair, and anything the incoming technician needs to know"
+            className="mt-0.5 bg-[hsl(var(--panel-2))] text-xs" />
+        </div>
+      )}
     </div>
   );
 }

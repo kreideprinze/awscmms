@@ -1,30 +1,42 @@
 [
   {
-    "content": "Explore Login.jsx, public kiosk form(s), Warning-related UI files, backend warning strings",
-    "status": "completed"
+    "content": "Explore RCA flow, transfer endpoints, technician analytics, WO modal + RcaForm frontend",
+    "status": "in_progress"
   },
   {
-    "content": "AH1: Mobile-responsive Login page + remove default-credentials block",
-    "status": "completed"
+    "content": "AI1 backend: POST /work-orders/{id}/rca-reject (admin, reason required) + timeline + notification",
+    "status": "pending"
   },
   {
-    "content": "AH2: Mobile-friendly public Breakdown/Red Tag report forms",
-    "status": "completed"
+    "content": "AI1 frontend: Reject button + reason in admin RCA review; rejected banner + prefilled resubmission for tech",
+    "status": "pending"
   },
   {
-    "content": "AH3a: Frontend rename Warning -> Red Tag + Tag icon (keep yellow)",
-    "status": "completed"
+    "content": "AI2 backend: breakdown_types aggregation (count + downtime) in analytics kpis",
+    "status": "pending"
   },
   {
-    "content": "AH3b: Backend rename Warning -> Red Tag in NEW notifications/timeline/WO strings",
-    "status": "completed"
+    "content": "AI2 frontend: Breakdown Type pie card with Count/Downtime toggle",
+    "status": "pending"
   },
   {
-    "content": "AH4: Write /app/deploy.sh single-script Ubuntu deployment + prerequisites doc",
-    "status": "completed"
+    "content": "AI3 backend: extend technician analytics (rca_completed, per-metric ranks, overall composite)",
+    "status": "pending"
   },
   {
-    "content": "Test: frontend mobile viewports + rename sweep + backend string check (testing agent)",
-    "status": "completed"
+    "content": "AI3 frontend: Leaderboard with metric tabs + Overall, technician drill-down card (admin only)",
+    "status": "pending"
+  },
+  {
+    "content": "AI4 backend: IN_PROGRESS transfer requires pass_on_note; handoffs array; timeline; integrity checks",
+    "status": "pending"
+  },
+  {
+    "content": "AI4 frontend: Pass-On Note field on transfer of in-progress WO; handoff history display",
+    "status": "pending"
+  },
+  {
+    "content": "Testing agent (both) + fix issues",
+    "status": "pending"
   }
 ]

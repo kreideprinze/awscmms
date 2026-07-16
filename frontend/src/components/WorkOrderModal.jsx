@@ -113,6 +113,8 @@ export function WorkOrderModal() {
   const [startT, setStartT] = useState('');
   const [endT, setEndT] = useState('');
   const [saving, setSaving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   const fetchWo = useCallback(async () => {
     if (!woModalId) return;
@@ -130,6 +132,7 @@ export function WorkOrderModal() {
 
   useEffect(() => {
     setWo(null); setCompleting(false); setNotFound(false); setAssignTech('');
+    setRejecting(false); setRejectReason('');
     if (woModalId) fetchWo();
   }, [woModalId, fetchWo]);
 
@@ -166,6 +169,17 @@ export function WorkOrderModal() {
     setSaving(false);
   };
 
+  // ADMIN: reject a submitted RCA — reopens it back to the SAME locked technician
+  const rejectRca = async () => {
+    if (!rejectReason.trim()) return;
+    try {
+      await api.put(`/work-orders/${wo.id}/rca-reject`, { reason: rejectReason.trim() });
+      toast.warning(`${wo.wo_number} rejected — returned to ${wo.assigned_to} for resubmission`);
+      setRejecting(false); setRejectReason('');
+      await refresh();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   const open = !!woModalId;
   if (!open) return null;
 
@@ -200,6 +214,14 @@ export function WorkOrderModal() {
         {wo && (
         <div className="space-y-4">
           <div className="text-sm font-medium leading-snug" data-testid="wo-detail-title">{wo.title}</div>
+
+          {/* Active RCA rejection — the analysis was returned for resubmission */}
+          {wo.wo_type === 'RCA' && wo.rca_rejection && (
+            <div className="border border-[#ff2e63]/50 bg-[#ff2e63]/[0.06] p-2.5 text-xs text-[#ff2e63]" data-testid="wo-detail-rca-rejected-banner">
+              <span className="font-semibold uppercase tracking-widest">RCA Rejected</span> by {wo.rca_rejection.rejected_by} · {fmtDate(wo.rca_rejection.rejected_at)}
+              <p className="mt-1 whitespace-pre-wrap text-foreground/90">“{wo.rca_rejection.reason}” — {wo.assigned_to} must update and resubmit the 5-Why analysis.</p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border bg-[hsl(var(--panel-2))] p-3">
             <Row label="Machine" value={wo.machine_name} testId="wo-detail-machine" />
@@ -250,6 +272,21 @@ export function WorkOrderModal() {
                 <Button size="sm" variant="outline" data-testid="wo-detail-repair-page-btn" className="h-7 border-border bg-transparent text-xs"
                   onClick={() => { closeWorkOrder(); navigate(`/breakdowns/repair/${wo.origin_breakdown.id}`); }}>Open Repair Page</Button>
               )}
+            </div>
+          )}
+
+          {/* Mid-repair handoff trail — every transfer with a Pass-On Note */}
+          {(wo.handoffs || []).length > 0 && (
+            <div className="rounded-md border border-[#ff9e1c]/40 bg-[hsl(var(--panel-2))] p-3" data-testid="wo-detail-handoffs">
+              <Label className="text-[10px] uppercase tracking-widest text-[#ff9e1c]">Pass-On Notes ({wo.handoffs.length} handoff{wo.handoffs.length > 1 ? 's' : ''})</Label>
+              <div className="mt-1.5 space-y-2">
+                {wo.handoffs.map((h, i) => (
+                  <div key={i} className="border-l-2 border-[#ff9e1c]/50 pl-2" data-testid={`wo-handoff-${i}`}>
+                    <div className="font-mono text-[10px] text-muted-foreground">{h.from} → <span className="text-foreground">{h.to}</span> · {fmtDate(h.at)}{h.mid_repair ? ' · mid-repair' : ''}</div>
+                    <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90">{h.note}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -338,7 +375,8 @@ export function WorkOrderModal() {
                   </span>
                 ) : (isAdmin || wo.assigned_to === user?.username) && (
                   <TransferControl current={wo.assigned_to} testId="wo-detail-transfer"
-                    onTransfer={(t) => act('assign', { assigned_to: t })} />
+                    requireNote={wo.status === 'IN_PROGRESS'}
+                    onTransfer={(t, note) => act('assign', { assigned_to: t, pass_on_note: note })} />
                 )
               )}
               {['OPEN', 'ASSIGNED'].includes(wo.status) && !isUnassigned && canWork && (
@@ -355,8 +393,27 @@ export function WorkOrderModal() {
                 </span>
               )}
               {wo.status === 'PENDING_ADMIN_CLOSURE' && (isAdmin ? (
-                <Button size="sm" data-testid="wo-detail-admin-close-btn" className="h-7 border border-[#ff9e1c]/60 bg-transparent text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/10"
-                  onClick={() => act('close')}>Admin Close</Button>
+                <div className="w-full space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" data-testid="wo-detail-admin-close-btn" className="h-7 border border-[#ff9e1c]/60 bg-transparent text-xs text-[#ff9e1c] hover:bg-[#ff9e1c]/10"
+                      onClick={() => act('close')}>Admin Close</Button>
+                    {wo.wo_type === 'RCA' && (
+                      <Button size="sm" data-testid="wo-detail-rca-reject-btn" className="h-7 border border-[#ff2e63]/60 bg-transparent text-xs text-[#ff2e63] hover:bg-[#ff2e63]/10"
+                        onClick={() => setRejecting((v) => !v)}>{rejecting ? 'Cancel Reject' : 'Reject RCA'}</Button>
+                    )}
+                  </div>
+                  {rejecting && wo.wo_type === 'RCA' && (
+                    <div className="border border-[#ff2e63]/40 bg-[#ff2e63]/[0.04] p-2.5" data-testid="wo-detail-rca-reject-form">
+                      <Label className="text-[10px] uppercase tracking-widest text-[#ff2e63]">Rejection Reason <span>*</span></Label>
+                      <Textarea data-testid="wo-detail-rca-reject-reason" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} rows={2}
+                        placeholder="Required — tell the technician what must be corrected before resubmission"
+                        className="mt-0.5 bg-[hsl(var(--panel-2))] text-xs" />
+                      <Button size="sm" disabled={!rejectReason.trim()} data-testid="wo-detail-rca-reject-confirm"
+                        className="mt-2 h-7 w-full border border-[#ff2e63]/60 bg-transparent text-xs text-[#ff2e63] hover:bg-[#ff2e63]/10 disabled:opacity-40"
+                        onClick={rejectRca}>Reject & Return to {wo.assigned_to}</Button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <span className="self-center text-[10px] text-[#ff9e1c]" data-testid="wo-detail-awaiting-admin">awaiting admin closure</span>
               ))}

@@ -238,6 +238,7 @@ async def get_breakdown(bd_id: str, user: dict = Depends(get_current_user)):
 class BreakdownUpdate(BaseModel):
     action: str  # assign | claim | start | complete | close | update
     assigned_to: Optional[str] = None
+    pass_on_note: Optional[str] = None  # MANDATORY when transferring an IN_PROGRESS breakdown (mid-repair handoff)
     root_cause: Optional[str] = None
     action_taken: Optional[str] = None
     consumed_spares: Optional[List[SpareUse]] = None
@@ -292,20 +293,33 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
             assignee = user['username']
         else:
             raise HTTPException(status_code=400, detail='assigned_to required — admins assign a technician from the dropdown')
+        # MID-REPAIR HANDOFF (breakdowns): transferring an IN_PROGRESS repair requires
+        # a mandatory Pass-On Note. INTEGRITY: handoff never touches start_time /
+        # downtime / reliability state — MTTR still measures original start → final end.
+        mid_repair = bool(prev) and bd.get('status') == 'IN_PROGRESS'
+        note = str(req.pass_on_note or '').strip()
+        if mid_repair and not note:
+            raise HTTPException(status_code=400,
+                                detail='A Pass-On Note is required to hand off an in-progress repair — describe what has been done so far, the current state, and anything the incoming technician needs to know')
         updates = {'status': bd['status'] if bd['status'] == 'IN_PROGRESS' else 'ASSIGNED', 'assigned_to': assignee}
-        await db.breakdowns.update_one({'id': bd_id}, {'$set': updates})
+        ops = {'$set': updates}
+        if prev and note:
+            ops['$push'] = {'handoffs': {'from': prev, 'to': assignee, 'note': note, 'at': now_iso(),
+                                         'by': user['username'], 'mid_repair': mid_repair}}
+        await db.breakdowns.update_one({'id': bd_id}, ops)
         # SYNC: assigning the breakdown also assigns its linked (non-RCA, still-open) work order
         if bd.get('work_order_id'):
             await db.work_orders.update_one(
                 {'id': bd['work_order_id'], 'status': {'$in': ['OPEN', 'ASSIGNED']}, 'wo_type': {'$ne': 'RCA'}},
                 {'$set': {'status': 'ASSIGNED', 'assigned_to': assignee}})
         if prev:
+            verb = 'handed off mid-repair' if mid_repair else 'transferred'
             await create_timeline_event('breakdown_transferred', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
-                                        title=f"{bd['ticket_number']} transferred from {prev} to {assignee}",
-                                        description=f"Transferred by {user['username']}", user=user['username'],
+                                        title=f"{bd['ticket_number']} {verb} from {prev} to {assignee}",
+                                        description=(f"Pass-On Note: {note}" if note else f"Transferred by {user['username']}"), user=user['username'],
                                         reference_id=bd_id, reference_type='breakdown', department=bd['department'], line=bd['line'])
-            await create_notification('breakdown', f"Breakdown Transferred: {bd['machine_name']}",
-                                      f"{bd['ticket_number']} transferred from {prev} to {assignee} by {user['username']}", severity='info',
+            await create_notification('breakdown', f"Breakdown {'Handoff' if mid_repair else 'Transferred'}: {bd['machine_name']}",
+                                      f"{bd['ticket_number']} {verb} from {prev} to {assignee} by {user['username']}" + (f" — Pass-On Note: {note}" if note else ''), severity='info',
                                       machine_id=bd['machine_id'], machine_name=bd['machine_name'], reference_id=bd_id, reference_type='breakdown')
         else:
             await create_timeline_event('breakdown_assigned', machine_id=bd['machine_id'], machine_name=bd['machine_name'],
@@ -549,6 +563,7 @@ async def list_work_orders(machine_id: Optional[str] = None, status: Optional[st
 class WOUpdate(BaseModel):
     action: str  # assign | claim | start | complete | close | update
     assigned_to: Optional[str] = None
+    pass_on_note: Optional[str] = None  # MANDATORY when transferring an IN_PROGRESS WO (mid-repair handoff)
     root_cause: Optional[str] = None
     action_taken: Optional[str] = None
     spare_parts: Optional[List[SpareUse]] = None
@@ -583,10 +598,24 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
             raise HTTPException(status_code=403, detail=f'Only {prev} (current assignee) or an admin can transfer this work order')
         if prev == assignee:
             raise HTTPException(status_code=400, detail=f'{wo["wo_number"]} is already assigned to {assignee}')
+        # MID-REPAIR HANDOFF: transferring an IN_PROGRESS work order requires a
+        # mandatory Pass-On Note (what's done so far / current state / what the next
+        # technician needs to know). Multiple handoffs are supported — each appends
+        # its own record. INTEGRITY: a handoff NEVER touches started_at / durations /
+        # reliability state — it is purely an assignee change, not a new event.
+        mid_repair = bool(prev) and wo.get('status') == 'IN_PROGRESS'
+        note = str(req.pass_on_note or '').strip()
+        if mid_repair and not note:
+            raise HTTPException(status_code=400,
+                                detail='A Pass-On Note is required to hand off an in-progress work order — describe what has been done so far, the current state of the repair, and anything the incoming technician needs to know')
         updates = {'assigned_to': assignee}
         if wo.get('status') == 'OPEN':
             updates['status'] = 'ASSIGNED'
-        await db.work_orders.update_one({'id': wo_id}, {'$set': updates})
+        ops = {'$set': updates}
+        if prev and note:
+            ops['$push'] = {'handoffs': {'from': prev, 'to': assignee, 'note': note, 'at': now_iso(),
+                                         'by': user['username'], 'mid_repair': mid_repair}}
+        await db.work_orders.update_one({'id': wo_id}, ops)
         # SYNC: linked PM task / origin breakdown follow the work order's technician
         if wo.get('pm_task_id'):
             await db.pm_tasks.update_one({'id': wo['pm_task_id']}, {'$set': {'assigned_to': assignee}})
@@ -595,13 +624,15 @@ async def update_work_order(wo_id: str, req: WOUpdate, user: dict = Depends(requ
                 {'id': wo['source_breakdown_id'], 'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS']}},
                 {'$set': {'assigned_to': assignee}})
         if prev:
-            # technician-to-technician (or admin-driven) TRANSFER — full audit trail
-            await create_notification('work_order', f"WO Transferred: {wo['machine_name']}",
-                                      f"{wo['wo_number']} transferred from {prev} to {assignee} by {user['username']}", severity='info',
+            # technician-to-technician (or admin-driven) TRANSFER — full audit trail.
+            # Mid-repair handoffs carry the Pass-On Note into the notification + timeline.
+            verb = 'handed off mid-repair' if mid_repair else 'transferred'
+            await create_notification('work_order', f"WO {'Handoff' if mid_repair else 'Transferred'}: {wo['machine_name']}",
+                                      f"{wo['wo_number']} {verb} from {prev} to {assignee} by {user['username']}" + (f" — Pass-On Note: {note}" if note else ''), severity='info',
                                       machine_id=wo['machine_id'], machine_name=wo['machine_name'], reference_id=wo_id, reference_type='work_order')
             await create_timeline_event('wo_transferred', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
-                                        title=f"{wo['wo_number']} transferred from {prev} to {assignee}",
-                                        description=f"Transferred by {user['username']}", user=user['username'],
+                                        title=f"{wo['wo_number']} {verb} from {prev} to {assignee}",
+                                        description=(f"Pass-On Note: {note}" if note else f"Transferred by {user['username']}"), user=user['username'],
                                         reference_id=wo_id, reference_type='work_order', department=wo.get('department'), line=wo.get('line'))
         else:
             await create_notification('work_order', f"WO Assigned: {wo['machine_name']}",
@@ -855,15 +886,58 @@ async def submit_rca(wo_id: str, req: RCASubmit, user: dict = Depends(require_ad
         raise HTTPException(status_code=400, detail='Final Root Cause and Corrective Action are required')
     rca = {'whys': whys, 'root_cause': root_cause, 'corrective_action': corrective,
            'submitted_by': user['username'], 'submitted_at': now_iso()}
+    # RESUBMISSION after an admin rejection: clear the active rejection flag (the
+    # rejection history stays on the timeline) and label the event accordingly.
+    resubmit = bool(wo.get('rca_rejection'))
     await db.work_orders.update_one({'id': wo_id}, {'$set': {
-        'rca': rca, 'root_cause': root_cause, 'action_taken': corrective,
+        'rca': rca, 'root_cause': root_cause, 'action_taken': corrective, 'rca_rejection': None,
     }})
     await create_timeline_event('rca_submitted', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
-                                title=f"5-Why RCA submitted for {wo['wo_number']}", description=f"Root cause: {root_cause}",
+                                title=f"5-Why RCA {'re' if resubmit else ''}submitted for {wo['wo_number']}", description=f"Root cause: {root_cause}",
                                 user=user['username'], reference_id=wo_id, reference_type='work_order',
                                 department=wo.get('department'), line=wo.get('line'))
     updated = await db.work_orders.find_one({'id': wo_id}, {'_id': 0})
     return {'ok': True, 'work_order': updated}
+
+
+class RCAReject(BaseModel):
+    reason: str
+
+
+@router.put('/work-orders/{wo_id}/rca-reject')
+async def reject_rca(wo_id: str, req: RCAReject, user: dict = Depends(require_admin)):
+    """ADMIN-ONLY: reject a submitted RCA awaiting closure. The task REOPENS
+    (status back to IN_PROGRESS) and returns to the SAME locked technician —
+    the exclusive-RCA rule still applies, it can never be reassigned. The
+    previous 5-Why answers are retained so the technician edits + resubmits.
+    Every rejection cycle is logged on the timeline + notifies the technician."""
+    wo = await db.work_orders.find_one({'id': wo_id}, {'_id': 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail='Work order not found')
+    if wo.get('wo_type') != 'RCA':
+        raise HTTPException(status_code=400, detail='Only RCA work orders can be rejected through this action')
+    if wo.get('status') != 'PENDING_ADMIN_CLOSURE':
+        raise HTTPException(status_code=400, detail='Only a submitted RCA awaiting admin closure can be rejected')
+    reason = str(req.reason or '').strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail='A rejection reason is required — tell the technician what must be corrected')
+    tech = wo.get('assigned_to')
+    rejection = {'reason': reason, 'rejected_by': user['username'], 'rejected_at': now_iso()}
+    await db.work_orders.update_one({'id': wo_id}, {
+        '$set': {'status': 'IN_PROGRESS', 'rca_rejection': rejection,
+                 'completed_at': None, 'completed_by': None, 'duration_minutes': None},
+        '$inc': {'rca_rejections_count': 1},
+    })
+    await create_timeline_event('rca_rejected', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                                title=f"RCA {wo['wo_number']} rejected by {user['username']}",
+                                description=f"Reason: {reason} — returned to {tech or 'assigned technician'} for resubmission",
+                                user=user['username'], reference_id=wo_id, reference_type='work_order',
+                                department=wo.get('department'), line=wo.get('line'))
+    await create_notification('work_order', f"RCA Rejected: {wo['machine_name']}",
+                              f"{wo['wo_number']} was rejected by {user['username']} — reason: {reason}. Update your 5-Why analysis and resubmit.",
+                              severity='warning', machine_id=wo['machine_id'], machine_name=wo['machine_name'],
+                              reference_id=wo_id, reference_type='work_order')
+    return {'ok': True, 'status': 'IN_PROGRESS', 'rca_rejection': rejection}
 
 
 @router.get('/work-orders/{wo_id}')

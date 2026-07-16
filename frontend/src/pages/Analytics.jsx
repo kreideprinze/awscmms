@@ -1,14 +1,15 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, ComposedChart, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts';
-import { ShieldCheck, Trophy, X, Timer } from 'lucide-react';
+import { ShieldCheck, Trophy, X, Timer, Medal } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { KpiCard, MachineSelect } from '@/components/Shared';
 
 const chartTheme = {
@@ -37,12 +38,42 @@ const TU_SLICES = [
   { key: 'predictive_minutes', name: 'AWS / Predictive', color: '#00fff5' },
 ];
 
+// Breakdown-type pie — same category colors as the AWS health pools.
+const BT_META = {
+  MECHANICAL: { label: 'Mechanical', color: '#00fff5' },
+  ELECTRICAL: { label: 'Electrical', color: '#f9f871' },
+  CONTROL_PLC: { label: 'PLC / Control', color: '#ff2e63' },
+};
+
+// Leaderboard ranking modes (admin choice: metric tabs + Overall composite)
+const LB_METRICS = [
+  { key: 'overall', label: 'Overall', hint: 'composite score' },
+  { key: 'breakdowns', label: 'Breakdowns Closed', hint: 'most resolved' },
+  { key: 'mttr', label: 'Best Avg MTTR', hint: 'fastest repairs' },
+  { key: 'pm', label: 'PM Compliance', hint: 'on-time PMs' },
+  { key: 'ontime', label: 'WO On-Time', hint: 'within target' },
+];
+const lbValue = (r, metric) => (
+  metric === 'overall' ? r.overall_score
+  : metric === 'breakdowns' ? r.breakdowns_resolved
+  : metric === 'mttr' ? r.avg_repair_minutes
+  : metric === 'pm' ? r.pm_compliance_rate
+  : r.wo_on_time_rate);
+const lbDisplay = (r, metric) => (
+  metric === 'overall' ? (r.overall_score != null ? `${r.overall_score}` : '—')
+  : metric === 'breakdowns' ? `${r.breakdowns_resolved}`
+  : metric === 'mttr' ? fmtMin(r.avg_repair_minutes)
+  : metric === 'pm' ? fmtPct(r.pm_compliance_rate)
+  : fmtPct(r.wo_on_time_rate));
+
 // Admin-only technician performance section. The API itself is role-guarded (403 for non-admins).
 function TechnicianAnalytics({ hierarchy }) {
   const [rows, setRows] = useState([]);
   const [target, setTarget] = useState(30);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({ date_from: '', date_to: '', line: 'all', department: 'all', wo_type: 'all' });
+  const [metric, setMetric] = useState('overall'); // leaderboard ranking mode
+  const [cardTech, setCardTech] = useState(null);  // drill-down technician card
 
   const load = useCallback(() => {
     setLoading(true);
@@ -60,6 +91,27 @@ function TechnicianAnalytics({ hierarchy }) {
   useEffect(() => { load(); }, [load]);
 
   const top = rows[0];
+
+  // Leaderboard ordering — lower is better ONLY for Avg MTTR; techs without data
+  // for the chosen metric sink to the bottom (never unfairly ranked).
+  const ranked = useMemo(() => {
+    const active = rows.filter((r) => r.breakdowns_resolved || r.wo_completed || r.pm_completed);
+    const asc = metric === 'mttr';
+    return [...active].sort((a, b) => {
+      const va = lbValue(a, metric), vb = lbValue(b, metric);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return asc ? va - vb : vb - va;
+    });
+  }, [rows, metric]);
+  const bestVal = ranked.length ? lbValue(ranked[0], metric) : null;
+  const barPct = (r) => {
+    const v = lbValue(r, metric);
+    if (v == null || bestVal == null || bestVal === 0) return v === 0 && bestVal === 0 ? 100 : 0;
+    return Math.max(Math.min(metric === 'mttr' ? (bestVal / v) * 100 : (v / bestVal) * 100, 100), 3);
+  };
+  const medalColor = (i) => (i === 0 ? '#f9f871' : i === 1 ? '#9ca3af' : i === 2 ? '#ff9e1c' : null);
 
   return (
     <div className="mt-8" data-testid="technician-analytics-section">
@@ -110,6 +162,48 @@ function TechnicianAnalytics({ hierarchy }) {
         </div>
       )}
 
+      {/* LEADERBOARD — rank all technicians against each other on a chosen metric */}
+      <div className="cyber-panel mb-4 p-4" data-testid="tech-leaderboard">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            <Medal className="h-4 w-4 text-[#f9f871]" /> Leaderboard
+            <span className="font-mono text-[9px] normal-case tracking-normal">({LB_METRICS.find((m) => m.key === metric)?.hint})</span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {LB_METRICS.map((m) => (
+              <button key={m.key} data-testid={`lb-metric-${m.key}`} onClick={() => setMetric(m.key)}
+                className={`cyber-chamfer-sm border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide transition-colors ${metric === m.key ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {ranked.length === 0 ? (
+          <div className="py-8 text-center text-sm text-muted-foreground" data-testid="lb-empty">No technician activity in the selected window</div>
+        ) : (
+          <div className="space-y-1.5">
+            {ranked.map((r, i) => (
+              <button key={r.technician} data-testid={`lb-row-${r.technician}`} onClick={() => setCardTech(r)}
+                className="group flex w-full items-center gap-3 border border-border bg-[hsl(var(--panel-2))] px-3 py-2 text-left transition-colors hover:border-[hsl(var(--primary))]/60">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center border font-mono text-[11px]"
+                  style={medalColor(i) ? { borderColor: `${medalColor(i)}99`, color: medalColor(i) } : { borderColor: 'hsl(var(--border))', color: 'inherit' }}>
+                  {i === 0 ? <Trophy className="h-3.5 w-3.5" /> : i + 1}
+                </span>
+                <div className="w-40 shrink-0 truncate">
+                  <div className="text-sm font-medium group-hover:text-[hsl(var(--primary))]">{r.name}</div>
+                  <div className="font-mono text-[9px] text-muted-foreground">{r.technician}</div>
+                </div>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[hsl(var(--panel-3))]">
+                  <div className="h-full bg-[hsl(var(--primary))]/70" style={{ width: `${barPct(r)}%` }} />
+                </div>
+                <span className="w-20 shrink-0 text-right font-mono text-xs tabular-nums" data-testid={`lb-value-${r.technician}`}>{lbDisplay(r, metric)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="mt-2 text-[10px] text-muted-foreground">Overall = composite score (0–100) blending breakdowns resolved, WOs completed, avg repair time (inverted), WO on-time and PM compliance — normalized across peers. Click a technician for their full card.</p>
+      </div>
+
       <div className="overflow-hidden border border-border">
         <Table data-testid="technician-analytics-table">
           <TableHeader>
@@ -130,7 +224,8 @@ function TechnicianAnalytics({ hierarchy }) {
             {loading && <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">Computing technician metrics…</TableCell></TableRow>}
             {!loading && rows.length === 0 && <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">No technician activity in the selected window</TableCell></TableRow>}
             {!loading && rows.map((r) => (
-              <TableRow key={r.technician} data-testid={`tech-row-${r.technician}`} className="border-border hover:bg-white/[0.03]">
+              <TableRow key={r.technician} data-testid={`tech-row-${r.technician}`} onClick={() => setCardTech(r)}
+                className="cursor-pointer border-border hover:bg-white/[0.03]">
                 <TableCell className="font-mono text-xs">
                   {r.rank === 1 ? <Trophy className="h-3.5 w-3.5 text-[#f9f871]" /> : r.rank}
                 </TableCell>
@@ -148,7 +243,52 @@ function TechnicianAnalytics({ hierarchy }) {
           </TableBody>
         </Table>
       </div>
-      <p className="mt-2 text-[11px] text-muted-foreground">WO On-Time = completed within the configured {target}-minute target (Reliability Rules → Root Cause threshold). PM Compliance = completions on/before due date.</p>
+      <p className="mt-2 text-[11px] text-muted-foreground">WO On-Time = completed within the configured {target}-minute target (Reliability Rules → Root Cause threshold). PM Compliance = completions within the ± reminder-offset window around the due date. Click any row for the technician's card.</p>
+
+      {/* Individual TECHNICIAN CARD — drill-down from leaderboard or table (admin-only section) */}
+      <Dialog open={!!cardTech} onOpenChange={(v) => { if (!v) setCardTech(null); }}>
+        <DialogContent data-testid="tech-card-modal" className="max-w-md border-border bg-[hsl(var(--panel-1))]">
+          <DialogHeader>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-[hsl(var(--primary))]" />
+              <span data-testid="tech-card-name">{cardTech?.name}</span>
+              <span className="font-mono text-[10px] text-muted-foreground">@{cardTech?.technician}</span>
+              {cardTech?.overall_score != null && (
+                <span className="border border-[hsl(var(--primary))]/50 px-1.5 py-px font-mono text-[10px] text-[hsl(var(--primary))]" data-testid="tech-card-score">
+                  Overall {cardTech.overall_score}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {cardTech && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {[
+                  ['Breakdowns Resolved', cardTech.breakdowns_resolved, 'text-[#ff2e63]'],
+                  ['Avg MTTR', fmtMin(cardTech.avg_repair_minutes)],
+                  ['Total Repair Time', minToH(cardTech.total_repair_minutes)],
+                  ['WOs Completed', cardTech.wo_completed],
+                  ['Avg Time / Task', fmtMin(cardTech.wo_avg_minutes)],
+                  ['WO On-Time', fmtPct(cardTech.wo_on_time_rate), cardTech.wo_on_time_rate >= 80 ? 'text-[#05ffa1]' : ''],
+                  ['PM Completed', cardTech.pm_completed],
+                  ['PM Compliance', fmtPct(cardTech.pm_compliance_rate), cardTech.pm_compliance_rate >= 80 ? 'text-[#05ffa1]' : ''],
+                  ['RCA Completed', cardTech.rca_completed, 'text-[#ff2e63]'],
+                ].map(([label, val, accent]) => (
+                  <div key={label} className="border border-border bg-[hsl(var(--panel-2))] p-2.5" data-testid={`tech-card-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
+                    <div className="text-[9px] uppercase tracking-widest text-muted-foreground">{label}</div>
+                    <div className={`mt-0.5 font-mono text-lg tabular-nums ${accent || ''}`}>{val ?? '—'}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between border border-[hsl(var(--primary))]/30 bg-[hsl(var(--primary))]/[0.04] px-3 py-2">
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground">Total Logged Effort</span>
+                <span className="font-mono text-sm tabular-nums text-[hsl(var(--primary))]" data-testid="tech-card-total-hours">{cardTech.total_hours}h</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Metrics respect the filters above (date range / line / department / WO type). Admin-only visibility.</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -163,6 +303,7 @@ export default function Analytics() {
   const [kpis, setKpis] = useState(null);
   const [loading, setLoading] = useState(false);
   const [paretoExpanded, setParetoExpanded] = useState(false); // top 15 by default, expandable
+  const [btMode, setBtMode] = useState('downtime'); // breakdown-type pie: 'downtime' | 'count'
 
   useEffect(() => { api.get('/hierarchy').then((r) => setHierarchy(r.data)); }, []);
 
@@ -304,6 +445,64 @@ export default function Analytics() {
                 </div>
               )}
             </div>
+            {/* Breakdown-type share — Mechanical / Electrical / PLC (count or downtime-weighted) */}
+            <div className="cyber-panel p-4" data-testid="analytics-breakdown-types">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Breakdowns by Type</div>
+                <div className="flex gap-1">
+                  {[['downtime', 'Downtime'], ['count', 'Count']].map(([k, lbl]) => (
+                    <button key={k} data-testid={`bt-mode-${k}`} onClick={() => setBtMode(k)}
+                      className={`cyber-chamfer-sm border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide transition-colors ${btMode === k ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {(() => {
+                const valKey = btMode === 'count' ? 'count' : 'downtime_minutes';
+                const data = (kpis.breakdown_types || [])
+                  .map((b) => ({ ...b, ...(BT_META[b.type] || { label: b.type, color: '#9ca3af' }), value: b[valKey] || 0 }))
+                  .filter((b) => b.value > 0);
+                const total = data.reduce((n, b) => n + b.value, 0);
+                const fmtVal = (v) => (btMode === 'count' ? `${v} breakdown${v === 1 ? '' : 's'}` : minToH(v));
+                if (!total) {
+                  return <div className="py-10 text-center text-sm text-muted-foreground" data-testid="breakdown-types-empty">No breakdowns in the selected range</div>;
+                }
+                return (
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="relative h-[200px] w-[200px] shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={data} dataKey="value" nameKey="label" cx="50%" cy="50%" innerRadius={58} outerRadius={88}
+                            paddingAngle={3} stroke="hsl(220 16% 8%)" strokeWidth={2}>
+                            {data.map((d) => <Cell key={d.type} fill={d.color} />)}
+                          </Pie>
+                          <RTooltip contentStyle={chartTheme.tooltip} formatter={(v, name) => [`${fmtVal(v)} (${Math.round((v / total) * 100)}%)`, name]} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="font-mono text-lg font-semibold tabular-nums" data-testid="breakdown-types-total">{btMode === 'count' ? total : minToH(total)}</span>
+                        <span className="text-[9px] uppercase tracking-widest text-muted-foreground">{btMode === 'count' ? 'Breakdowns' : 'Downtime'}</span>
+                      </div>
+                    </div>
+                    <div className="min-w-[180px] flex-1 space-y-1.5">
+                      {Object.keys(BT_META).map((t) => {
+                        const row = (kpis.breakdown_types || []).find((b) => b.type === t);
+                        const v = row ? row[valKey] || 0 : 0;
+                        return (
+                          <div key={t} data-testid={`breakdown-type-${t}`} className="flex items-center justify-between border border-border bg-[hsl(var(--panel-2))] px-3 py-2">
+                            <span className="flex items-center gap-2 text-xs"><span className="h-2 w-2" style={{ backgroundColor: BT_META[t].color }} />{BT_META[t].label}</span>
+                            <span className="tabular-nums font-mono text-xs">{btMode === 'count' ? v : minToH(v)} <span className="text-muted-foreground">· {total ? Math.round((v / total) * 100) : 0}%</span></span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+              <p className="mt-2 text-[10px] text-muted-foreground">{btMode === 'count' ? 'Share of breakdown occurrences' : 'Downtime-weighted share (consistent with the Pareto metric)'} · respects the date range and scope above.</p>
+            </div>
+
             <div className="cyber-panel p-4" data-testid="analytics-time-utilization">
               <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 <Timer className="h-3.5 w-3.5 text-[hsl(var(--primary))]" /> Time Utilization — maintenance time invested

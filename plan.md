@@ -104,7 +104,7 @@
 ### Navigation + productivity objectives
 - **Universal “jump to Work Order” deep linking**:
   - Clicking a WO reference anywhere opens the **exact Work Order popout/modal** rather than a generic list.
-  - Contract: `?wo=<id>` plus a global `openWorkOrder(id)`.
+  - Contract: `?wo=<id>` plus a global `openWorkOrder(id)`
 
 - **Universal “jump to Breakdown” deep linking**:
   - Clicking a line’s live DOWN timer ribbon opens `/breakdowns?bd=<breakdown_id>`.
@@ -123,375 +123,204 @@
   - Clicking any Live Event Feed entry deep-links to the *exact* referenced record:
     - Work Orders → WO popout
     - Breakdowns → Breakdown row expansion
-    - Red Tags (Warnings) → Warning detail dialog
+    - Red Tags → Warning detail dialog
     - PM Tasks → PM row highlight
     - Fallback → Machine drawer
 
 - **Global “My Tasks” filter** for technicians across: Breakdowns, Work Orders (Kanban), PMs.
 - **Fuzzy/typeahead search** on Report Breakdown form dropdowns for Area/Line and Machine.
-- **Red Tags (Warnings) are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
+- **Red Tags are observation-only** and **always dispatch an Inspection WO** (no Corrective option).
 
 ### UX + Security objectives (Phase AH — completed)
-- **Mobile-friendly login & public kiosk UX**:
-  - Login card fully responsive on phone widths (no horizontal scroll, tap-friendly controls, legible without zoom).
-  - Removed the dev/demo **default-credentials hint block** from the login page.
-  - Public entry points (Report Breakdown + Report Red Tag) remain visible on login page.
-  - Public kiosk report dialog is mobile-friendly (scrollable, tap-friendly controls).
-
-- **Terminology + icon consistency**:
-  - Renamed user-facing “Warning” → **“Red Tag”** everywhere.
-  - Kept existing **yellow theme** for this feature (does not turn red).
-  - Swapped warning icon to a **Tag** icon everywhere it appears.
-  - **Intentionally unchanged:** internal API routes (`/api/warnings`), internal field names (`warning_type`), event types (`warning_created`), and historical DB text.
+- Mobile-friendly login & public kiosk UX (done)
+- Terminology + icon consistency: “Warning” → “Red Tag” (done)
 
 ### Deployment objectives (Phase AH — completed)
-- Produced a **single-script, one-step deployment** for Ubuntu Server (22.04/24.04 LTS), LAN-only.
-  - Nginx on **port 80** serving built frontend.
-  - Reverse proxy `/api` to backend on `127.0.0.1:8001` with WebSocket upgrade headers.
-  - MongoDB repo selection:
-    - Ubuntu 22.04 (jammy) → MongoDB **7.0**
-    - Ubuntu 24.04 (noble) → MongoDB **8.0**
-  - Backend runs as a **systemd service** (auto-start, auto-restart).
-  - Install path: `/opt/factory-ops`.
-  - Script is **idempotent where reasonable** and logs each stage clearly.
+- One-step deployment script `/app/deploy.sh` for Ubuntu 22.04/24.04 (done)
+
+### NEW Objectives (Phase AI — current)
+- **RCA rejection loop**: Admins can reject a submitted RCA with a reason; RCA reopens and returns to the same locked technician; rejection/resubmission is tracked in Timeline + notifications.
+- **Analytics: Breakdown Type Pie**: Add breakdown-type pie chart (Mechanical/Electrical/PLC) with toggle **Count vs Downtime-weighted**, respecting existing slicers.
+- **Admin-only Technician Leaderboard**: Extend Technician Analytics with leaderboard, metric tabs + **Overall composite** toggle, and technician drill-down card.
+- **Mid-repair Work Order handoff**: Allow transfer of **IN_PROGRESS** work orders with mandatory **Pass-On Note**, multiple handoffs, timeline/audit trail, and ensure MTTR/MTBF/AWS integrity.
 
 ---
 
 ## 2) Implementation Steps
 
-### Phase 1 — Core “Operational Loop” POC (Isolation) (WebSocket + eventing + derived machine state)
+### Phase 1 — Core “Operational Loop” POC
 **Status:** ✅ COMPLETE
 
----
-
-### Phase 2 — V1 App Development (MVP, end-to-end usable)
+### Phase 2 — V1 App Development
 **Status:** ✅ COMPLETE
 
----
-
-### Phase 3 — Reliability/AWS + Predictive + Analytics (multi-level)
-**Status:** ✅ COMPLETE *(superseded by newer AWS multi-pool implementation)*
-
----
-
-### Phase 4 — Spares/Inventory + Administration hardening + scale readiness
+### Phase 3 — Reliability/AWS + Predictive + Analytics
 **Status:** ✅ COMPLETE
 
----
-
-### Phase E — Control Room Ribbon + Customization + Theming
+### Phase 4 — Spares/Inventory + Administration
 **Status:** ✅ COMPLETE
 
-**Phase E Testing:** ✅ COMPLETE
-- `/app/test_reports/iteration_3.json` — **backend 100% (43/43)**, **frontend 100%**
+### Phase AG — AWS strict category filter + PM tolerance + Time Utilization
+**Status:** ✅ COMPLETE — VERIFIED (`/app/test_reports/iteration_14.json`)
+
+### Phase AH — Mobile login + deploy script + Red Tag rename
+**Status:** ✅ COMPLETE — VERIFIED (`/app/test_reports/iteration_15.json`)
 
 ---
 
-### Phase F — PM Checklist Rework (Structured Checklists + PDF Export) + Public Breakdown Reporting
-**Status:** ✅ COMPLETE
-
-**Phase F Testing:** ✅ COMPLETE
-- `/app/test_reports/iteration_4.json` — **backend 98.8% (82/83)** *(single miss is a test artifact)*, **frontend 100%**
-
----
-
-### Phase G — Bugfix + Weibull Demo Data (Verification Enablement)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase H — UI Polish Pass (Creative Freedom; Zero Logic Changes)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase I — Warnings + Workflow Changes + Kanban/Repair Dedicated Pages
-**Status:** ✅ COMPLETE *(feature persists but is now labeled “Red Tag” in UI; internal API remains /warnings)*
-
-**Phase I Testing:** ✅ COMPLETE
-- `/app/test_reports/iteration_5.json`
-  - **backend 100% (34/34)**
-  - **frontend 95%** *(1 skipped automation step due to no OPEN breakdowns available; verified manually)*
-
----
-
-### Phase J — PM WO Admin Closure + Kanban Detail Popout Modal (P0)
-**Status:** ✅ COMPLETE *(closure rules updated/superseded by current branching rules)*
-
-**Phase J Testing:** ✅ COMPLETE
-- `/app/test_reports/iteration_6.json`
-  - **backend 100% (29/29)**
-  - **frontend 100%**
-
----
-
-### Phase L — RCA 5-Why Module + Technician Analytics + Line Runtime + AWS Category Sorting (P0)
-**Status:** ✅ COMPLETE *(analytics extended later; AWS logic now multi-pool)*
-
-**Phase L Testing:** ✅ COMPLETE
-- `/app/test_reports/iteration_7.json`
-  - **backend 100% (15/15)**
-  - **frontend verified via screenshot automation + manual checks**
-
----
-
-### Phase M — Mandatory Technician Assignment + Mandatory WO Creation + Runtime Calendar (P0)
-**Status:** ✅ COMPLETE *(legacy runtime model superseded by Phase AB)*
-
-**Phase M Testing:** ✅ COMPLETE
-- `/app/test_reports/iteration_8.json`
-  - **backend 99%** (95/96; single failure is a *test-expectation quirk*, not a product bug)
-  - **frontend 95%** with **0 real issues reported**
-
----
-
-### Phase N — Plant bugfix pack (Breakdown/WO sync + Time edits + Availability + Warnings + Spares + PM PDF) (P0)
-**Status:** ✅ COMPLETE *(availability + runtime unified; superseded by Phase AB runtime model)*
-
-**Phase N Testing:** ✅ COMPLETE
-- Backend: **15/15 tests passed (100%)**
-- Frontend: verified
-
----
-
-### Phase O — Kanban cleanup (remove OPEN column) + Clear Closed + remove redundant elements (P0)
-**Status:** ✅ COMPLETE *(OPEN/Unassigned state reintroduced intentionally in current governance)*
-
----
-
-### Phase P — Data Management (Seed Sample Data + Purge Operational Data)
-**Status:** ✅ COMPLETE — **USER VERIFIED**
-
----
-
-## New Work Phases (Current Roadmap)
-
-### Phase Q — Backend overhaul: Hierarchy inversion + governance + AWS multi-pool + runtime unification
-**Status:** ✅ COMPLETE
-
-**Phase Q Testing**
-- ✅ `/app/test_reports/iteration_9.json` backend: **100%**.
-
----
-
-### Phase T — Frontend Sync: Control Room + Hierarchy + UX cleanup (P0)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase U — Frontend Sync: Work Orders + Kanban + Deep-links + My Tasks (P0)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase V — Frontend additions: Analytics + AWS page + Report Breakdown fuzzy search (P1)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase W — Feature: Jump-to-breakdown from live DOWN timer (P0)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase X — PDF “Corrections Part 4” governance + AWS Life% fix (P0)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase Y — Follow-up: Unassigned PM Tasks + Live Event Feed deep-linking (P0)
-**Status:** ✅ COMPLETE
-
----
-
-### Phase Z — Feature: Task Transfer + Immediate RCA Flow (P0)
-**Status:** ✅ COMPLETE — VERIFIED
-
-**Phase Z Testing**
-- ✅ `/app/test_reports/iteration_12.json` — backend 100%.
-- ✅ Frontend verified via screenshot automation.
-
----
-
-### Phase AA — MTBF Unification (P1)
-**Status:** ✅ COMPLETE — VERIFIED
-
-- ✅ Machine-level Analytics MTBF now reads from `reliability_metrics.mtbf`.
-- ✅ `mtbf_source` field added.
-
----
-
-### Phase AB — Runtime Module Rework: Planned Runtime + Derived Downtime + Corrected Availability (P0)
-**Status:** ✅ COMPLETE — VERIFIED
-
-*(Phase AB details unchanged; runtime model is single source of truth.)*
-
----
-
-### Phase AC — Assignment Enforcement + Closure Attribution (P0)
-**Status:** ✅ COMPLETE — VERIFIED
-
----
-
-### Phase AD — Mandatory-field Validation Pack + Pareto Correction (P0)
-**Status:** ✅ COMPLETE — VERIFIED
-
----
-
-### Phase AE — Analytics Pareto regrouped MACHINE-WISE (P0 amendment)
-**Status:** ✅ COMPLETE — VERIFIED
-
----
-
-### Phase AF — Bugfix: PM Compliance KPI blank card (P0)
-**Status:** ✅ COMPLETE — VERIFIED *(superseded by Phase AG tolerance update for `on_time` semantics)*
-
----
-
-### Phase AG — AWS strict category filter + PM on-time tolerance + Analytics Time Utilization donut (P0)
-**Status:** ✅ COMPLETE — VERIFIED
-
-- ✅ AWS category filter now strictly hides other pools and recalculates KPIs from the selected pool.
-- ✅ PM completion `on_time` uses ± reminder offset window + admin backfill endpoint exists.
-- ✅ Analytics Time Utilization donut added + backend aggregation added.
-- ✅ Testing: `/app/test_reports/iteration_14.json`.
-
----
-
-### Phase AH — Mobile login cleanup + single-script deployment + “Warning”→“Red Tag” rename (P0)
-**Status:** ✅ COMPLETE — VERIFIED
-
-#### AH1) Mobile-responsive Login page + remove default credentials block
-- **Implemented** in `/app/frontend/src/pages/Login.jsx`:
-  - Fully responsive at phone widths (390px verified), no horizontal scroll.
-  - Tap-friendly inputs/buttons (h-11 on mobile).
-  - Default credentials hint block removed.
-  - Public entry points preserved: **Breakdown** + **Red Tag**.
-
-#### AH2) Mobile-friendly public kiosk report forms (Breakdown + Red Tag)
-- **Implemented** in `/app/frontend/src/components/ReportBreakdownDialog.jsx`:
-  - Mobile width handling: `w-[calc(100%-1rem)]` on small screens.
-  - Scrollable: `max-h-[92vh]` and `overflow-y-auto`.
-  - Tap-friendly controls: inputs/select/submit use h-11 on mobile.
-
-#### AH3) Rename “Warning” → “Red Tag” everywhere (UI + new backend strings)
-- **Frontend** updates (yellow theme kept, icon swapped to Tag):
-  - Login page public button label/icon.
-  - Report dialog title/type label/note/submit/toast.
-  - Breakdowns page: “Report Red Tag” button, “Red Tags” tab, empty state, Tag icons.
-  - Machine drawer: “Report Red Tag” button; timeline filter label shows “red tag created”.
-  - Admin/Runtime explanatory texts updated.
-- **Backend** updates (new strings only) in `/app/backend/routers_maintenance.py`:
-  - Timeline event title: `Red Tag {tag} raised`.
-  - Notification title: `Red Tag: {machine}`.
-  - Work order descriptions: `Auto-dispatched from red tag ...` / `Generated from red tag ...`.
-  - Error details updated: `Red tag not found`, `Red tag already has an open work order`, `Red tag work order must be Inspection or Corrective`.
-- **Intentionally unchanged**:
-  - API route names: `/api/warnings`, `/api/public/warnings`.
-  - Internal fields/events: `warning_type`, `warning_created`, and tag prefix `WRN-*`.
-  - Historical DB text.
-  - “AWS — Advance Warning System” wording (distinct module).
-
-#### AH4) Single-script deployment (`/app/deploy.sh`)
-- **Finalized** deployment script:
-  - Ubuntu 22.04/24.04 support.
-  - MongoDB 7.0 (jammy) / 8.0 (noble) repo auto-select.
-  - Python 3.11 venv backend, systemd service binds `127.0.0.1:8001`.
-  - Frontend: yarn build.
-  - Nginx on :80 with `/api` reverse proxy + WS headers.
-  - Idempotent behavior: preserves `backend/.env` and database; refreshes app code + rebuilds.
-  - Clear staged logging + health checks.
-
-#### AH5) Phase AH verification
-- ✅ Test report: `/app/test_reports/iteration_15.json`
-  - Backend: **100% (10/10)**
-  - Frontend: **100%**
-  - Static analysis: **100%** (`deploy.sh` syntax + contents)
+### Phase AI — RCA Rejection + Breakdown-Type Pie + Technician Leaderboard + Mid-repair Handoff (P0)
+**Status:** ⏳ NOT STARTED
+
+#### AI1) Admin can reject a submitted 5-Why RCA
+**Goal:** Add a Reject action for Admins reviewing RCA work orders.
+
+**Backend (primary):** `/app/backend/routers_maintenance.py`
+- Add new RCA lifecycle states or flags (recommended minimal change):
+  - `status` remains `PENDING_ADMIN_CLOSURE` when technician submits.
+  - On reject: set `status='IN_PROGRESS'` (or `ASSIGNED`) and keep `assigned_to` unchanged.
+  - Add fields:
+    - `rca_rejected: bool`
+    - `rca_rejection_reason: str`
+    - `rca_rejected_at: iso`
+    - `rca_rejected_by: username`
+    - optional: `rca_resubmissions_count`
+- Add endpoint: `POST /api/work-orders/{wo_id}/rca-reject` (admin-only)
+  - Requires non-empty `reason`.
+  - Verifies WO is `wo_type='RCA'` and `status='PENDING_ADMIN_CLOSURE'`.
+  - Writes rejection fields + returns updated WO.
+  - Timeline event: `rca_rejected` (“RCA rejected by Admin — reason: …”).
+  - Notification to the assigned technician (targeted): “RCA rejected — resubmission required”.
+
+**Frontend:** `/app/frontend/src/pages/RcaForm.jsx` and admin WO closure UX
+- In admin review area for RCA:
+  - Add **Reject** button next to Approve/Close.
+  - Prompt for rejection reason (modal or inline textarea).
+  - On success: WO returns to technician’s task list.
+- Technician reopens RCA:
+  - **Prefill previous answers** for editing/resubmission (choice 2a).
+  - Add “Rejected by Admin” banner with reason.
+
+**Testing:**
+- Admin rejects → WO status back to technician, reason saved.
+- Technician resubmits → status back to `PENDING_ADMIN_CLOSURE`.
+- Timeline shows both events; technician receives notification.
+
+#### AI2) Breakdown-type pie chart in Analytics (count + downtime toggle)
+**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/kpis`)
+- Add aggregation for breakdowns in current scope/date range:
+  - buckets: `MECHANICAL`, `ELECTRICAL`, `CONTROL_PLC`
+  - return both:
+    - `breakdown_type_share_count: [{type, count}]`
+    - `breakdown_type_share_downtime: [{type, downtime_minutes}]`
+
+**Frontend:** `/app/frontend/src/pages/Analytics.jsx`
+- Add new Cyberpunk panel with pie chart.
+- Toggle control: **Count / Downtime** (choice 1c).
+- Tooltip: show value + percentage.
+- Respect existing slicers (date range + hierarchy level/value).
+
+**Testing:**
+- With empty range → “No breakdowns in range”.
+- With data → sums match KPI totals.
+
+#### AI3) Technician Leaderboard + Technician drill-down card (Admin-only)
+**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/technicians`)
+- Extend response:
+  - `leaderboard` computed server-side.
+  - Rankings by metric tabs:
+    - Breakdowns Closed
+    - Avg MTTR
+    - PM Compliance
+    - WO On-Time
+  - Add **Overall composite** option (user request):
+    - Provide normalized score formula (documented), e.g. weighted z-scores or min-max.
+- Add endpoint for drill-down:
+  - `GET /api/analytics/technicians/{username}` (admin-only)
+  - returns detailed card stats:
+    - breakdowns handled, breakdowns closed
+    - avg MTTR
+    - avg WO duration
+    - PM count + compliance
+    - RCA completion count
+    - total hours
+
+**Frontend:** `/app/frontend/src/pages/Analytics.jsx` (TechnicianAnalytics section)
+- Add Leaderboard view:
+  - Metric tabs + “Overall” toggle.
+  - Click technician row → open Technician card panel/modal.
+- Ensure entire section remains admin-only (already gated by backend; keep UI hide).
+
+**Testing:**
+- Non-admin gets 403.
+- Leaderboard order changes per metric tab.
+- Drill-down card matches list numbers.
+
+#### AI4) Mid-repair Work Order handoff with Pass-On Notes
+**Goal:** Allow transfer while `IN_PROGRESS` with mandatory pass-on note.
+
+**Backend:** `/app/backend/routers_maintenance.py`
+- Extend existing transfer endpoint to accept optional `pass_on_note`.
+- Rule:
+  - If WO status is `IN_PROGRESS`, `pass_on_note` is **required** (choice 4a).
+  - If WO not yet started (OPEN/ASSIGNED), transfer remains as-is (note optional).
+- Persist handoffs:
+  - Add array field `handoffs: [{from,to,note,at,by}]` to work_orders.
+  - Timeline event per handoff: “WO handed off from A → B” + note.
+  - Notification to incoming technician.
+- Integrity constraints:
+  - Do **not** change `started_at` on handoff.
+  - Do **not** touch breakdown start_time / downtime.
+  - Do **not** trigger reliability/AWS reset logic (handoff is assignee-only change).
+
+**Frontend:** Work order modal / transfer UI
+- When transferring an IN_PROGRESS WO:
+  - show required Pass-On Note textarea.
+  - show history of previous handoffs.
+
+**Testing:**
+- Transfer IN_PROGRESS without note → 400.
+- Multiple handoffs record multiple entries.
+- Completion duration remains from original start to final completion.
+- No duplicate AWS reset events.
+
+#### AI5) Phase AI testing + report
+- Create `/app/test_reports/iteration_16.json`.
+- Run both backend + frontend verification.
 
 ---
 
 ## 3) Next Actions
 
+### Current (P0)
+- Implement Phase AI (AI1–AI5).
+
 ### P0 (Pending approval)
-- **Reliability data-quality guard**: prevent breakdown start-times from predating a machine’s `commissioned_at` (or otherwise ignore invalid negative TBF intervals) to avoid Weibull/MTBF poisoning.
+- Reliability data-quality guard: prevent breakdown start-times predating commissioned date.
 
 ### P1
-- UI hint for `mtbf_source` (show whether MTBF is from reliability engine vs aggregate).
+- UI hint for `mtbf_source`.
 - E2E regression test asserting AWS MTBF == machine analytics MTBF.
 
 ---
 
 ## 4) Success Criteria
 
-### Hierarchy + Admin
-- ✅ Backend hierarchy is **Line → Department → Process Group → Machine**, implemented as an in-place DB migration preserving all operational history.
-- ✅ Frontend Admin pages render and edit hierarchy without crashes.
+### Existing (already satisfied)
+- Governance rules, runtime model, AWS strict pool filtering, PM tolerance, Time Utilization, Red Tag rename, mobile login, deploy script.
 
-### Control Room
-- ✅ Filter ribbon positioned above line group cards.
-- ✅ KPI presets: 8h/24h/168h + custom date range.
-- ✅ No flavor text on line cards / plant totals.
-- ✅ Active breakdown lines show live HH:MM:SS red timer ribbon.
-- ✅ Clicking the DOWN timer jumps to the exact breakdown.
-
-### Work Orders + Governance
-- ✅ Unassigned supported + claim.
-- ✅ Admins assign via dropdown.
-- ✅ Transfer works (assignee/admin only).
-- ✅ **Assigned action enforcement**: non-assigned technicians cannot start/complete/close assigned WOs.
-- ✅ **Action Taken required** for Corrective/Inspection/Predictive completion.
-- ✅ RCA lock enforced.
-
-### Breakdowns + Governance
-- ✅ Cannot close without technician.
-- ✅ Claim/assign/transfer supported.
-- ✅ **Assigned action enforcement**: non-assigned technicians cannot start/complete/close assigned breakdowns.
-- ✅ **Action Taken required** on Repair/Completion.
-- ✅ **Correct closure attribution**: repaired-by vs closed-by is accurate and visible in timeline.
-
-### Preventive Maintenance (PM Tasks) + Governance
-- ✅ Unassigned supported + claim.
-- ✅ Transfer supported.
-- ✅ PM checklist close-out blocks submission if any **NOT OK** row has empty **Remarks**.
-
-### Immediate RCA Flow
-- ✅ Closing a >threshold breakdown returns `rca_required` + `rca_task_id`.
-- ✅ Repair flow pops embedded 5-Why RCA form immediately.
-- ✅ RCA locks to the technician who actually triggered closure.
-
-### AWS / Predictive
-- ✅ 3-pool engine + threshold config.
-- ✅ Reliability consumes the planned-runtime model for logged days.
-- ✅ AWS category filter strictness:
-  - Selecting **Mechanical/Electrical/PLC** hides other pools entirely.
-  - AWS KPI cards recalc using **only the selected pool**.
-  - “All Pools” preserves blended behavior.
-
-### Analytics + Runtime
-- ✅ Date slicer exists.
-- ✅ Closure rate + Pareto exist.
-- ✅ Pareto plots **downtime** and groups **by Machine**.
-- ✅ PM Compliance KPI is non-blank and correct (Completed ÷ Scheduled × 100) across all scopes.
-- ✅ PM on-time tolerance:
-  - New completions compute `pm_completions.on_time` using `[due − offset, due + offset]`.
-  - Historical `pm_completions.on_time` can be recomputed via admin backfill endpoint.
-- ✅ Runtime is single source of truth.
-- ✅ MTBF consistency: Machine-level analytics MTBF matches AWS MTBF.
-- ✅ Time Utilization donut:
-  - Analytics shows donut/pie minutes by AWS/Predictive, PM/Preventive, Breakdown/Corrective.
-  - Respects date slicer + hierarchy scope.
-  - Handles empty ranges with explicit “No maintenance time logged…” state.
-
-### Phase AH (NEW; now complete)
-- ✅ **Mobile login + public kiosk UX**
-  - Login page is fully usable on phone screens; no credential hint block.
-  - Public Report Breakdown + Report Red Tag remain accessible.
-  - Public report dialog is mobile-friendly.
-- ✅ **Red Tag rename + Tag icon**
-  - No user-facing “Warning” remains for this feature; “Red Tag” used consistently.
-  - Yellow theme preserved; Tag icon used.
-  - Internal APIs/events unchanged as intended.
-- ✅ **Single-script deployment**
-  - `/app/deploy.sh` performs one-step install + build + service setup + nginx reverse proxy.
-  - Safe to re-run (idempotent where reasonable) and logs each stage clearly.
-  - Ubuntu 22.04/24.04 supported with MongoDB series auto-selection.
+### Phase AI (NEW)
+- ✅ **RCA rejection**:
+  - Admin can reject submitted RCA with reason.
+  - RCA returns to locked technician; resubmission required with prefilled data.
+  - Timeline + notification capture full cycle.
+- ✅ **Analytics breakdown-type pie**:
+  - Pie chart with toggle Count vs Downtime-weighted.
+  - Respects date range + scope filters.
+- ✅ **Technician Leaderboard (Admin-only)**:
+  - Metric tabs + Overall toggle.
+  - Drill-down technician card with detailed stats.
+  - Technicians cannot view.
+- ✅ **Mid-repair handoff**:
+  - IN_PROGRESS transfer requires Pass-On Note.
+  - Multiple handoffs stored + timeline.
+  - MTTR/MTBF/AWS integrity preserved (no timer reset, no reliability side effects).

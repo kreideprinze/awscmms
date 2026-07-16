@@ -167,6 +167,21 @@ export default function RepairBreakdown() {
 
       {!isTech && <div className="mb-4 border border-[#f9f871]/40 p-3 text-xs text-[#f9f871]">Read-only — repairs are recorded by technicians/admins.</div>}
 
+      {/* Mid-repair handoff trail — Pass-On Notes left for the incoming technician */}
+      {(bd.handoffs || []).length > 0 && (
+        <div className="cyber-panel mb-4 p-4" data-testid="repair-handoffs">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.25em] text-[#ff9e1c]">Pass-On Notes ({bd.handoffs.length} handoff{bd.handoffs.length > 1 ? 's' : ''})</div>
+          <div className="space-y-2">
+            {bd.handoffs.map((h, i) => (
+              <div key={i} className="border-l-2 border-[#ff9e1c]/50 pl-2" data-testid={`repair-handoff-${i}`}>
+                <div className="font-mono text-[10px] text-muted-foreground">{h.from} → <span className="text-foreground">{h.to}</span> · {fmtDate(h.at)}{h.mid_repair ? ' · mid-repair' : ''}</div>
+                <p className="mt-0.5 whitespace-pre-wrap text-xs text-foreground/90">{h.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ENFORCEMENT (P0): only the assigned technician or an admin can complete this
           repair. Other technicians see a locked notice instead of the completion form. */}
       {active && isTech && !canWork && (

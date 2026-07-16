@@ -90,6 +90,16 @@ export function RcaFormBody({ woId, onDone, immediate = false }) {
         </div>
       )}
 
+      {/* Admin rejection — analysis returned for correction + resubmission */}
+      {wo.rca_rejection && !locked && (
+        <div className="mb-4 border border-[#ff2e63]/50 bg-[#ff2e63]/[0.06] p-2.5 text-xs" data-testid="rca-rejected-banner">
+          <span className="font-semibold uppercase tracking-widest text-[#ff2e63]">Rejected by {wo.rca_rejection.rejected_by}</span>
+          <span className="text-muted-foreground"> · {fmtDate(wo.rca_rejection.rejected_at)}</span>
+          <p className="mt-1 text-foreground/90">“{wo.rca_rejection.reason}”</p>
+          <p className="mt-1 text-[#ff9e1c]">Your previous answers are prefilled below — update the analysis and resubmit, then complete the work order again.</p>
+        </div>
+      )}
+
       <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-border bg-[hsl(var(--panel-1))] p-3 sm:grid-cols-4">
         <div><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Machine</div><div className="font-mono text-xs" data-testid="rca-machine">{wo.machine_name}</div></div>
         <div><div className="text-[10px] uppercase tracking-widest text-muted-foreground">Assigned To</div><div className="font-mono text-xs">{wo.assigned_to || '—'}</div></div>

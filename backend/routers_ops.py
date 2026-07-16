@@ -396,6 +396,18 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
                        'downtime_hours': round(t['downtime'] / 60, 1),
                        'cumulative_pct': round(cum / total_downtime * 100, 1)})
 
+    # ---- Breakdown-type share (Mechanical / Electrical / PLC) ----
+    # Powers the Analytics pie chart — provides BOTH count and downtime-weighted
+    # proportions (UI toggles between them). Same scope + date slice as everything else.
+    bt_acc = {}
+    for b in breakdowns:
+        t = b.get('breakdown_type') or 'MECHANICAL'
+        e = bt_acc.setdefault(t, {'count': 0, 'downtime_minutes': 0.0})
+        e['count'] += 1
+        e['downtime_minutes'] += b.get('downtime_minutes') or 0
+    breakdown_types = [{'type': t, 'count': v['count'], 'downtime_minutes': round(v['downtime_minutes'], 1)}
+                       for t, v in sorted(bt_acc.items())]
+
     # ---- Time Utilization: maintenance minutes invested, by category ----
     # Buckets: AWS/Predictive + PM/Preventive read completed/closed WO durations;
     # Breakdown/Corrective uses the ACTUAL repair minutes captured on closed
@@ -436,6 +448,7 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         'downtime_trend': downtime_trend, 'failure_trend': failure_trend,
         'availability_trend': availability_trend, 'top_failing_machines': top_failing,
         'failure_modes': failure_modes, 'pareto': pareto, 'pareto_total_machines': len(pareto_rows),
+        'breakdown_types': breakdown_types,
         'time_utilization': time_utilization,
     }
 
@@ -466,7 +479,7 @@ async def technician_analytics(date_from: Optional[str] = None, date_to: Optiona
     stats = defaultdict(lambda: {
         'breakdowns_resolved': 0, 'breakdown_repair_minutes': 0.0,
         'wo_completed': 0, 'wo_minutes': 0.0, 'wo_on_time': 0,
-        'pm_completed': 0, 'pm_on_time': 0,
+        'pm_completed': 0, 'pm_on_time': 0, 'rca_completed': 0,
     })
 
     # Breakdowns handled (resolved = COMPLETED/CLOSED with an assigned technician)
@@ -490,11 +503,13 @@ async def technician_analytics(date_from: Optional[str] = None, date_to: Optiona
         wo_q['department'] = department
     if wo_type:
         wo_q['wo_type'] = wo_type
-    async for w in db.work_orders.find(wo_q, {'_id': 0, 'assigned_to': 1, 'completed_at': 1, 'duration_minutes': 1}):
+    async for w in db.work_orders.find(wo_q, {'_id': 0, 'assigned_to': 1, 'completed_at': 1, 'duration_minutes': 1, 'wo_type': 1}):
         if (date_from or date_to) and not in_range(w.get('completed_at')):
             continue
         s = stats[w['assigned_to']]
         s['wo_completed'] += 1
+        if w.get('wo_type') == 'RCA':
+            s['rca_completed'] += 1
         dur = w.get('duration_minutes') or 0
         s['wo_minutes'] += dur
         if dur <= on_time_target:
@@ -526,8 +541,32 @@ async def technician_analytics(date_from: Optional[str] = None, date_to: Optiona
             'wo_on_time_rate': round(s['wo_on_time'] / s['wo_completed'] * 100, 1) if s['wo_completed'] else None,
             'pm_completed': s['pm_completed'],
             'pm_compliance_rate': round(s['pm_on_time'] / s['pm_completed'] * 100, 1) if s['pm_completed'] else None,
+            'rca_completed': s['rca_completed'],
             'total_hours': round(total_minutes / 60, 1),
         })
+    # ---- Overall composite leaderboard score (0-100) ----
+    # Min-max normalized blend across peers of: breakdowns resolved ↑, WOs completed ↑,
+    # avg repair time ↓ (inverted), WO on-time rate ↑, PM compliance ↑. Metrics a
+    # technician has no data for are skipped (not penalized). All-equal cohorts score 100.
+    def _minmax(vals):
+        vals = [v for v in vals if v is not None]
+        if not vals:
+            return None, None
+        return min(vals), max(vals)
+
+    metric_defs = [('breakdowns_resolved', False), ('wo_completed', False), ('avg_repair_minutes', True),
+                   ('wo_on_time_rate', False), ('pm_compliance_rate', False)]
+    bounds = {k: _minmax([r[k] for r in rows]) for k, _ in metric_defs}
+    for r in rows:
+        comps = []
+        for k, invert in metric_defs:
+            v = r.get(k)
+            lo, hi = bounds[k]
+            if v is None or lo is None:
+                continue
+            n = 1.0 if hi == lo else (v - lo) / (hi - lo)
+            comps.append(1 - n if invert else n)
+        r['overall_score'] = round(sum(comps) / len(comps) * 100, 1) if comps else 0.0
     rows.sort(key=lambda r: (-r['breakdowns_resolved'], -r['wo_completed']))
     for i, r in enumerate(rows, start=1):
         r['rank'] = i
