@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Factory, Loader2, Tag } from 'lucide-react';
+import { Factory, Loader2, Tag, ClipboardCheck } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,14 +42,18 @@ export default function Login() {
       <div className="login-grid" aria-hidden="true" />
       <div className="relative w-full max-w-md">
         {/* Public kiosk reporting — no login required (above the login card) */}
-        <div className="mb-3 grid grid-cols-2 gap-2" data-testid="public-report-section">
+        <div className="mb-3 grid grid-cols-3 gap-2" data-testid="public-report-section">
           <Button type="button" data-testid="public-report-breakdown-button" onClick={() => setReportOpen(true)}
-            className="h-11 border border-[#ff2e63]/60 bg-transparent text-[#ff2e63] hover:bg-[#ff2e63]/10 sm:h-10">
+            className="h-11 border border-[#ff2e63]/60 bg-transparent px-2 text-[#ff2e63] hover:bg-[#ff2e63]/10 sm:h-10">
             <CrackedGear className="mr-1 h-4 w-4" /> Breakdown
           </Button>
           <Button type="button" data-testid="public-report-warning-button" onClick={() => setWarningOpen(true)}
-            className="h-11 border border-[#f9f871]/60 bg-transparent text-[#f9f871] hover:bg-[#f9f871]/10 sm:h-10">
+            className="h-11 border border-[#f9f871]/60 bg-transparent px-2 text-[#f9f871] hover:bg-[#f9f871]/10 sm:h-10">
             <Tag className="mr-1 h-4 w-4" /> Red Tag
+          </Button>
+          <Button type="button" data-testid="public-am-checklist-button" onClick={() => navigate('/am-checklist')}
+            className="h-11 border border-[#05ffa1]/60 bg-transparent px-2 text-[#05ffa1] hover:bg-[#05ffa1]/10 sm:h-10">
+            <ClipboardCheck className="mr-1 h-4 w-4" /> AM Checklist
           </Button>
         </div>
 

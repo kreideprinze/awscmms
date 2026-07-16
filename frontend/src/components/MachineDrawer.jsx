@@ -16,9 +16,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge, HealthBadge, LifecycleBadge, CritBadge, fmtDate } from '@/components/StatusBits';
 import { SpareRows, TechnicianSelect, TransferControl } from '@/components/Shared';
+import { AmSubmissionHistory } from '@/components/AmChecklistForm';
 import { ReportBreakdownDialog } from '@/components/ReportBreakdownDialog';
 
-const TABS = ['Overview', 'Reports', 'Breakdowns', 'Work Orders', 'PM Tasks', 'Analytics', 'Timeline', 'Notes', 'Documents', 'Reliability', 'Spares'];
+const TABS = ['Overview', 'Reports', 'Breakdowns', 'Work Orders', 'PM Tasks', 'AM Checklist', 'Analytics', 'Timeline', 'Notes', 'Documents', 'Reliability', 'Spares'];
 
 const chartTheme = {
   grid: 'rgba(255,255,255,0.08)',
@@ -678,6 +679,7 @@ export function MachineDrawer() {
                   {tab === 'Breakdowns' && <BreakdownsTab machineId={m.id} machine={m} />}
                   {tab === 'Work Orders' && <WorkOrdersTab machineId={m.id} />}
                   {tab === 'PM Tasks' && <PMTab machineId={m.id} />}
+                  {tab === 'AM Checklist' && <AmSubmissionHistory machineId={m.id} compact />}
                   {tab === 'Analytics' && <AnalyticsTab machineId={m.id} />}
                   {tab === 'Timeline' && <TimelineTab machineId={m.id} />}
                   {tab === 'Notes' && <NotesTab machineId={m.id} />}

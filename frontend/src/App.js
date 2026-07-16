@@ -17,6 +17,8 @@ import Runtime from '@/pages/Runtime';
 import Inventory from '@/pages/Inventory';
 import Administration from '@/pages/Administration';
 import AWSPage from '@/pages/AWSPage';
+import AMChecklists from '@/pages/AMChecklists';
+import AMChecklistPublic from '@/pages/AMChecklistPublic';
 
 function Protected({ children, roles }) {
   const { user } = useApp();
@@ -29,6 +31,9 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      {/* PUBLIC kiosk — shift operators fill AM checklists without an account */}
+      <Route path="/am-checklist" element={<AMChecklistPublic />} />
+      <Route path="/am-checklists" element={<Protected><AMChecklists /></Protected>} />
       <Route path="/" element={<Protected><ControlRoom /></Protected>} />
       <Route path="/breakdowns" element={<Protected><Breakdowns /></Protected>} />
       <Route path="/breakdowns/repair/:breakdownId" element={<Protected roles={['admin', 'technician']}><RepairBreakdown /></Protected>} />

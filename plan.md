@@ -149,6 +149,16 @@
 - **Admin-only Technician Leaderboard**: Leaderboard with metric tabs + **Overall composite** toggle, and technician drill-down card.
 - **Mid-repair Work Order handoff**: Transfer of **IN_PROGRESS** work orders/breakdowns with mandatory **Pass-On Note**, multiple handoffs, timeline/audit trail, MTTR/MTBF/AWS integrity preserved.
 
+### NEW Objectives (Phase AJ — current)
+- **Autonomous Maintenance (AM) Checklist module**:
+  - Operator-driven, shift-based routine checks (distinct from PM).
+  - Reuses the existing structured checklist builder pattern (Sub-Component → multiple items).
+  - Per-item tri-state: **OK / NOT OK / NA**; remarks mandatory on **NOT OK**.
+  - Public entry point on login/front page (no full login required) + full in-app module.
+  - Machine Drawer integration (history with shift + date filters) + PDF export (blank + completed).
+  - Show **today’s per-shift (A/B/C) coverage board**.
+  - Reliability/AWS integration explicitly **future scope** only.
+
 ---
 
 ## 2) Implementation Steps
@@ -171,115 +181,143 @@
 ### Phase AH — Mobile login + deploy script + Red Tag rename
 **Status:** ✅ COMPLETE — VERIFIED (`/app/test_reports/iteration_15.json`)
 
+### Phase AI — RCA Rejection + Breakdown-Type Pie + Technician Leaderboard + Mid-repair Handoff (P0)
+**Status:** ✅ COMPLETE — VERIFIED (`/app/test_reports/iteration_16.json` + live UI verification)
+
 ---
 
-### Phase AI — RCA Rejection + Breakdown-Type Pie + Technician Leaderboard + Mid-repair Handoff (P0)
-**Status:** ✅ COMPLETE — VERIFIED (`/app/test_reports/iteration_16.json` + live UI verification by main agent)
+### Phase AJ — Autonomous Maintenance (AM) Checklist Module (P0)
+**Status:** ⏳ NOT STARTED
 
-#### AI1) Admin can reject a submitted 5-Why RCA
-**Status:** ✅ DONE
+#### AJ0) Key decisions (confirmed)
+- Templates are **per machine** (no machine-type concept). Provide **duplicate template to another machine**.
+- Template management: **Admin-only**.
+- AM page includes a **today shift-coverage board** (A/B/C done/pending) per machine.
 
-**Backend:** `/app/backend/routers_maintenance.py`
-- Added `PUT /api/work-orders/{wo_id}/rca-reject` (admin-only)
-  - Requires non-empty `reason`
-  - Only for `wo_type='RCA'` and `status='PENDING_ADMIN_CLOSURE'`
-  - Reopens to `status='IN_PROGRESS'` and keeps the same locked `assigned_to`
-  - Stores `rca_rejection={reason,rejected_by,rejected_at}` + increments `rca_rejections_count`
-  - Clears `completed_at`, `completed_by`, `duration_minutes` (so it must be completed again)
-  - Logs timeline event `rca_rejected` and sends a warning severity notification
-- Updated `PUT /api/work-orders/{wo_id}/rca` submission logic:
-  - If resubmitting after rejection, clears `rca_rejection` and logs the event as **re-submitted**
+#### AJ1) Backend — New router + schema
+**New file:** `/app/backend/routers_am.py`
 
-**Frontend:**
-- `/app/frontend/src/components/WorkOrderModal.jsx`
-  - Added **Reject RCA** action for admins on `PENDING_ADMIN_CLOSURE` RCAs
-  - Inline rejection reason form + disabled confirm until reason present
-  - Added a visible **RCA Rejected** banner when `wo.rca_rejection` exists
-- `/app/frontend/src/pages/RcaForm.jsx`
-  - Added rejection banner with reason
-  - Previous 5-Why answers stay **prefilled** (RCA content is retained)
+**Collections**
+- `am_templates`
+  - `id`, `machine_id`, `machine_name`, `line`, `department`, `process_group`
+  - `template_name` (e.g. `AM — Fryer`)
+  - `checklist_groups` (REUSE PM structure): `[{ description: <sub-component>, items: [{ checked_for: <check item>, parameter: <optional> }] }]`
+  - `active`, `created_at`, `created_by`, `updated_at`, `updated_by`
+- `am_submissions`
+  - `id`, `template_id`, `machine_id`, `machine_name`, `line`, `department`, `process_group`
+  - metadata (required): `name`, `gpid`, `shift` in `{'A','B','C'}`
+  - `email` (auto from user if logged in else `'anonymous'`)
+  - timing: `started_at` (client-sent when opened), `completed_at` (server now), `duration_minutes` (derived)
+  - `row_results`: `[{ description, checked_for, parameter, status: 'OK'|'NOT_OK'|'NA', remarks }]`
+  - `not_ok_count`
+  - `submitted_via`: `'authenticated'|'public_kiosk'`
 
-**Testing:**
-- Full reject → resubmit → complete → admin close cycle verified.
+**Shared validation reuse**
+- Reuse `_normalize_groups()` from `routers_maintenance.py` to validate checklist group structure.
+- Add `am_rows(template, submission=None)` helper (AM needs 3-state mapping instead of PM’s 2-state).
 
-#### AI2) Breakdown-type pie chart in Analytics (count + downtime toggle)
-**Status:** ✅ DONE
+**Endpoints**
+- Templates (admin-only):
+  - `GET /api/am-templates?machine_id=&line=&active=`
+  - `POST /api/am-templates`
+  - `PUT /api/am-templates/{template_id}`
+  - `DELETE /api/am-templates/{template_id}`
+  - `POST /api/am-templates/{template_id}/duplicate` with `{target_machine_id}`
+- Submissions (authenticated):
+  - `GET /api/am-submissions?machine_id=&template_id=&date_from=&date_to=&shift=&limit=`
+  - `POST /api/am-submissions` (validates tri-state + remarks on NOT_OK)
+- Coverage board:
+  - `GET /api/am-coverage?date=YYYY-MM-DD&line=&department=`
+    - returns per-machine `A/B/C` done status + last submission time
+- PDF export (authenticated):
+  - `GET /api/am-templates/{template_id}/pdf?submission_id=...`
+    - ReportLab, mirrored from PM PDF:
+      - Header fields: Machine / Line / Shift / Date
+      - Table columns: Sub-Component / Check Item / Parameter / Status / Remarks
+      - Status boxes: `☐ OK ☐ NOT OK ☐ NA` for blank sheets
+      - Done-by line includes Name + GPID + signature
 
-**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/kpis`)
-- Added `breakdown_types: [{type, count, downtime_minutes}]`
-- Respects date range and hierarchy scope.
+**Public (no-auth) entry points**
+- `GET /api/public/am-context` (machines + minimal template list)
+- `GET /api/public/am-templates/{template_id}` (template detail)
+- `POST /api/public/am-submissions`
+  - Must require Name/GPID/Shift.
+  - Email defaults to `'anonymous'`.
 
-**Frontend:** `/app/frontend/src/pages/Analytics.jsx`
-- Added **Breakdowns by Type** donut card (`analytics-breakdown-types`)
-- Toggle: **Downtime / Count**
-- Cyberpunk styling + empty-state for no data.
+**Timeline + notifications**
+- Always create `timeline_event` on submission: `am_submitted` with machine context.
+- If any NOT_OK items:
+  - create a **warning** severity notification for admins/technicians (or at least admins) with a summary count.
 
-#### AI3) Technician Leaderboard + Technician drill-down card (Admin-only)
-**Status:** ✅ DONE
+**Server registration**
+- Register `routers_am.router` in `/app/backend/server.py`.
 
-**Backend:** `/app/backend/routers_ops.py` (`GET /api/analytics/technicians`, admin-only)
-- Added:
-  - `rca_completed`
-  - `overall_score` (0–100) via min-max normalized composite of:
-    - breakdowns resolved ↑
-    - WOs completed ↑
-    - avg repair minutes ↓ (inverted)
-    - WO on-time ↑
-    - PM compliance ↑
+#### AJ2) Frontend — New pages/components
 
-**Frontend:** `/app/frontend/src/pages/Analytics.jsx`
-- Added leaderboard panel (`tech-leaderboard`) with metric tabs:
-  - Overall / Breakdowns Closed / Best Avg MTTR / PM Compliance / WO On-Time
-- Clicking a row opens the Technician Card modal (`tech-card-modal`)
-- Clicking a table row also opens the same card.
-- Section remains **admin-only** (`isAdmin && <TechnicianAnalytics />`).
+**Routing** (`/app/frontend/src/App.js`)
+- Public route:
+  - `Route /am-checklist` (no Protected wrapper)
+- In-app module:
+  - `Route /am-checklists` inside Protected (all roles)
 
-#### AI4) Mid-repair Work Order handoff with Pass-On Notes
-**Status:** ✅ DONE
+**Sidebar navigation** (`/app/frontend/src/components/Layout.jsx`)
+- Add `AM Checklists` entry for roles `[admin, technician, operator]`.
 
-**Backend:** `/app/backend/routers_maintenance.py`
-- Extended models:
-  - `WOUpdate.pass_on_note`
-  - `BreakdownUpdate.pass_on_note`
-- Enforced rule:
-  - If transferring an **IN_PROGRESS** WO or breakdown, `pass_on_note` is **required** (400 otherwise).
-  - Pre-start transfers (OPEN/ASSIGNED) remain unchanged (note optional).
-- Stored handoff history:
-  - Appends into `handoffs[] = [{from,to,note,at,by,mid_repair}]`
-  - Timeline + notification include verb **“handed off mid-repair”** and Pass-On Note.
-- Integrity:
-  - `started_at` / `start_time` not modified
-  - completion duration remains original start → final completion
-  - no AWS/reliability resets triggered (handoff is assignee change only)
+**Front/Login page public entry point** (`/app/frontend/src/pages/Login.jsx`)
+- Add a new **AM Checklist** button alongside Breakdown and Red Tag.
+  - Opens `/am-checklist`.
 
-**Frontend:**
-- `/app/frontend/src/components/Shared.jsx`
-  - `TransferControl(requireNote)` shows Pass-On Note textarea and gates “Hand Off”.
-- `/app/frontend/src/components/WorkOrderModal.jsx`
-  - Requires note only when `wo.status==='IN_PROGRESS'`
-  - Displays Pass-On Notes history (`wo-detail-handoffs`).
-- `/app/frontend/src/components/MachineDrawer.jsx`
-  - Breakdown transfer requires note when IN_PROGRESS.
-- `/app/frontend/src/pages/RepairBreakdown.jsx`
-  - Displays Pass-On Notes history (`repair-handoffs`).
+**Reusable fill form**
+- Create `AmChecklistForm` component:
+  - Template selector + machine info
+  - Required: Name, GPID, Shift (A/B/C)
+  - Auto-capture `started_at` at open
+  - Per item tri-state control: OK / NOT OK / NA
+  - Remarks field per row, mandatory when NOT OK
+  - Submit writes to authenticated or public endpoint based on auth state
 
-#### AI5) Phase AI testing + report
-**Status:** ✅ DONE
-- Automated test report: `/app/test_reports/iteration_16.json` (backend 100%)
-- Frontend verified by:
-  - testing agent code-review
-  - main agent live Playwright screenshots
-- Test artifacts cleaned:
-  - test breakdowns/WOs/RCAs deleted
-  - machine statuses restored
-  - reliability recomputed
+**Public page** (`/app/frontend/src/pages/AMChecklistPublic.jsx`)
+- Fetch `/api/public/am-context`
+- Operator picks machine → template (if multiple) → completes form → submit
+
+**In-app module page** (`/app/frontend/src/pages/AMChecklists.jsx`)
+- Today per-shift coverage board:
+  - shows machines in scope and A/B/C status
+- Admin template management:
+  - Create/Edit templates using the existing `ChecklistBuilder` UI (reused)
+  - Duplicate-to-another-machine action
+  - Download blank PDF
+- Submission history:
+  - Filters: date_from/date_to, shift, machine
+  - Download completed PDF
+
+**Machine Drawer integration** (`/app/frontend/src/components/MachineDrawer.jsx`)
+- Add new tab: `AM Checklist`
+  - History list for that machine, filterable by date range + shift
+  - PDF download per submission
+
+#### AJ3) Seed data
+**File:** `/app/backend/seed.py`
+- Add 1 representative **AM template** for an existing machine (Fryer-style example), with multiple sub-components and items.
+- Ensure seeding is idempotent (don’t duplicate on re-run).
+
+#### AJ4) Future scope note (explicitly not implemented)
+- Repeated NOT_OK patterns per item as a reliability/AWS leading indicator.
+  - Document candidate signal: “same item NOT_OK ≥ N times within rolling window”
+  - Do not feed into AWS yet.
+
+#### AJ5) Testing + report
+- Create `/app/test_reports/iteration_17.json`
+- Use testing agent **both**:
+  - Backend: template CRUD (admin-only), public submit, tri-state + remarks validation, coverage board, PDF endpoint.
+  - Frontend: public flow from login → /am-checklist submit; in-app module boards; drawer tab filters; PDF download.
 
 ---
 
 ## 3) Next Actions
 
-### Current
-- No P0 remaining from Phase AI.
+### Current (P0)
+- Implement Phase AJ (AJ1–AJ5).
 
 ### P0 (Pending approval)
 - Reliability data-quality guard: prevent breakdown start-times predating commissioned date.
@@ -294,20 +332,23 @@
 
 ### Existing (already satisfied)
 - Governance rules, runtime model, AWS strict pool filtering, PM tolerance, Time Utilization, Red Tag rename, mobile login, deploy script.
+- Phase AI features validated: RCA rejection, breakdown-type pie, technician leaderboard + card, mid-repair handoff.
 
-### Phase AI (now satisfied)
-- ✅ **RCA rejection**:
-  - Admin can reject submitted RCA with reason.
-  - RCA returns to locked technician; resubmission required with prefilled data.
-  - Timeline + notification capture full cycle.
-- ✅ **Analytics breakdown-type pie**:
-  - Pie chart with toggle Count vs Downtime-weighted.
-  - Respects date range + scope filters.
-- ✅ **Technician Leaderboard (Admin-only)**:
-  - Metric tabs + Overall toggle.
-  - Drill-down technician card with detailed stats.
-  - Technicians cannot view.
-- ✅ **Mid-repair handoff**:
-  - IN_PROGRESS transfer requires Pass-On Note.
-  - Multiple handoffs stored + timeline.
-  - MTTR/MTBF/AWS integrity preserved (no timer reset, no reliability side effects).
+### Phase AJ (NEW)
+- ✅ AM Templates:
+  - Admin can create/edit/delete AM templates per machine using the existing builder pattern.
+  - Admin can duplicate an AM template to another machine.
+- ✅ AM Submissions:
+  - Operators submit checklists once per shift (A/B/C) with Name + GPID + Shift required.
+  - Start/complete times are captured; duration derived.
+  - Each item supports OK/NOT OK/NA; remarks are mandatory on NOT OK.
+- ✅ Access:
+  - Public entry point exists on login/front page; no full login required.
+  - In-app module is available via sidebar for all roles.
+- ✅ Machine Drawer:
+  - New AM Checklist tab shows history for the machine with date + shift filters.
+- ✅ PDF:
+  - Blank template PDF and completed submission PDF match the PM tabular style and include header + signature lines.
+- ✅ Integrity:
+  - AM is separate from PM frequency models.
+  - No AWS/reliability engine coupling yet (explicit future scope).

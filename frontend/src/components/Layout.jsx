@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { NavLink, useSearchParams, useNavigate } from 'react-router-dom';
 import {
-  Radar, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, Siren,
+  Radar, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, Siren, ClipboardCheck,
   Bell, LogOut, Pin, PinOff, Factory, Paintbrush, GripVertical, Check,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
@@ -17,6 +17,7 @@ const MODULES = [
   { key: 'breakdowns', path: '/breakdowns', label: 'Breakdowns', icon: CrackedGear, roles: ['admin', 'technician', 'operator'] },
   { key: 'work-orders', path: '/work-orders', label: 'Work Orders', icon: ClipboardList, roles: ['admin', 'technician'] },
   { key: 'pm', path: '/preventive-maintenance', label: 'Preventive Maintenance', icon: CalendarCheck, roles: ['admin', 'technician'] },
+  { key: 'am', path: '/am-checklists', label: 'AM Checklists', icon: ClipboardCheck, roles: ['admin', 'technician', 'operator'] },
   { key: 'analytics', path: '/analytics', label: 'Analytics', icon: BarChart3, roles: ['admin', 'technician', 'operator'] },
   { key: 'runtime', path: '/runtime', label: 'Runtime', icon: Timer, roles: ['admin', 'technician', 'operator'] },
   { key: 'inventory', path: '/inventory', label: 'Inventory (Spares)', icon: Package, roles: ['admin', 'technician'] },

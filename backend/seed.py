@@ -477,6 +477,48 @@ async def seed_all():
         created_settings += 1
     summary['settings'] = {'created': created_settings, 'total': await db.settings.count_documents({})}
 
+    # ---------- AM (Autonomous Maintenance) checklist template ----------
+    # One representative per-machine template (Fryer example from the spec) so the
+    # AM module ships non-empty. Idempotent: skipped once any template exists.
+    if not await db.am_templates.find_one({}):
+        fryer = await db.machines.find_one({'name': 'Fryer'}, {'_id': 0}) or await db.machines.find_one({}, {'_id': 0})
+        if fryer:
+            await db.am_templates.insert_one({
+                'id': str(uuid.uuid4()), 'machine_id': fryer['id'], 'machine_name': fryer['name'],
+                'line': fryer.get('line'), 'department': fryer.get('department'), 'process_group': fryer.get('process_group'),
+                'template_name': f"AM — {fryer['name']}",
+                'checklist_groups': [
+                    {'description': 'Fryer', 'items': [
+                        {'checked_for': 'Loose components', 'parameter': 'Visual — fasteners, fittings'},
+                        {'checked_for': 'Oil level control', 'parameter': 'Level within min/max marks'},
+                        {'checked_for': 'Conveyor belt tension', 'parameter': 'No sag / slippage'},
+                        {'checked_for': 'Drive chain tension', 'parameter': 'Deflection within spec'},
+                        {'checked_for': 'Hood limit switches', 'parameter': 'Trip / interlock functional'},
+                        {'checked_for': 'Frame alignment', 'parameter': 'No visible distortion'},
+                        {'checked_for': 'Moisture monitor', 'parameter': 'Reading plausible / no alarm'},
+                        {'checked_for': 'Guards & covers', 'parameter': 'In place, secured'},
+                    ]},
+                    {'description': 'Oil Mist Eliminator', 'items': [
+                        {'checked_for': 'Fan operation', 'parameter': 'No abnormal noise / vibration'},
+                        {'checked_for': 'Mist carry-over', 'parameter': 'No visible mist at outlet'},
+                        {'checked_for': 'Drain line', 'parameter': 'Free-flowing, no blockage'},
+                    ]},
+                    {'description': 'Motorized Catch Box', 'items': [
+                        {'checked_for': 'Drive operation', 'parameter': 'Smooth travel, no jams'},
+                        {'checked_for': 'Debris accumulation', 'parameter': 'Cleaned / acceptable'},
+                        {'checked_for': 'Limit switches', 'parameter': 'End stops functional'},
+                    ]},
+                    {'description': 'Main Oil Pump', 'items': [
+                        {'checked_for': 'Seal leakage', 'parameter': 'No drips at gland'},
+                        {'checked_for': 'Abnormal noise / vibration', 'parameter': 'By ear / touch'},
+                        {'checked_for': 'Discharge pressure', 'parameter': 'Within normal band'},
+                    ]},
+                ],
+                'frequency': 'per_shift', 'active': True, 'created_at': ts, 'created_by': 'seed',
+                'updated_at': None, 'updated_by': None,
+            })
+            summary['am_templates'] = {'created': 1}
+
     # ---------- Indexes ----------
     await db.machines.create_index('id')
     await db.machines.create_index([('line', 1), ('process_group', 1)])
@@ -494,6 +536,9 @@ async def seed_all():
     await db.spares_inventory.create_index('sap_code', unique=True)
     await db.reliability_metrics.create_index('machine_id')
     await db.machine_reports.create_index([('machine_id', 1), ('created_at', -1)])
+    await db.am_templates.create_index('machine_id')
+    await db.am_submissions.create_index([('machine_id', 1), ('completed_at', -1)])
+    await db.am_submissions.create_index([('template_id', 1), ('completed_at', -1)])
     await db.audit_logs.create_index([('created_at', -1)])
 
     # ---------- Startup summary log ----------

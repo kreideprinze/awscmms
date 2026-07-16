@@ -20,6 +20,7 @@ import routers_maintenance
 import routers_ops
 import routers_spares
 import routers_admin
+import routers_am
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ api_router.include_router(routers_maintenance.router, tags=['maintenance'])
 api_router.include_router(routers_ops.router, tags=['ops'])
 api_router.include_router(routers_spares.router, tags=['spares'])
 api_router.include_router(routers_admin.router, tags=['admin'])
+api_router.include_router(routers_am.router, tags=['am'])
 
 
 @api_router.get('/')
