@@ -1,30 +1,30 @@
 [
   {
     "content": "AJ1: Backend routers_am.py (templates CRUD + duplicate, submissions, coverage, PDF, public endpoints) + register in server.py",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "AJ2a: Shared AmChecklistForm component (tri-state, remarks gating, metadata)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AJ2b: Public /am-checklist page + Login page AM button",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AJ2c: In-app /am-checklists module (coverage board, templates admin, history) + sidebar + routes",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AJ2d: MachineDrawer AM Checklist tab (history + filters + PDF)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AJ3: Seed representative demo AM template (idempotent)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "AJ5: Testing agent (both) + fixes",
-    "status": "pending"
+    "status": "completed"
   }
 ]
