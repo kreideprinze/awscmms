@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardCheck, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AmChecklistForm } from '@/components/AmChecklistForm';
+import { FuzzyPicker } from '@/components/ReportBreakdownDialog';
 
 /**
  * PUBLIC (no login) AM Checklist kiosk — shift-floor operators identified by
@@ -28,6 +28,13 @@ export default function AMChecklistPublic() {
     setTemplate(null);
     if (templateId) api.get(`/public/am-templates/${templateId}`).then((r) => setTemplate(r.data)).catch(() => {});
   }, [templateId]);
+
+  const selected = templates.find((t) => t.id === templateId);
+  // Fuzzy search options — every typed token must match machine / template / line / group
+  const pickerOptions = useMemo(() => templates.map((t) => ({
+    key: t.id, t,
+    haystack: `${t.machine_name} ${t.template_name} ${t.line || ''} ${t.process_group || ''}`.toLowerCase(),
+  })), [templates]);
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-background px-4 py-6">
@@ -63,16 +70,22 @@ export default function AMChecklistPublic() {
         ) : (
           <div className="border border-border bg-[hsl(var(--panel-1))]/90 p-4 backdrop-blur-md sm:p-6">
             <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Machine / Checklist <span className="text-[#ff2e63]">*</span></Label>
-            <Select value={templateId} onValueChange={setTemplateId}>
-              <SelectTrigger data-testid="am-public-template-select" className="mt-0.5 h-11 bg-[hsl(var(--panel-2))] sm:h-10">
-                <SelectValue placeholder={loadingCtx ? 'Loading…' : templates.length ? 'Select the machine you are checking' : 'No AM checklists configured yet'} />
-              </SelectTrigger>
-              <SelectContent>
-                {templates.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.machine_name} — {t.template_name} ({t.line})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="mt-0.5">
+              <FuzzyPicker
+                testId="am-public-template-select"
+                value={templateId}
+                display={selected ? `${selected.machine_name} — ${selected.template_name} (${selected.line})` : ''}
+                options={pickerOptions}
+                onSelect={(o) => setTemplateId(o.key)}
+                placeholder={loadingCtx ? 'Loading…' : templates.length ? 'Search machine by name / line / group…' : 'No AM checklists configured yet'}
+                renderOption={(o) => (
+                  <span>
+                    <span className="font-medium">{o.t.machine_name}</span>
+                    <span className="text-muted-foreground"> — {o.t.template_name} · {o.t.line}{o.t.process_group ? ` / ${o.t.process_group}` : ''}</span>
+                  </span>
+                )}
+              />
+            </div>
             {!loadingCtx && templates.length === 0 && (
               <p className="mt-3 text-xs text-muted-foreground" data-testid="am-public-empty">An administrator must create AM checklist templates first.</p>
             )}

@@ -45,7 +45,8 @@ function Segmented({ options, value, onChange, testPrefix, accent = 'primary' })
 }
 
 // Fuzzy typeahead picker: every typed token must match somewhere in the option haystack.
-function FuzzyPicker({ value, display, options, onSelect, placeholder, testId, error, renderOption }) {
+// (exported — also used by the public AM Checklist machine selector)
+export function FuzzyPicker({ value, display, options, onSelect, placeholder, testId, error, renderOption }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
 
