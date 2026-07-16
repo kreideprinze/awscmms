@@ -396,6 +396,31 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
                        'downtime_hours': round(t['downtime'] / 60, 1),
                        'cumulative_pct': round(cum / total_downtime * 100, 1)})
 
+    # ---- AM Compliance (shift-based, mirrors PM Compliance placement) ----
+    # AM Compliance = submitted scheduled shift occurrences ÷ total scheduled
+    # occurrences × 100. Occurrences are the materialized am_tasks instances
+    # (machine + shift + date); a scheduled shift with no submission counts
+    # against compliance. Today's NOT-YET-SUBMITTED shifts are excluded from the
+    # denominator until the day ends (fair mid-day reading — user choice 3b).
+    from routers_am import ensure_am_tasks
+    today_str = now_iso()[:10]
+    am_from = (date_from or '')[:10]
+    if not am_from:
+        first_sched = await db.am_schedules.find_one({}, {'_id': 0, 'created_at': 1}, sort=[('created_at', 1)])
+        am_from = (first_sched or {}).get('created_at', today_str)[:10]
+    am_to = (date_to or today_str)[:10]
+    await ensure_am_tasks(am_from, am_to)
+    am_q = dict(comp_q)
+    am_q['date'] = {'$gte': am_from, '$lte': am_to}
+    am_scheduled = am_submitted = 0
+    async for t in db.am_tasks.find(am_q, {'_id': 0, 'date': 1, 'status': 1}):
+        if t['date'] >= today_str and t['status'] != 'SUBMITTED':
+            continue  # today's still-pending shifts don't count yet
+        am_scheduled += 1
+        if t['status'] == 'SUBMITTED':
+            am_submitted += 1
+    am_compliance = round(am_submitted / am_scheduled * 100, 1) if am_scheduled else None
+
     # ---- Breakdown-type share (Mechanical / Electrical / PLC) ----
     # Powers the Analytics pie chart — provides BOTH count and downtime-weighted
     # proportions (UI toggles between them). Same scope + date slice as everything else.
@@ -442,6 +467,7 @@ async def analytics_kpis(level: str = 'plant', value: Optional[str] = None,
         'mtbf_hours': mtbf, 'mtbf_source': mtbf_source, 'mttr_hours': mttr_hours, 'availability': availability,
         'failure_rate_per_1000h': failure_rate, 'pm_compliance': pm_compliance,
         'pm_completed_count': pm_completed, 'pm_scheduled_count': pm_scheduled, 'pm_on_time_count': on_time,
+        'am_compliance': am_compliance, 'am_scheduled_count': am_scheduled, 'am_submitted_count': am_submitted,
         'failures_total': failures, 'downtime_hours_total': round(total_downtime_min / 60, 1),
         'breakdowns_reported': failures, 'breakdowns_closed': closed_in_range, 'closure_rate': closure_rate,
         'run_hours': run_hours, 'planned_hours': planned_hours,

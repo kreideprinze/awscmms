@@ -130,6 +130,20 @@ async def pm_scheduler_loop():
         await asyncio.sleep(60)
 
 
+# ---------------- AM SCHEDULER (background, per-shift recurrence) ----------------
+async def am_scheduler_loop():
+    """Reuses the same background-scheduler pattern as PM, but the recurrence unit
+    is PER SHIFT (A/B/C): materializes today's scheduled AM checklist occurrences
+    and flags missed past-day shifts (see routers_am.am_scheduler_tick)."""
+    await asyncio.sleep(15)
+    while True:
+        try:
+            await routers_am.am_scheduler_tick()
+        except Exception as e:
+            logger.error(f'AM scheduler error: {e}')
+        await asyncio.sleep(120)
+
+
 # ---------------- PLANT RUNTIME CLOCK (live machine run-hour counter) ----------------
 async def runtime_clock_tick():
     """Tick the plant clock and accrue `total_run_hours` on running machines (UI counter).
@@ -187,6 +201,7 @@ async def startup():
     except Exception as e:
         logger.error(f'Seed error: {e}')
     asyncio.create_task(pm_scheduler_loop())
+    asyncio.create_task(am_scheduler_loop())
     asyncio.create_task(runtime_clock_loop())
 
 

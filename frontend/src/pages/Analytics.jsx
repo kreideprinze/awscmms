@@ -373,7 +373,7 @@ export default function Analytics() {
 
       {!loading && kpis && (
         <>
-          <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+          <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
             <KpiCard testId="analytics-kpi-mtbf" label="MTBF" value={kpis.mtbf_hours != null ? `${kpis.mtbf_hours}h` : '—'} />
             <KpiCard testId="analytics-kpi-mttr" label="MTTR" value={kpis.mttr_hours != null ? `${kpis.mttr_hours}h` : '—'} />
             <KpiCard testId="analytics-kpi-availability" label="Availability" value={kpis.availability != null ? `${kpis.availability}%` : '—'} accent="text-[hsl(var(--primary))]" />
@@ -382,6 +382,10 @@ export default function Analytics() {
               value={kpis.pm_compliance != null ? `${kpis.pm_compliance}%` : 'N/A'}
               accent={kpis.pm_compliance != null ? (kpis.pm_compliance >= 80 ? 'text-[#05ffa1]' : kpis.pm_compliance >= 50 ? 'text-[#f9f871]' : 'text-[#ff2e63]') : ''}
               sub={kpis.pm_scheduled_count ? `${kpis.pm_completed_count}/${kpis.pm_scheduled_count} scheduled PMs completed` : 'No PMs scheduled in range'} />
+            <KpiCard testId="analytics-kpi-am-compliance" label="AM Compliance"
+              value={kpis.am_compliance != null ? `${kpis.am_compliance}%` : 'N/A'}
+              accent={kpis.am_compliance != null ? (kpis.am_compliance >= 80 ? 'text-[#05ffa1]' : kpis.am_compliance >= 50 ? 'text-[#f9f871]' : 'text-[#ff2e63]') : ''}
+              sub={kpis.am_scheduled_count ? `${kpis.am_submitted_count}/${kpis.am_scheduled_count} scheduled shift checks submitted` : 'No AM shifts scheduled in range'} />
             <KpiCard testId="analytics-kpi-closure-rate" label="Closure Rate" value={kpis.closure_rate != null ? `${kpis.closure_rate}%` : '—'}
               accent={kpis.closure_rate != null ? (kpis.closure_rate >= 80 ? 'text-[#05ffa1]' : kpis.closure_rate >= 50 ? 'text-[#f9f871]' : 'text-[#ff2e63]') : ''}
               sub={`${kpis.breakdowns_closed ?? 0}/${kpis.breakdowns_reported ?? 0} closed`} />

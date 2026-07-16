@@ -35,10 +35,10 @@ const SHIFTS = ['A', 'B', 'C'];
  * MANDATORY on NOT OK. Start time auto-captured when the form opens; Name +
  * GPID + Shift required; email auto-fills from the logged-in user, else 'anonymous'.
  */
-export function AmChecklistForm({ template, publicMode = false, onDone }) {
+export function AmChecklistForm({ template, publicMode = false, onDone, initialShift = '' }) {
   const { user } = useApp();
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString());
-  const [meta, setMeta] = useState({ name: '', gpid: '', shift: '' });
+  const [meta, setMeta] = useState({ name: '', gpid: '', shift: initialShift || '' });
   const [res, setRes] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [tried, setTried] = useState(false);
@@ -47,7 +47,8 @@ export function AmChecklistForm({ template, publicMode = false, onDone }) {
     setStartedAt(new Date().toISOString());
     setRes({});
     setTried(false);
-  }, [template?.id]);
+    setMeta((m) => ({ ...m, shift: initialShift || m.shift }));
+  }, [template?.id, initialShift]);
 
   const rows = useMemo(() => {
     const out = [];
@@ -183,6 +184,33 @@ export function AmChecklistForm({ template, publicMode = false, onDone }) {
         <ClipboardCheck className="mr-1.5 h-4 w-4" />
         {submitting ? 'Submitting…' : `Submit AM Checklist (${answered}/${rows.length})`}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * Compact scheduled-task banner for a machine — DUE (today) and MISSED (past)
+ * AM shift occurrences, so an unsubmitted shift check is never silently absent.
+ * Used by the Machine Drawer's AM Checklist tab.
+ */
+export function AmPendingTasks({ machineId }) {
+  const [tasks, setTasks] = useState([]);
+  useEffect(() => {
+    api.get(`/am-tasks?machine_id=${machineId}&status=PENDING`).then((r) => setTasks(r.data)).catch(() => {});
+  }, [machineId]);
+  if (!tasks.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    <div className="mb-3 border border-[#f9f871]/40 bg-[#f9f871]/[0.04] p-2.5" data-testid="am-pending-banner">
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-[#f9f871]">Scheduled AM checks awaiting submission</div>
+      <div className="flex flex-wrap gap-1.5">
+        {tasks.map((t) => (
+          <span key={t.id} data-testid={`am-pending-${t.id}`}
+            className={`border px-2 py-0.5 font-mono text-[10px] ${t.date < today ? 'border-[#ff2e63]/60 text-[#ff2e63]' : 'border-[#f9f871]/60 text-[#f9f871]'}`}>
+            {t.date} · Shift {t.shift} {t.date < today ? '· MISSED' : '· DUE'}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

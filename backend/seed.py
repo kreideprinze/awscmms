@@ -539,6 +539,9 @@ async def seed_all():
     await db.am_templates.create_index('machine_id')
     await db.am_submissions.create_index([('machine_id', 1), ('completed_at', -1)])
     await db.am_submissions.create_index([('template_id', 1), ('completed_at', -1)])
+    await db.am_tasks.create_index([('schedule_id', 1), ('date', 1), ('shift', 1)], unique=True)
+    await db.am_tasks.create_index([('machine_id', 1), ('date', -1)])
+    await db.am_schedules.create_index('template_id')
     await db.audit_logs.create_index([('created_at', -1)])
 
     # ---------- Startup summary log ----------
