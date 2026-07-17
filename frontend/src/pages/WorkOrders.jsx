@@ -29,7 +29,7 @@ const inColumn = (wo, col) => {
 
 function TypeChip({ wo }) {
   if (wo.wo_type === 'RCA') return <span className="border border-[#ff2e63]/60 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-[#ff2e63]">RCA</span>;
-  if (wo.wo_type === 'Predictive') return <span className="border border-[#ff9e1c]/60 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-[#ff9e1c]" title={`AWS Predictive — ${wo.aws_category || ''}`}>AWS</span>;
+  if (wo.wo_type === 'Predictive') return <span className="border border-[#ff9e1c]/60 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-[#ff9e1c]" title={`eWACS-90 Predictive — ${wo.aws_category || ''}`}>eWACS-90</span>;
   return null;
 }
 
@@ -219,7 +219,7 @@ export default function WorkOrders() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Work Orders</h1>
-          <p className="text-sm text-muted-foreground">{data.total} total · Corrective / Preventive / Inspection / AWS-Predictive / RCA</p>
+          <p className="text-sm text-muted-foreground">{data.total} total · Corrective / Preventive / Inspection / eWACS-90-Predictive / RCA</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" data-testid="work-orders-view-toggle" onClick={() => setView(view === 'table' ? 'kanban' : 'table')} className="border-border bg-[hsl(var(--panel-2))]">
@@ -251,7 +251,7 @@ export default function WorkOrders() {
         {TYPES.map((t) => (
           <button key={t} onClick={() => setWoType(t)} data-testid={`wo-type-filter-${t}`}
             className={`cyber-chamfer-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors ${woType === t ? 'power-on border-[hsl(var(--primary))] bg-transparent text-[hsl(var(--primary))] shadow-[0_0_8px_rgba(var(--accent-rgb),0.25)]' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-            {t === 'all' ? 'All Types' : t === 'Predictive' ? 'AWS / Predictive' : t}
+            {t === 'all' ? 'All Types' : t === 'Predictive' ? 'eWACS-90 / Predictive' : t}
           </button>
         ))}
       </div>
@@ -306,7 +306,7 @@ export default function WorkOrders() {
                     </button>
                   </TableCell>
                   <TableCell className="text-xs">
-                    {wo.wo_type === 'Predictive' ? <span className="text-[#ff9e1c]">AWS / Predictive</span> : wo.wo_type}
+                    {wo.wo_type === 'Predictive' ? <span className="text-[#ff9e1c]">eWACS-90 / Predictive</span> : wo.wo_type}
                     {wo.auto_generated && <span className="ml-1 text-[9px] text-muted-foreground">(auto)</span>}
                   </TableCell>
                   <TableCell className="max-w-64 truncate text-sm">{wo.title}</TableCell>
@@ -355,7 +355,7 @@ export default function WorkOrders() {
                 <Label className="text-xs">Type</Label>
                 <Select value={form.wo_type} onValueChange={(v) => setForm({ ...form, wo_type: v })}>
                   <SelectTrigger data-testid="wo-create-type" className="bg-[hsl(var(--panel-2))]"><SelectValue /></SelectTrigger>
-                  <SelectContent>{['Corrective', 'Preventive', 'Inspection', 'Predictive'].map((t) => <SelectItem key={t} value={t}>{t === 'Predictive' ? 'AWS / Predictive' : t}</SelectItem>)}</SelectContent>
+                  <SelectContent>{['Corrective', 'Preventive', 'Inspection', 'Predictive'].map((t) => <SelectItem key={t} value={t}>{t === 'Predictive' ? 'eWACS-90 / Predictive' : t}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>

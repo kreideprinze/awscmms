@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { NavLink, useSearchParams, useNavigate } from 'react-router-dom';
 import {
-  Radar, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, Siren, ClipboardCheck,
+  Radar, ClipboardList, CalendarCheck, BarChart3, Timer, Package, Settings2, ClipboardCheck,
   Bell, LogOut, Pin, PinOff, Factory, Paintbrush, GripVertical, Check,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { fmtDate, CrackedGear } from '@/components/StatusBits';
+import { fmtDate, CrackedGear, EwacsIcon } from '@/components/StatusBits';
 import { MachineDrawer } from '@/components/MachineDrawer';
 import { WorkOrderModal } from '@/components/WorkOrderModal';
 
@@ -22,7 +22,7 @@ const MODULES = [
   { key: 'runtime', path: '/runtime', label: 'Runtime', icon: Timer, roles: ['admin', 'technician', 'operator'] },
   { key: 'inventory', path: '/inventory', label: 'Inventory (Spares)', icon: Package, roles: ['admin', 'technician'] },
   { key: 'admin', path: '/administration', label: 'Administration', icon: Settings2, roles: ['admin'] },
-  { key: 'aws', path: '/aws', label: 'AWS — Advance Warning', icon: Siren, roles: ['admin', 'technician'] },
+  { key: 'aws', path: '/aws', label: 'eWACS-90', icon: EwacsIcon, roles: ['admin', 'technician'] },
 ];
 
 const SEVERITY_CLS = {

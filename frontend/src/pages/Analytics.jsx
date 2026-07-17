@@ -35,7 +35,7 @@ const minToH = (m) => `${((m || 0) / 60).toFixed(1)}h`;
 const TU_SLICES = [
   { key: 'breakdown_minutes', name: 'Breakdown / Corrective', color: '#ff2e63' },
   { key: 'preventive_minutes', name: 'PM / Preventive', color: '#05ffa1' },
-  { key: 'predictive_minutes', name: 'AWS / Predictive', color: '#00fff5' },
+  { key: 'predictive_minutes', name: 'eWACS-90 / Predictive', color: '#00fff5' },
 ];
 
 // Breakdown-type pie — same category colors as the AWS health pools.
@@ -549,7 +549,7 @@ export default function Analytics() {
                   </div>
                 );
               })()}
-              <p className="mt-2 text-[10px] text-muted-foreground">Breakdown = actual repair minutes on closed breakdowns (+ standalone corrective WOs) · PM / AWS = completed work-order durations. Respects the date range and hierarchy scope above.</p>
+              <p className="mt-2 text-[10px] text-muted-foreground">Breakdown = actual repair minutes on closed breakdowns (+ standalone corrective WOs) · PM / eWACS-90 = completed work-order durations. Respects the date range and hierarchy scope above.</p>
             </div>
             <div className="cyber-panel p-4 xl:col-span-2">
               <div className="mb-3 flex items-center justify-between">

@@ -2,6 +2,24 @@ import React from 'react';
 import { Badge } from '@/components/ui/badge';
 
 // Cracked gear — the platform's breakdown icon (lucide-style 24x24 stroke icon)
+/* eWACS-90 module icon — radar sweep with plane silhouette + "90" badge (fallback custom SVG). */
+export const EwacsIcon = ({ className = 'h-4 w-4', style }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+    strokeLinecap="round" strokeLinejoin="round" className={className} style={style} aria-hidden="true">
+    {/* radar rings (open at top-right for the badge) */}
+    <path d="M20.8 13.5A9 9 0 1 1 10.5 3.2" />
+    <path d="M12 7.5a4.5 4.5 0 1 0 4.5 4.5" />
+    {/* sweep line */}
+    <path d="M12 12 6.6 6.6" />
+    <path d="m12 12 3.4 7.2" opacity="0.4" />
+    {/* plane silhouette */}
+    <path d="m15.2 6.4 3-1.2-1.1 3-1-0.8z" fill="currentColor" strokeWidth="0.6" />
+    {/* 90 badge */}
+    <text x="19.2" y="6.4" fontSize="6.5" fontFamily="ui-monospace, monospace" fontWeight="bold"
+      fill="currentColor" stroke="none" textAnchor="middle">90</text>
+  </svg>
+);
+
 export const CrackedGear = ({ className = 'h-4 w-4', style }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
     strokeLinecap="round" strokeLinejoin="round" className={className} style={style} aria-hidden="true">

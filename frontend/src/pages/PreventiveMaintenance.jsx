@@ -162,7 +162,7 @@ export default function PreventiveMaintenance() {
                 <TableRow key={t.id} id={`pm-row-${t.id}`} data-testid={`pm-row-${t.id}`}
                   className={`border-border hover:bg-white/[0.03] ${highlightId === t.id ? 'bg-[hsl(var(--primary))]/10 shadow-[inset_2px_0_0_hsl(var(--primary))]' : ''}`}>
                   <TableCell>
-                    <div className="text-sm font-medium">{t.task_name} {t.source === 'predictive' && <span className="ml-1 border border-[#ff9e1c]/50 px-1 text-[9px] uppercase text-[#ff9e1c]">AWS</span>}</div>
+                    <div className="text-sm font-medium">{t.task_name} {t.source === 'predictive' && <span className="ml-1 border border-[#ff9e1c]/50 px-1 text-[9px] uppercase text-[#ff9e1c]">eWACS-90</span>}</div>
                     {rowCount > 0 && <div className="text-[10px] text-muted-foreground">{t.checklist_groups?.length ? `${t.checklist_groups.length} components · ` : ''}{rowCount} check rows</div>}
                   </TableCell>
                   <TableCell><button className="text-sm hover:text-[hsl(var(--primary))]" onClick={() => openMachine(t.machine_id)}>{t.machine_name}</button></TableCell>

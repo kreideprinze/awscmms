@@ -202,7 +202,7 @@ export function WorkOrderModal() {
                 <LifecycleBadge status={isUnassigned ? 'OPEN' : wo.status} />
                 <CritBadge level={wo.priority} />
                 {isUnassigned && <span className="border border-[#f9f871]/60 px-1.5 py-px font-mono text-[9px] uppercase tracking-widest text-[#f9f871]" data-testid="wo-detail-unassigned-badge">Unassigned</span>}
-                {wo.wo_type === 'Predictive' && <span className="border border-[#ff9e1c]/60 px-1.5 py-px font-mono text-[9px] uppercase tracking-widest text-[#ff9e1c]" data-testid="wo-detail-aws-badge">AWS {AWS_CAT_LABEL[wo.aws_category] || wo.aws_category || ''}</span>}
+                {wo.wo_type === 'Predictive' && <span className="border border-[#ff9e1c]/60 px-1.5 py-px font-mono text-[9px] uppercase tracking-widest text-[#ff9e1c]" data-testid="wo-detail-aws-badge">eWACS-90 {AWS_CAT_LABEL[wo.aws_category] || wo.aws_category || ''}</span>}
               </>
             ) : <span className="font-mono text-sm text-muted-foreground">Work Order</span>}
           </DialogTitle>

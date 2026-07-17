@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Siren, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { HealthBadge, fmtDate } from '@/components/StatusBits';
+import { HealthBadge, fmtDate, EwacsIcon } from '@/components/StatusBits';
 import { KpiCard } from '@/components/Shared';
 
 const HEALTH_FILTERS = ['all', 'healthy', 'watch', 'inspection_due', 'overdue'];
@@ -122,7 +122,7 @@ export default function AWSPage() {
     <div className="p-6" data-testid="aws-page">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Siren className="h-6 w-6 text-[#ff9e1c]" /> AWS — Advance Warning System</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><EwacsIcon className="h-6 w-6 text-[#ff9e1c]" /> eWACS-90</h1>
           <p className="text-sm text-muted-foreground">3 independent health pools per machine (Mechanical · Electrical · PLC) — statistical reliability, not AI. A Predictive WO fires when any pool crosses {settings?.predictive_trigger_pct ?? 80}%.</p>
         </div>
         {isAdmin && (

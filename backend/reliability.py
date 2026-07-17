@@ -263,7 +263,7 @@ async def _ensure_predictive_wo(machine, cat_metrics, trigger_pct, existing_metr
     wo = {
         'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Predictive',
         'title': f"Predictive \u2014 {machine['name']} [{CATEGORY_LABELS.get(cat, cat)}]",
-        'description': (f"AWS auto-generated: {CATEGORY_LABELS.get(cat, cat)} pool at {life_pct}% of predicted "
+        'description': (f"eWACS-90 auto-generated: {CATEGORY_LABELS.get(cat, cat)} pool at {life_pct}% of predicted "
                         f"failure life ({predicted_life:.0f}h, {tier} tier, threshold {trigger_pct:.0f}%). "
                         f"Suggested: {', '.join(suggestions) or 'inspection'}."),
         'machine_id': machine['id'], 'machine_name': machine['name'],
@@ -283,7 +283,7 @@ async def _ensure_predictive_wo(machine, cat_metrics, trigger_pct, existing_metr
                               severity='warning', machine_id=machine['id'], machine_name=machine['name'],
                               reference_id=wo['id'], reference_type='work_order')
     await create_timeline_event('reliability_alert', machine_id=machine['id'], machine_name=machine['name'],
-                                title=f"AWS alert [{CATEGORY_LABELS.get(cat, cat)}]: {life_pct}% \u2014 Predictive WO {wo_num} created",
+                                title=f"eWACS-90 alert [{CATEGORY_LABELS.get(cat, cat)}]: {life_pct}% \u2014 Predictive WO {wo_num} created",
                                 description=f"Predicted failure life {predicted_life:.0f}h ({tier} tier). Unassigned \u2014 claimable by any technician.",
                                 user='system', reference_id=wo['id'], reference_type='work_order',
                                 department=machine.get('department'), line=machine.get('line'))

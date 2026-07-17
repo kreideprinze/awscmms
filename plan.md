@@ -297,3 +297,16 @@
 - ✅ Integrity:
   - AM is separate from PM frequency models.
   - No AWS/reliability engine coupling yet (explicit future scope).
+### Phase AK: Admin-scheduled AM tasks + AM Compliance KPI — Status: ✅ COMPLETED
+- Verified via `/app/test_reports/iteration_18.json`: 10/10 backend + all frontend tests PASSED, zero bugs.
+- Test data cleanup done: removed 3 test am_submissions + 3 SUBMITTED test am_tasks (2026-07-16). Fryer schedule + today's PENDING tasks kept (legit).
+
+### Phase AL: AWS → eWACS-90 rename + custom module icon — Status: ✅ COMPLETED
+- Label-only rename (zero logic changes): sidebar, page header, WO type labels/badges ("eWACS-90 / Predictive"), Analytics donut legend & footnote, PM predictive badge, WO modal badge, backend WO description + timeline alert title.
+- Internal identifiers untouched: aws_* fields/collections, /api routes, /aws path, variable names.
+- Icon: attached asset was an app screenshot (no SVG) → FALLBACK path taken: custom `EwacsIcon` SVG (radar sweep + plane silhouette + "90" badge) added to StatusBits.jsx, applied in sidebar + page header.
+
+### Pending (user-approved backlog)
+- P1: Breakdown start-time vs commissioned_at validation (MTBF poisoning guard).
+- P1: mtbf_source UI hint.
+- P2: AM "Not OK" recurrence → eWACS-90 degradation signal.
