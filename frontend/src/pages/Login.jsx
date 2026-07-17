@@ -42,19 +42,22 @@ export default function Login() {
       <div className="login-grid" aria-hidden="true" />
       <div className="relative w-full max-w-md">
         {/* Public kiosk reporting — no login required (above the login card) */}
-        <div className="mb-3 grid grid-cols-3 gap-2" data-testid="public-report-section">
+        <div className="mb-3 space-y-2" data-testid="public-report-section">
           <Button type="button" data-testid="public-report-breakdown-button" onClick={() => setReportOpen(true)}
-            className="h-11 border border-[#ff2e63]/60 bg-transparent px-2 text-[#ff2e63] hover:bg-[#ff2e63]/10 sm:h-10">
-            <CrackedGear className="mr-1 h-4 w-4" /> Breakdown
+            className="h-14 w-full border-2 border-[#ff2e63] bg-[#ff2e63]/10 text-base font-bold uppercase tracking-widest text-[#ff2e63] hover:bg-[#ff2e63]/25"
+            style={{ boxShadow: '0 0 18px rgba(255,46,99,0.35)' }}>
+            <CrackedGear className="mr-2 h-6 w-6" /> Report Breakdown
           </Button>
-          <Button type="button" data-testid="public-report-warning-button" onClick={() => setWarningOpen(true)}
-            className="h-11 border border-[#f9f871]/60 bg-transparent px-2 text-[#f9f871] hover:bg-[#f9f871]/10 sm:h-10">
-            <Tag className="mr-1 h-4 w-4" /> Red Tag
-          </Button>
-          <Button type="button" data-testid="public-am-checklist-button" onClick={() => navigate('/am-checklist')}
-            className="h-11 border border-[#05ffa1]/60 bg-transparent px-2 text-[#05ffa1] hover:bg-[#05ffa1]/10 sm:h-10">
-            <ClipboardCheck className="mr-1 h-4 w-4" /> AM Checklist
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" data-testid="public-report-warning-button" onClick={() => setWarningOpen(true)}
+              className="h-11 border border-[#f9f871]/60 bg-transparent px-2 text-[#f9f871] hover:bg-[#f9f871]/10 sm:h-10">
+              <Tag className="mr-1 h-4 w-4" /> Red Tag
+            </Button>
+            <Button type="button" data-testid="public-am-checklist-button" onClick={() => navigate('/am-checklist')}
+              className="h-11 border border-[#05ffa1]/60 bg-transparent px-2 text-[#05ffa1] hover:bg-[#05ffa1]/10 sm:h-10">
+              <ClipboardCheck className="mr-1 h-4 w-4" /> AM Checklist
+            </Button>
+          </div>
         </div>
 
         <div className="relative border border-border bg-[hsl(var(--panel-1))]/90 p-5 backdrop-blur-md sm:p-8" style={{ boxShadow: '0 0 0 1px rgba(var(--accent-rgb),0.1), 0 0 60px rgba(var(--accent-rgb),0.06), 0 30px 80px rgba(0,0,0,0.85)' }}>
