@@ -323,3 +323,8 @@
 - 349 imported breakdowns now linked to their real technicians (leaderboard-ready); stale open WOs unassigned back to claimable.
 - Admin → Users: "Set Password" dialog per user (PUT /api/users/{id} with password).
 - eWACS-90 page: +MEC/+ELE/+PLC buttons per row → POST /api/reliability/manual-wo (identical to auto-generated predictive WO, duplicate-guarded, admin/tech only).
+
+### Phase AO: WO deletion + first-install data seeding — Status: ✅ COMPLETED
+- DELETE /api/work-orders/{id} (admin) + trash icon on every Kanban card; DELETE /api/work-orders/unassigned (admin) + "Delete All" button on UNASSIGNED column header (confirm dialogs, timeline-logged).
+- seed_data/historical_breakdowns.json (367 records) + seed.seed_historical_breakdowns(): fresh installs auto-seed the Pune history (machine resolved by line+name, tickets via counter, commissioned_at backdated). Idempotent guard: skips if excel-import records exist.
+- Technician roster already in seed.py (Phase AN) — full data parity on first install.

@@ -556,6 +556,31 @@ async def clear_closed_work_orders(user: dict = Depends(require_admin_or_tech)):
     return {'ok': True, 'cleared': res.modified_count}
 
 
+@router.delete('/work-orders/unassigned')
+async def delete_unassigned_work_orders(user: dict = Depends(require_admin)):
+    """PERMANENTLY delete ALL unassigned work orders (the UNASSIGNED Kanban column).
+    Admin only. Closed/assigned/in-progress WOs are never touched."""
+    q = {'assigned_to': None, 'status': {'$in': ['OPEN', 'ASSIGNED']}}
+    n = await db.work_orders.count_documents(q)
+    await db.work_orders.delete_many(q)
+    await create_timeline_event('wo_cancelled', title=f'{n} unassigned work orders deleted',
+                                description='Bulk delete of the UNASSIGNED Kanban column', user=user['username'])
+    return {'ok': True, 'deleted': n}
+
+
+@router.delete('/work-orders/{wo_id}')
+async def delete_work_order(wo_id: str, user: dict = Depends(require_admin)):
+    """PERMANENTLY delete a single work order (admin only)."""
+    wo = await db.work_orders.find_one({'id': wo_id}, {'_id': 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail='Work order not found')
+    await db.work_orders.delete_one({'id': wo_id})
+    await create_timeline_event('wo_cancelled', machine_id=wo.get('machine_id'), machine_name=wo.get('machine_name'),
+                                title=f"WO {wo['wo_number']} deleted", description=f"Deleted by {user['username']}",
+                                user=user['username'], department=wo.get('department'), line=wo.get('line'))
+    return {'ok': True}
+
+
 @router.get('/work-orders')
 async def list_work_orders(machine_id: Optional[str] = None, status: Optional[str] = None,
                            wo_type: Optional[str] = None, assigned_to: Optional[str] = None,

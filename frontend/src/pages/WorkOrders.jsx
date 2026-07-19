@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Plus, LayoutGrid, Rows3, Hand, UserRound } from 'lucide-react';
+import { Plus, LayoutGrid, Rows3, Hand, UserRound, Trash2 } from 'lucide-react';
 import { api, errMsg } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -166,6 +166,24 @@ export default function WorkOrders() {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
+  const deleteWo = async (wo) => {
+    if (!window.confirm(`Permanently delete ${wo.wo_number}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/work-orders/${wo.id}`);
+      toast.success(`${wo.wo_number} deleted`);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
+  const deleteAllUnassigned = async (count) => {
+    if (!window.confirm(`Permanently delete ALL ${count} unassigned work order(s)? This cannot be undone.`)) return;
+    try {
+      const r = await api.delete('/work-orders/unassigned');
+      toast.success(`${r.data.deleted} unassigned work order(s) deleted`);
+      load();
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   const isUnassigned = (wo) => !wo.assigned_to && ['OPEN', 'ASSIGNED'].includes(wo.status);
 
   // Compact kanban card — click anywhere on the card to open the universal detail popout
@@ -210,6 +228,10 @@ export default function WorkOrders() {
         ) : (
           <span className="text-[9px] text-[#ff9e1c]">awaiting admin</span>
         ))}
+        {isAdmin && <Button size="sm" variant="ghost" data-testid={`wo-delete-${wo.wo_number}`}
+          className="ml-auto h-5 px-1 text-[#ff2e63]/70 hover:bg-[#ff2e63]/10 hover:text-[#ff2e63]"
+          title="Permanently delete this work order"
+          onClick={(e) => { e.stopPropagation(); deleteWo(wo); }}><Trash2 className="h-3 w-3" /></Button>}
       </div>
     </div>
   );
@@ -264,6 +286,13 @@ export default function WorkOrders() {
               <div key={col} className={`rounded-lg border bg-[hsl(var(--panel-1))]/50 ${col === 'UNASSIGNED' ? 'border-[#f9f871]/30' : 'border-border'}`} data-testid={`wo-kanban-col-${col}`}>
                 <div className={`flex items-center justify-between border-b px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest ${col === 'UNASSIGNED' ? 'border-[#f9f871]/30 text-[#f9f871]' : 'border-border text-muted-foreground'}`}>
                   <span>{COL_LABEL[col] || col} <span className="ml-1 text-[hsl(var(--primary))]">{colItems.length}</span></span>
+                  {col === 'UNASSIGNED' && isAdmin && colItems.length > 0 && (
+                    <button data-testid="wo-delete-all-unassigned" onClick={() => deleteAllUnassigned(colItems.length)}
+                      className="flex items-center gap-1 border border-[#ff2e63]/50 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-[#ff2e63] transition-colors hover:bg-[#ff2e63]/10"
+                      title="Permanently delete ALL unassigned work orders">
+                      Delete All
+                    </button>
+                  )}
                   {col === 'CLOSED' && colItems.length > 0 && (
                     <button data-testid="wo-clear-closed" onClick={clearClosed}
                       className="flex items-center gap-1 border border-border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground transition-colors hover:border-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]"

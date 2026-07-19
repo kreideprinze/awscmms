@@ -3,6 +3,7 @@ PM templates, runtime templates, reliability settings, notification templates,
 spare locations, starter spares inventory, machine-spare recommendations.
 The system must NEVER start empty."""
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -565,4 +566,40 @@ async def seed_all():
 
     await db.settings.update_one({'id': 'seed_summary'}, {'$set': {'id': 'seed_summary', 'summary': summary, 'seeded_at': ts}}, upsert=True)
     await db.settings.update_one({'id': 'seed_complete'}, {'$set': {'id': 'seed_complete', 'seeded_at': ts, 'machine_count': machine_total}}, upsert=True)
+    await seed_historical_breakdowns()
     return summary
+
+
+async def seed_historical_breakdowns():
+    """Seed the imported Pune historical breakdowns (seed_data/historical_breakdowns.json)
+    on FIRST install only. Machine ids are resolved by (line, machine_name); each affected
+    machine's commissioned_at is backdated to before its earliest breakdown (MTBF guard)."""
+    import json
+    path = os.path.join(os.path.dirname(__file__), 'seed_data', 'historical_breakdowns.json')
+    if not os.path.exists(path):
+        return
+    if await db.breakdowns.count_documents({'reporter': 'excel-import'}) > 0:
+        return  # already seeded/imported
+    docs = json.load(open(path))
+    machines = {(m['line'], m['name']): m for m in
+                await db.machines.find({}, {'_id': 0, 'id': 1, 'name': 1, 'line': 1, 'commissioned_at': 1}).to_list(1000)}
+    inserted, earliest = [], {}
+    for d in docs:
+        m = machines.get((d['line'], d['machine_name']))
+        if not m:
+            continue
+        c = await db.counters.find_one_and_update({'_id': 'breakdowns'}, {'$inc': {'seq': 1}}, upsert=True, return_document=True)
+        d = dict(d, id=nid(), machine_id=m['id'], ticket_number=f"BD-{c['seq']:05d}",
+                 work_order_id=None, rca_task_id=None)
+        earliest[m['id']] = min(earliest.get(m['id'], d['start_time']), d['start_time'])
+        inserted.append(d)
+    if inserted:
+        await db.breakdowns.insert_many([dict(d) for d in inserted])
+        from datetime import timedelta
+        for mid, e in earliest.items():
+            m = next(v for v in machines.values() if v['id'] == mid)
+            comm = m.get('commissioned_at')
+            if comm and str(comm) > e:
+                await db.machines.update_one({'id': mid}, {'$set': {'commissioned_at':
+                    (datetime.fromisoformat(e) - timedelta(days=1)).isoformat()}})
+        logger.info(f'historical breakdowns seeded: {len(inserted)}/{len(docs)}')
