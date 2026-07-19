@@ -655,6 +655,16 @@ async def recompute_reliability(machine_id: Optional[str] = None, user: dict = D
     return {'ok': True}
 
 
+@router.post('/reliability/manual-wo')
+async def manual_predictive_wo(payload: dict, user: dict = Depends(require_admin_or_tech)):
+    """Manually generate an eWACS-90 Predictive WO (same behavior as auto-generated)."""
+    from reliability import create_manual_predictive_wo
+    res = await create_manual_predictive_wo(payload.get('machine_id'), payload.get('category'), user['username'])
+    if res.get('error'):
+        raise HTTPException(status_code=400, detail=res['error'])
+    return res
+
+
 @router.get('/reliability/settings')
 async def get_reliability_settings(user: dict = Depends(require_admin_or_tech)):
     return await db.settings.find_one({'id': 'reliability_settings'}, {'_id': 0})

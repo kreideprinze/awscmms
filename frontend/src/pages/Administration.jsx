@@ -189,8 +189,14 @@ function HierarchyTab() {
 function UsersTab() {
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState({ username: '', password: '', name: '', role: 'operator' });
+  const [pwUser, setPwUser] = useState(null); // user whose password is being changed
+  const [pwValue, setPwValue] = useState('');
   const load = useCallback(() => { api.get('/users').then((r) => setUsers(r.data)); }, []);
   useEffect(() => { load(); }, [load]);
+  const savePassword = async () => {
+    if (!pwValue || pwValue.length < 4) { toast.error('Password must be at least 4 characters'); return; }
+    try { await api.put(`/users/${pwUser.id}`, { password: pwValue }); toast.success(`Password updated for ${pwUser.username}`); setPwUser(null); setPwValue(''); } catch (e) { toast.error(errMsg(e)); }
+  };
   const create = async () => {
     if (!form.username || !form.password || !form.name) { toast.error('All fields required'); return; }
     try { await api.post('/users', form); toast.success('User created'); setForm({ username: '', password: '', name: '', role: 'operator' }); load(); } catch (e) { toast.error(errMsg(e)); }
@@ -226,12 +232,21 @@ function UsersTab() {
               <TableCell className="text-xs uppercase text-[hsl(var(--primary))]">{u.role}</TableCell>
               <TableCell className="text-xs">{u.active ? 'Yes' : 'No'}</TableCell>
               <TableCell>
+                <Button size="sm" variant="ghost" className="h-6 text-[10px] text-[hsl(var(--primary))]" data-testid={`admin-user-setpw-${u.username}`} onClick={() => { setPwUser(u); setPwValue(''); }}>Set Password</Button>
                 {u.active && <Button size="sm" variant="ghost" className="h-6 text-[10px] text-[#ff2e63]" onClick={async () => { try { await api.delete(`/users/${u.id}`); toast.success('User deactivated'); load(); } catch (e) { toast.error(errMsg(e)); } }}>Deactivate</Button>}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+      <Dialog open={!!pwUser} onOpenChange={(o) => !o && setPwUser(null)}>
+        <DialogContent className="max-w-sm border-border bg-[hsl(var(--panel-1))]">
+          <DialogHeader><DialogTitle className="text-sm uppercase tracking-wider">Set password — {pwUser?.username}</DialogTitle></DialogHeader>
+          <Label className="text-[10px] uppercase">New password</Label>
+          <Input type="password" data-testid="admin-setpw-input" value={pwValue} onChange={(e) => setPwValue(e.target.value)} className="bg-[hsl(var(--panel-2))]" autoFocus />
+          <Button onClick={savePassword} data-testid="admin-setpw-save" className="bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">Save Password</Button>
+        </DialogContent>
+      </Dialog>
     </Section>
   );
 }

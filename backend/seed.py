@@ -325,7 +325,12 @@ async def seed_all():
     existing_users = {u['username'] async for u in db.users.find({}, {'username': 1})}
     user_docs = [
         {'id': nid(), 'username': 'admin', 'password': hash_password('admin123'), 'role': 'admin', 'name': 'System Administrator', 'email': 'admin@factory.local', 'active': True, 'created_at': ts},
-        {'id': nid(), 'username': 'tech', 'password': hash_password('tech123'), 'role': 'technician', 'name': 'Maintenance Technician', 'email': 'tech@factory.local', 'active': True, 'created_at': ts},
+        # Technician roster from Pune plant records (default password: tech123 — change via Administration → Users)
+        *[{'id': nid(), 'username': u, 'password': hash_password('tech123'), 'role': 'technician', 'name': n,
+           'email': f'{u}@factory.local', 'active': True, 'created_at': ts} for u, n in [
+            ('dattatray', 'Dattatray Rakshe'), ('nitin', 'Nitin Chavan'), ('ravindra', 'Ravindra Sonawane'),
+            ('namdev', 'Namdev Shewale'), ('raju', 'Raju Daundkar'), ('premraj', 'Premraj Patil'),
+            ('bhausaheb', 'Bhausaheb Kulal'), ('chandrakant', 'Chandrakant Bhole'), ('jalindar', 'Jalindar Kokate')]],
         {'id': nid(), 'username': 'operator', 'password': hash_password('operator123'), 'role': 'operator', 'name': 'Floor Operator', 'email': 'operator@factory.local', 'active': True, 'created_at': ts},
     ]
     new_users = [u for u in user_docs if u['username'] not in existing_users]

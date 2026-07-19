@@ -317,3 +317,9 @@
 - User-approved mappings: KKR Blending→Blending System, PC36 Optyx infeed vibratory→Optyx, created new machine "Trim & Pare Conveyor" on PC32.
 - commissioned_at backdated on 89 machines (user-approved) so MTBF/Weibull stays valid; ticket numbers issued via real counter (dup collision found + fixed).
 - Import tool kept at backend/import_breakdowns.py (dry-run by default).
+
+### Phase AN: Technician roster + password editor + manual eWACS-90 WO — Status: ✅ COMPLETED
+- Wiped 16 old technician accounts; created 9 from Excel "Attended By" (dattatray, nitin, ravindra, namdev, raju, premraj, bhausaheb, chandrakant, jalindar — default pw tech123). Also seeded in seed.py for fresh deployments.
+- 349 imported breakdowns now linked to their real technicians (leaderboard-ready); stale open WOs unassigned back to claimable.
+- Admin → Users: "Set Password" dialog per user (PUT /api/users/{id} with password).
+- eWACS-90 page: +MEC/+ELE/+PLC buttons per row → POST /api/reliability/manual-wo (identical to auto-generated predictive WO, duplicate-guarded, admin/tech only).

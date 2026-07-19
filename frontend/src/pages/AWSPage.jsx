@@ -78,6 +78,13 @@ export default function AWSPage() {
     } catch (e) { toast.error(errMsg(e)); }
   };
 
+  const manualWo = async (machineId, cat, name) => {
+    try {
+      const r = await api.post('/reliability/manual-wo', { machine_id: machineId, category: cat });
+      toast.success(`${r.data.wo_number} created — eWACS-90 WO for ${name}`);
+    } catch (e) { toast.error(errMsg(e)); }
+  };
+
   const saveSettings = async () => {
     setSavingSettings(true);
     try {
@@ -169,6 +176,7 @@ export default function AWSPage() {
               <TableHead className="text-xs uppercase">Hours Since Failure {category === 'all' ? '▲' : ''}</TableHead>
               <TableHead className="text-xs uppercase">Health</TableHead>
               <TableHead className="text-xs uppercase">Weibull β/η {category === 'all' ? '▲' : ''}</TableHead>
+              <TableHead className="text-xs uppercase">Manual WO</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -191,6 +199,18 @@ export default function AWSPage() {
                 <TableCell className="tabular-nums text-sm">{m.hours_since_last_failure}h</TableCell>
                 <TableCell><HealthBadge health={m.health} /></TableCell>
                 <TableCell className="font-mono text-xs">{m.weibull ? `${m.weibull.beta} / ${m.weibull.eta}h` : '—'}</TableCell>
+                <TableCell>
+                  <div className="flex gap-1">
+                    {[['MECHANICAL', 'MEC'], ['ELECTRICAL', 'ELE'], ['CONTROL_PLC', 'PLC']].map(([cat, lbl]) => (
+                      <button key={cat} data-testid={`aws-manual-wo-${m.machine_id}-${cat}`}
+                        title={`Generate eWACS-90 ${lbl} work order (same as auto-generated)`}
+                        onClick={() => manualWo(m.machine_id, cat, m.machine_name)}
+                        className="border border-[#ff9e1c]/40 px-1.5 py-0.5 font-mono text-[9px] uppercase text-[#ff9e1c] hover:bg-[#ff9e1c]/15">
+                        +{lbl}
+                      </button>
+                    ))}
+                  </div>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

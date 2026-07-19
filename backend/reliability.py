@@ -290,6 +290,56 @@ async def _ensure_predictive_wo(machine, cat_metrics, trigger_pct, existing_metr
     return wo['id']
 
 
+async def create_manual_predictive_wo(machine_id, category, username):
+    """MANUAL eWACS-90 work order — identical in shape/behavior to the auto-generated
+    Predictive WO, but triggered on demand by an admin/technician regardless of threshold."""
+    machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
+    if not machine:
+        return {'error': 'Machine not found'}
+    if category not in CATEGORY_LABELS:
+        return {'error': f'Invalid category. Valid: {list(CATEGORY_LABELS)}'}
+    open_wo = await db.work_orders.find_one(
+        {'machine_id': machine_id, 'wo_type': 'Predictive', 'aws_category': category,
+         'status': {'$in': ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_ADMIN_CLOSURE']}},
+        {'_id': 0, 'wo_number': 1})
+    if open_wo:
+        return {'error': f"An open eWACS-90 WO already exists for this machine/category ({open_wo['wo_number']})"}
+    cm = ((await db.reliability_metrics.find_one({'machine_id': machine_id}, {'_id': 0}) or {})
+          .get('categories') or {}).get(category) or {}
+    life_pct = cm.get('life_pct', 0)
+    predicted_life = cm.get('predicted_failure_life') or 0
+    tier = cm.get('tier', 'initial')
+    suggestions = cm.get('suggestions') or []
+    label = CATEGORY_LABELS.get(category, category)
+    wo_num = await next_counter('work_orders', 'WO')
+    wo = {
+        'id': str(uuid.uuid4()), 'wo_number': wo_num, 'wo_type': 'Predictive',
+        'title': f"Predictive \u2014 {machine['name']} [{label}]",
+        'description': (f"eWACS-90 manual request by {username}: {label} pool at {life_pct}% of predicted "
+                        f"failure life ({predicted_life:.0f}h, {tier} tier). "
+                        f"Suggested: {', '.join(suggestions) or 'inspection'}."),
+        'machine_id': machine['id'], 'machine_name': machine['name'],
+        'department': machine.get('department'), 'line': machine.get('line'),
+        'assigned_to': None, 'priority': 'high', 'status': 'OPEN',
+        'aws_category': category, 'aws_life_pct': life_pct,
+        'root_cause': None, 'action_taken': None, 'spare_parts': [],
+        'duration_minutes': None, 'source': 'aws_predictive', 'auto_generated': False,
+        'created_by': username, 'created_at': now_iso(),
+    }
+    await db.work_orders.insert_one(dict(wo))
+    await create_notification('inspection_recommended', f"Predictive WO: {machine['name']} [{label}]",
+                              f"{wo_num} \u2014 manually generated from eWACS-90 by {username} ({label} pool at {life_pct}%).",
+                              severity='warning', machine_id=machine['id'], machine_name=machine['name'],
+                              reference_id=wo['id'], reference_type='work_order')
+    await create_timeline_event('reliability_alert', machine_id=machine['id'], machine_name=machine['name'],
+                                title=f"eWACS-90 manual WO [{label}]: Predictive WO {wo_num} created by {username}",
+                                description=f"Pool at {life_pct}% of predicted life ({predicted_life:.0f}h, {tier} tier). Unassigned \u2014 claimable by any technician.",
+                                user=username, reference_id=wo['id'], reference_type='work_order',
+                                department=machine.get('department'), line=machine.get('line'))
+    wo.pop('_id', None)
+    return wo
+
+
 async def recompute_machine_reliability(machine_id, trigger='manual'):
     """Full recompute of per-category reliability pools + predictive triggers for one machine."""
     machine = await db.machines.find_one({'id': machine_id}, {'_id': 0})
