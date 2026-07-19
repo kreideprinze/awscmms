@@ -52,9 +52,13 @@ async def main(commit=False):
         if not equip:
             badrow.append((rid, f'no equipment (line={line})')); continue
         pool = by_line.get(line, {})
-        m = pool.get(equip.lower())
+        ALIAS = {('KKR', 'blending'): 'blending system',
+                 ('PC32', 'trim and pare conveyor'): 'trim & pare conveyor',
+                 ('PC36', 'optyx infeed vibratory'): 'optyx'}
+        equip_l = ALIAS.get((line, equip.lower()), equip.lower())
+        m = pool.get(equip_l)
         if not m:  # fuzzy
-            cand = difflib.get_close_matches(equip.lower(), list(pool.keys()), n=1, cutoff=0.75)
+            cand = difflib.get_close_matches(equip_l, list(pool.keys()), n=1, cutoff=0.75)
             if cand:
                 m = pool[cand[0]]
         if not m:

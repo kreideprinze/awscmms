@@ -310,3 +310,10 @@
 - P1: Breakdown start-time vs commissioned_at validation (MTBF poisoning guard).
 - P1: mtbf_source UI hint.
 - P2: AM "Not OK" recurrence → eWACS-90 degradation signal.
+
+### Phase AM2: Historical breakdown import + MTBF guard — Status: ✅ COMPLETED
+- P1 guard: breakdown start_time can no longer predate machine commissioned_at (create + edit paths, routers_maintenance.py).
+- Imported 367/367 historical breakdowns from Pune Excel (2025-07-23 → 2026-07-13) as CLOSED records, reporter='excel-import', no WOs/notifications triggered.
+- User-approved mappings: KKR Blending→Blending System, PC36 Optyx infeed vibratory→Optyx, created new machine "Trim & Pare Conveyor" on PC32.
+- commissioned_at backdated on 89 machines (user-approved) so MTBF/Weibull stays valid; ticket numbers issued via real counter (dup collision found + fixed).
+- Import tool kept at backend/import_breakdowns.py (dry-run by default).
