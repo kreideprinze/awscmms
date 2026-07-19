@@ -40,6 +40,17 @@ class BreakdownCreate(BaseModel):
 ADMIN_CLOSURE_TYPES = ('Preventive', 'RCA')
 
 
+def _check_commissioned(machine_or_commissioned, start_time):
+    """MTBF guard: a breakdown can never start before the machine was commissioned —
+    such records create negative time-between-failures and poison Weibull/MTBF predictions."""
+    c = machine_or_commissioned.get('commissioned_at') if isinstance(machine_or_commissioned, dict) else machine_or_commissioned
+    c, s = parse_dt(c), parse_dt(start_time)
+    if c and s and s < c:
+        raise HTTPException(status_code=400,
+                            detail=f"Breakdown start ({s.strftime('%Y-%m-%d %H:%M')}) predates the machine's commissioning date "
+                                   f"({c.strftime('%Y-%m-%d')}) — correct the start time, or update the machine's commissioned date first")
+
+
 async def _validate_technician(username, required=False):
     """Technician assignment is OPTIONAL (unassigned WOs are allowed universally).
     When provided, it must reference an existing, active technician."""
@@ -127,6 +138,8 @@ async def _create_breakdown_internal(machine_id: str, description: str, failure_
         raise HTTPException(status_code=404, detail='Machine not found')
     if breakdown_type not in BREAKDOWN_TYPES:
         raise HTTPException(status_code=400, detail=f'Invalid breakdown_type. Valid: {BREAKDOWN_TYPES}')
+    if start_time:
+        _check_commissioned(machine, start_time)
     ticket = await next_counter('breakdowns', 'BD')
     bd = {
         'id': str(uuid.uuid4()), 'ticket_number': ticket,
@@ -384,6 +397,10 @@ async def update_breakdown(bd_id: str, req: BreakdownUpdate, user: dict = Depend
         end = parse_dt(end_time)
         if start and end and end < start:
             raise HTTPException(status_code=400, detail='End time cannot be before start time')
+        if req.start_time:  # edited start time — re-check the commissioning guard
+            _m = await db.machines.find_one({'id': bd['machine_id']}, {'_id': 0, 'commissioned_at': 1})
+            if _m:
+                _check_commissioned(_m, start_time)
         downtime = round((end - start).total_seconds() / 60.0, 1) if start and end else 0
         settings = await db.settings.find_one({'id': 'reliability_settings'}, {'_id': 0}) or {}
         rc_threshold = settings.get('root_cause_downtime_minutes', 30)
