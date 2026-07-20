@@ -39,6 +39,7 @@ APPENDIX_A = {
         'Washing': ['Barrel Washer', 'Barrel Washer Infeed Conveyor', 'Dip Washer Unit', 'Dip Washer Conveyor', 'Hydrocyclone'],
         'Peeling': ['Peeler 1', 'Peeler 2', 'Peeler 3', 'Peeler 4', 'Peeler Infeed Conveyor', 'Peeler Infeed Vibratory Conveyor', 'Peeler Outfeed Vibratory Conveyor', 'Peeler Outfeed Inclined Conveyor'],
         'Cutting': ['Auto Halver', 'Slicer Landing Conveyor', 'Slicer Infeed Inclined Conveyor', 'Slicer 1', 'Slicer 2', 'Slicer 3', 'Slicer 4'],
+        'Trim & Pare': ['Trim & Pare Conveyor'],
         'Frying': ['Fryer', 'Main Oil Pump', 'Oil Management System', 'Heat Exchanger CNG', 'Heat Exchanger Steam', 'Fryer Catch Box'],
         'Optical Sorting': ['Optyx', 'Optyx Infeed Vibratory Conveyor', 'Recycle Conveyor', 'Recycle Vibratory', 'Rejection Conveyor', 'Optyx Outfeed Vibratory Conveyor'],
         'Seasoning': ['Seasoning Infeed Conveyor', 'Vibratory Conveyor', 'Weighing Infeed Conveyor', 'Bulk Feeder', 'Rospen Hopper', 'Scarf Plate', 'Seasoning Tumbler', 'Dust Collector', 'Gooseneck Conveyor'],
@@ -561,7 +562,7 @@ async def seed_all():
                 extra += f" | MISSING: {info['missing']}"
             if info['duplicates']:
                 extra += f" | DUPLICATES: {info['duplicates']}"
-        logger.info(f"  {coll:<24} created={info['created']:<4} total={info['total']}{extra}")
+        logger.info(f"  {coll:<24} created={info.get('created', '?')} total={info.get('total', '?')}{extra}")
     logger.info('=' * 60)
 
     await db.settings.update_one({'id': 'seed_summary'}, {'$set': {'id': 'seed_summary', 'summary': summary, 'seeded_at': ts}}, upsert=True)
